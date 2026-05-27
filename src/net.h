@@ -42,10 +42,10 @@ void Net_FreeEvent(NetEvent *ev);
 void Net_SendTo(int peerIdx, const void *data, size_t len, bool reliable);
 void Net_Broadcast(const void *data, size_t len, bool reliable);
 
-bool Net_IsConnected(void);     // client: connected to server; host: always true
-int  Net_PeerCount(void);       // host: number of connected clients
+bool Net_IsConnected(void);
 
 // Fills `ips` with up to `maxIps` non-loopback IPv4 strings. Returns count.
 int  Net_GetLocalIPs(char ips[][64], int maxIps);
 
-#endif
+#endif // SHOOTER_NET_H
+

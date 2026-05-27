@@ -20,8 +20,8 @@
 static bool         g_inited = false;
 static NetMode      g_mode = NET_SOLO;
 static ENetHost    *g_host = NULL;
-static ENetPeer    *g_serverPeer = NULL;                 // client only
-static ENetPeer    *g_clientPeers[NET_MAX_PLAYERS] = {0}; // host only (index = peerIdx)
+static ENetPeer    *g_serverPeer = NULL;
+static ENetPeer    *g_clientPeers[NET_MAX_PLAYERS] = {0};
 
 static void EnsureInit(void) {
     if (!g_inited) {
@@ -184,13 +184,6 @@ bool Net_IsConnected(void) {
         return g_serverPeer && g_serverPeer->state == ENET_PEER_STATE_CONNECTED;
     }
     return g_host != NULL;
-}
-
-int Net_PeerCount(void) {
-    if (g_mode != NET_HOST) return 0;
-    int n = 0;
-    for (int i = 1; i < NET_MAX_PLAYERS; i++) if (g_clientPeers[i]) n++;
-    return n;
 }
 
 int Net_GetLocalIPs(char ips[][64], int maxIps) {

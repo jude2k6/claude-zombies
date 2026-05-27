@@ -40,6 +40,17 @@ FetchContent_MakeAvailable(enet)
 add_executable(shooter
     src/main.c
     src/net.c
+    src/level.c
+    src/player.c
+    src/weapons.c
+    src/perks.c
+    src/entities.c
+    src/interact.c
+    src/game.c
+    src/protocol.c
+    src/render.c
+    src/hud.c
+    src/menu.c
 )
 target_include_directories(shooter PRIVATE
     ${raygui_SOURCE_DIR}/src

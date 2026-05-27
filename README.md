@@ -119,10 +119,35 @@ won't have any real effect.
 ## Layout
 
 ```
-CMakeLists.txt    — FetchContent for raylib / raygui / enet, per-OS link bits
-src/main.c        — game state, simulation, rendering, menus, protocol
-src/net.{h,c}     — thin enet wrapper (host/client init, poll, send)
+CMakeLists.txt        FetchContent for raylib / raygui / enet, per-OS link bits
+data/maps/*.map       map definitions (text, see format below)
+src/main.c            entry + main loop only
+src/{level,player,weapons,perks,entities,interact,game,protocol,render,hud,menu}
+                      one translation unit per responsibility
+src/types.h           shared structs / enums / constants
+src/net.{h,c}         enet wrapper (host/client init, poll, send)
 ```
+
+## Maps
+
+The level layout lives in `data/maps/default.map`. The format is a tiny
+text grammar — one entry per line, `#` comments — so adding a new map is
+just copying the file and editing it:
+
+```
+SPAWN    x z
+OBSTACLE cx cy cz sx sy sz
+WALL     cx cy cz sx sy sz
+DOOR     cx cy cz sx sy sz cost
+WALLBUY  x z nx nz   PISTOL|SMG|SHOTGUN|RIFLE|RAYGUN
+WINDOW   x z nx nz   lockedByDoor    (-1 = always open)
+PERK     x z         JUG|SPEED|DTAP|STAMIN
+PAP      x z
+```
+
+The build copies `data/` next to the executable, so the game finds it
+when launched from `build/`. Failing that it falls back to a hardcoded
+default layout so the binary always runs.
 
 ## License
 

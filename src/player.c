@@ -34,13 +34,9 @@ int Player_NearestAlive(Vector3 pos) {
 }
 
 Vector3 Player_Spawn(int idx) {
-    static const Vector3 SP[NET_MAX_PLAYERS] = {
-        { 0, PLAYER_EYE,  0 },
-        { 2, PLAYER_EYE,  0 },
-        {-2, PLAYER_EYE,  0 },
-        { 0, PLAYER_EYE,  2 },
-    };
-    return SP[idx];
+    if (idx >= 0 && idx < mapSpawnCount) return mapSpawns[idx];
+    if (mapSpawnCount > 0) return mapSpawns[0];
+    return (Vector3){ 0, PLAYER_EYE, 0 };
 }
 
 Vector3 Player_LookDir(float yaw, float pitch) {

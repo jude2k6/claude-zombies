@@ -58,6 +58,15 @@ target_include_directories(shooter PRIVATE
 )
 target_link_libraries(shooter PRIVATE raylib enet)
 
+# ---- data files ------------------------------------------------------------
+# Copy data/ next to the executable at build time so map files load from a
+# relative path. Re-runs whenever something under data/ changes.
+add_custom_command(TARGET shooter POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        ${CMAKE_SOURCE_DIR}/data $<TARGET_FILE_DIR:shooter>/data
+    COMMENT "Copying data/ next to shooter binary"
+)
+
 # ---- per-OS bits -----------------------------------------------------------
 if(UNIX AND NOT APPLE)
     target_link_libraries(shooter PRIVATE m pthread dl)

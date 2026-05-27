@@ -1,5 +1,15 @@
 # TODO
 
+## Done since last update
+
+- [x] **Doors stayed open across new games** — added `Level_Reset()` (closes
+      doors, refills boards, clears PaP) called from
+      `Menu_StartSoloGame` / `Menu_StartHostedGame`.
+- [x] **Map data lives in a file** — `data/maps/default.map`, parsed by
+      `Level_LoadFromFile`. Adding a new map is just dropping in another
+      `.map` file and the parser does the rest. Hardcoded fallback kept so
+      the binary still runs if the data dir is missing.
+
 ## Bugs
 
 - [x] **Repair barricades is broken** — fixed: `Interact_UpdateRepairs` now

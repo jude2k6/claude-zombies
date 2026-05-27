@@ -1,0 +1,58 @@
+# Claude Zombies - default map
+#
+# Format (one entry per line, # comments, whitespace tokens):
+#   NAME    <text...>
+#   SPAWN   x z                              (player Y is fixed)
+#   OBSTACLE cx cy cz sx sy sz               (cube; AABB collision)
+#   WALL    cx cy cz sx sy sz                (interior wall; always solid)
+#   DOOR    cx cy cz sx sy sz cost           (solid only while closed)
+#   WALLBUY x z nx nz weapon                 (PISTOL/SMG/SHOTGUN/RIFLE/RAYGUN)
+#   WINDOW  x z nx nz lockedByDoor           (-1 = always open; else door idx)
+#   PERK    x z perk                         (JUG/SPEED/DTAP/STAMIN)
+#   PAP     x z
+
+NAME Default
+
+# Spawns (one per player slot, up to 4)
+SPAWN  0 0
+SPAWN  2 0
+SPAWN -2 0
+SPAWN  0 2
+
+# Obstacles - cover and sight lines inside the arena
+OBSTACLE  10 1.5   5    4 3 4
+OBSTACLE -12 1.0  -8    6 2 3
+OBSTACLE -10 1.5 -16    4 3 4
+OBSTACLE  18 1.0 -15    3 2 6
+OBSTACLE -20 1.5  12    5 3 5
+OBSTACLE   8 1.0  20    7 2 2
+OBSTACLE  -6 1.5  26    3 3 3
+OBSTACLE  25 1.0   2    2 2 8
+
+# Interior walls split the arena north/south at z = -20
+WALL -21.5 2.5 -20   37 5 1
+WALL  21.5 2.5 -20   37 5 1
+
+# Door fills the 6m gap between the two wall segments
+DOOR   0   2.5 -20    6 5 1   1500
+
+# Wall buys (on perimeter walls)
+WALLBUY  15.0   39.45    0 -1   SHOTGUN
+WALLBUY  39.45 -10.0    -1  0   SMG
+WALLBUY -15.0  -39.45    0  1   RIFLE
+WALLBUY -39.45  18.0     1  0   RAYGUN
+
+# Windows (zombies spawn outside and break in)
+WINDOW -18.0   40.0    0 -1   -1
+WINDOW  40.0   18.0   -1  0   -1
+WINDOW  18.0  -40.0    0  1    0
+WINDOW -40.0  -8.0     1  0   -1
+
+# Perk machines
+PERK  -8.0  12.0   JUG
+PERK   4.0  -8.0   SPEED
+PERK  22.0  25.0   DTAP
+PERK -25.0 -22.0   STAMIN
+
+# Pack-a-Punch (in the south room, behind the door)
+PAP  0 -28

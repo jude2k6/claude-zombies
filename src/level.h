@@ -16,8 +16,14 @@ extern int         windowCount;
 extern PerkMachine perkMachines[PERK_COUNT];
 extern int         perkMachineCount;
 extern PackAPunch  pap;
+extern Vector3     mapSpawns[NET_MAX_PLAYERS];
+extern int         mapSpawnCount;
+extern char        mapName[64];
 
 void  Level_Build(void);
+bool  Level_LoadFromFile(const char *path);
+void  Level_LoadHardcodedFallback(void);
+void  Level_Reset(void);     // close doors, refill boards, clear PaP
 
 // Collision helpers
 BoundingBox Level_BoxToBB(Box b);

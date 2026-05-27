@@ -58,7 +58,7 @@ if(APPLE)
 endif()
 
 if(WIN32)
-    target_link_libraries(shooter PRIVATE ws2_32 winmm)
+    target_link_libraries(shooter PRIVATE ws2_32 winmm iphlpapi)
     if(MSVC)
         target_compile_options(shooter PRIVATE /W3 /utf-8)
         target_compile_definitions(shooter PRIVATE _CRT_SECURE_NO_WARNINGS)

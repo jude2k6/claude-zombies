@@ -7,7 +7,7 @@
 
 #define NET_MAX_PLAYERS   4
 #define NET_PORT_DEFAULT  7777
-#define NET_PROTO_VERSION 1
+#define NET_PROTO_VERSION 2
 
 typedef enum {
     NET_SOLO = 0,
@@ -44,5 +44,8 @@ void Net_Broadcast(const void *data, size_t len, bool reliable);
 
 bool Net_IsConnected(void);     // client: connected to server; host: always true
 int  Net_PeerCount(void);       // host: number of connected clients
+
+// Fills `ips` with up to `maxIps` non-loopback IPv4 strings. Returns count.
+int  Net_GetLocalIPs(char ips[][64], int maxIps);
 
 #endif

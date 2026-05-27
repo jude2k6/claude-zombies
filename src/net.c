@@ -7,6 +7,16 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#ifdef _WIN32
+  #include <iphlpapi.h>
+#else
+  #include <ifaddrs.h>
+  #include <net/if.h>
+  #include <netinet/in.h>
+  #include <arpa/inet.h>
+  #include <sys/socket.h>
+#endif
+
 static bool         g_inited = false;
 static NetMode      g_mode = NET_SOLO;
 static ENetHost    *g_host = NULL;
@@ -180,5 +190,52 @@ int Net_PeerCount(void) {
     if (g_mode != NET_HOST) return 0;
     int n = 0;
     for (int i = 1; i < NET_MAX_PLAYERS; i++) if (g_clientPeers[i]) n++;
+    return n;
+}
+
+int Net_GetLocalIPs(char ips[][64], int maxIps) {
+    int n = 0;
+#ifdef _WIN32
+    ULONG bufLen = 16384;
+    PIP_ADAPTER_ADDRESSES addrs = (PIP_ADAPTER_ADDRESSES)malloc(bufLen);
+    if (!addrs) return 0;
+    ULONG ret = GetAdaptersAddresses(AF_INET,
+        GAA_FLAG_SKIP_DNS_SERVER | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_ANYCAST,
+        NULL, addrs, &bufLen);
+    if (ret == NO_ERROR) {
+        for (PIP_ADAPTER_ADDRESSES a = addrs; a && n < maxIps; a = a->Next) {
+            if (a->OperStatus != IfOperStatusUp) continue;
+            if (a->IfType == IF_TYPE_SOFTWARE_LOOPBACK) continue;
+            for (PIP_ADAPTER_UNICAST_ADDRESS ua = a->FirstUnicastAddress; ua && n < maxIps; ua = ua->Next) {
+                if (ua->Address.lpSockaddr->sa_family != AF_INET) continue;
+                struct sockaddr_in *sin = (struct sockaddr_in *)ua->Address.lpSockaddr;
+                char ipstr[64];
+                if (inet_ntop(AF_INET, &sin->sin_addr, ipstr, sizeof ipstr)) {
+                    strncpy(ips[n], ipstr, 63);
+                    ips[n][63] = 0;
+                    n++;
+                }
+            }
+        }
+    }
+    free(addrs);
+#else
+    struct ifaddrs *ifap, *ifa;
+    if (getifaddrs(&ifap) != 0) return 0;
+    for (ifa = ifap; ifa && n < maxIps; ifa = ifa->ifa_next) {
+        if (!ifa->ifa_addr) continue;
+        if (ifa->ifa_addr->sa_family != AF_INET) continue;
+        if (ifa->ifa_flags & IFF_LOOPBACK) continue;
+        if (!(ifa->ifa_flags & IFF_UP)) continue;
+        struct sockaddr_in *sin = (struct sockaddr_in *)ifa->ifa_addr;
+        char ipstr[64];
+        if (inet_ntop(AF_INET, &sin->sin_addr, ipstr, sizeof ipstr)) {
+            strncpy(ips[n], ipstr, 63);
+            ips[n][63] = 0;
+            n++;
+        }
+    }
+    freeifaddrs(ifap);
+#endif
     return n;
 }

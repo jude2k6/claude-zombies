@@ -40,9 +40,12 @@
 #define BULLET_LIFE        1.0f
 
 #define MAX_OBSTACLES     12
+#define MAX_INTERIOR_WALLS 8
+#define MAX_DOORS          4
 
 #define INV_SLOTS          2
 #define INTERACT_DIST      3.0f
+#define DOOR_INTERACT_DIST 3.5f
 
 #define HIT_POINTS        10
 #define KILL_POINTS       50
@@ -191,7 +194,14 @@ typedef struct {
     int     boards;
     float   repairProgress;         // per-window; only one player repairs at a time
     int     repairPlayer;
+    int     lockedByDoor;           // -1 if always accessible
 } Window3D;
+
+typedef struct {
+    Box  box;
+    int  cost;
+    bool opened;
+} Door;
 
 typedef struct {
     Vector3 pos;
@@ -223,7 +233,7 @@ typedef enum {
 } UiState;
 
 typedef enum {
-    IK_NONE, IK_WALLBUY, IK_PERK, IK_PAP, IK_WINDOW
+    IK_NONE, IK_WALLBUY, IK_PERK, IK_PAP, IK_WINDOW, IK_DOOR
 } InteractKind;
 
 typedef struct { InteractKind kind; int idx; float dist; } Interact;
@@ -234,6 +244,10 @@ typedef struct { InteractKind kind; int idx; float dist; } Interact;
 
 static Box         obstacles[MAX_OBSTACLES];
 static int         obstacleCount = 0;
+static Box         interiorWalls[MAX_INTERIOR_WALLS];
+static int         interiorWallCount = 0;
+static Door        doors[MAX_DOORS];
+static int         doorCount = 0;
 static WallBuy     wallBuys[8];
 static int         wallBuyCount = 0;
 static Window3D    windows[MAX_WINDOWS];
@@ -274,6 +288,9 @@ static bool        nameEditing = false;
 static char        joinIp[64]  = "127.0.0.1";
 static bool        joinIpEditing = false;
 static char        statusMsg[128] = "";
+
+static char        hostIps[8][64];
+static int         hostIpCount = 0;
 
 static Camera      camera;
 
@@ -331,9 +348,19 @@ static Vector3 ResolveXZ(Vector3 from, Vector3 to, float radius, bool clampArena
     Vector3 stepX = (Vector3){ candidate.x, from.y, from.z };
     for (int i = 0; i < obstacleCount; i++)
         if (CircleHitsBoxXZ(stepX, radius, obstacles[i])) { stepX.x = from.x; break; }
+    for (int i = 0; i < interiorWallCount; i++)
+        if (CircleHitsBoxXZ(stepX, radius, interiorWalls[i])) { stepX.x = from.x; break; }
+    for (int i = 0; i < doorCount; i++)
+        if (!doors[i].opened && CircleHitsBoxXZ(stepX, radius, doors[i].box)) { stepX.x = from.x; break; }
+
     Vector3 stepZ = (Vector3){ stepX.x, from.y, candidate.z };
     for (int i = 0; i < obstacleCount; i++)
         if (CircleHitsBoxXZ(stepZ, radius, obstacles[i])) { stepZ.z = from.z; break; }
+    for (int i = 0; i < interiorWallCount; i++)
+        if (CircleHitsBoxXZ(stepZ, radius, interiorWalls[i])) { stepZ.z = from.z; break; }
+    for (int i = 0; i < doorCount; i++)
+        if (!doors[i].opened && CircleHitsBoxXZ(stepZ, radius, doors[i].box)) { stepZ.z = from.z; break; }
+
     return stepZ;
 }
 
@@ -422,16 +449,28 @@ static void BuildLevel(void) {
     windowCount = 0;
     windows[windowCount++] = (Window3D){
         .pos = { -18.0f, WALL_HEIGHT*0.5f,  ARENA_HALF }, .normal = { 0, 0, -1 }, .tangent = { 1, 0, 0 },
-        .boards = MAX_BOARDS_PER_WIN, .repairPlayer = -1 };
+        .boards = MAX_BOARDS_PER_WIN, .repairPlayer = -1, .lockedByDoor = -1 };
     windows[windowCount++] = (Window3D){
         .pos = { ARENA_HALF, WALL_HEIGHT*0.5f, 18.0f }, .normal = { -1, 0, 0 }, .tangent = { 0, 0, 1 },
-        .boards = MAX_BOARDS_PER_WIN, .repairPlayer = -1 };
+        .boards = MAX_BOARDS_PER_WIN, .repairPlayer = -1, .lockedByDoor = -1 };
     windows[windowCount++] = (Window3D){
         .pos = { 18.0f, WALL_HEIGHT*0.5f, -ARENA_HALF }, .normal = { 0, 0, 1 }, .tangent = { 1, 0, 0 },
-        .boards = MAX_BOARDS_PER_WIN, .repairPlayer = -1 };
+        .boards = MAX_BOARDS_PER_WIN, .repairPlayer = -1, .lockedByDoor = 0 };  // south-room window
     windows[windowCount++] = (Window3D){
         .pos = { -ARENA_HALF, WALL_HEIGHT*0.5f, -8.0f }, .normal = { 1, 0, 0 }, .tangent = { 0, 0, 1 },
-        .boards = MAX_BOARDS_PER_WIN, .repairPlayer = -1 };
+        .boards = MAX_BOARDS_PER_WIN, .repairPlayer = -1, .lockedByDoor = -1 };
+
+    // Interior wall splitting the arena north/south at z = -20, with a 6m door gap at x=0
+    interiorWallCount = 0;
+    interiorWalls[interiorWallCount++] = (Box){ (Vector3){ -21.5f, WALL_HEIGHT*0.5f, -20.0f }, (Vector3){ 37.0f, WALL_HEIGHT, 1.0f } };
+    interiorWalls[interiorWallCount++] = (Box){ (Vector3){  21.5f, WALL_HEIGHT*0.5f, -20.0f }, (Vector3){ 37.0f, WALL_HEIGHT, 1.0f } };
+
+    // Doors (filling the openings in the interior wall)
+    doorCount = 0;
+    doors[doorCount++] = (Door){
+        .box = { (Vector3){ 0, WALL_HEIGHT*0.5f, -20.0f }, (Vector3){ 6.0f, WALL_HEIGHT, 1.0f } },
+        .cost = 1500, .opened = false,
+    };
 
     perkMachineCount = 0;
     perkMachines[perkMachineCount++] = (PerkMachine){ { -8.0f, 0, 12.0f }, PERK_JUG };
@@ -508,7 +547,14 @@ static int NearestAlivePlayer(Vector3 pos) {
 
 static void TrySpawnEnemy(void) {
     if (windowCount == 0) return;
-    int wi = rand() % windowCount;
+    int accessible[MAX_WINDOWS]; int na = 0;
+    for (int i = 0; i < windowCount; i++) {
+        int lk = windows[i].lockedByDoor;
+        if (lk >= 0 && lk < doorCount && !doors[lk].opened) continue;
+        accessible[na++] = i;
+    }
+    if (na == 0) return;
+    int wi = accessible[rand() % na];
     Window3D *w = &windows[wi];
 
     Vector3 spawn = Vector3Subtract(w->pos, Vector3Scale(w->normal, RandRange(4.0f, 6.0f)));
@@ -571,6 +617,38 @@ static void UpdateSpawns(float dt) {
         float gap = 1.2f - roundNum * 0.05f;
         if (gap < 0.35f) gap = 0.35f;
         spawnTimer = gap;
+    }
+}
+
+static void SeparateEnemies(void) {
+    float minD = ENEMY_RADIUS * 1.9f;
+    float minD2 = minD * minD;
+    for (int i = 0; i < MAX_ENEMIES; i++) {
+        if (!enemies[i].alive) continue;
+        if (enemies[i].state == ZS_AT_WINDOW) continue;
+        for (int j = i + 1; j < MAX_ENEMIES; j++) {
+            if (!enemies[j].alive) continue;
+            if (enemies[j].state == ZS_AT_WINDOW) continue;
+            float dx = enemies[i].pos.x - enemies[j].pos.x;
+            float dz = enemies[i].pos.z - enemies[j].pos.z;
+            float d2 = dx*dx + dz*dz;
+            if (d2 < minD2 && d2 > 1e-6f) {
+                float d = sqrtf(d2);
+                float push = (minD - d) * 0.5f;
+                float nx = dx / d, nz = dz / d;
+                enemies[i].pos.x += nx * push;
+                enemies[i].pos.z += nz * push;
+                enemies[j].pos.x -= nx * push;
+                enemies[j].pos.z -= nz * push;
+            }
+        }
+    }
+    // Re-clamp INSIDE zombies to the arena after separation
+    float lim = ARENA_HALF - ENEMY_RADIUS;
+    for (int i = 0; i < MAX_ENEMIES; i++) {
+        if (!enemies[i].alive || enemies[i].state != ZS_INSIDE) continue;
+        enemies[i].pos.x = Clamp(enemies[i].pos.x, -lim, lim);
+        enemies[i].pos.z = Clamp(enemies[i].pos.z, -lim, lim);
     }
 }
 
@@ -787,7 +865,23 @@ static Interact FindInteractFor(Player *p) {
         float d = Vector2Distance(pXZ, q);
         if (d < best.dist) best = (Interact){ IK_WINDOW, i, d };
     }
+    for (int i = 0; i < doorCount; i++) {
+        if (doors[i].opened) continue;
+        Vector2 q = { doors[i].box.center.x, doors[i].box.center.z };
+        float d = Vector2Distance(pXZ, q);
+        if (d < DOOR_INTERACT_DIST && d < best.dist + 0.5f)
+            best = (Interact){ IK_DOOR, i, d };
+    }
     return best;
+}
+
+static void BuyDoorServer(Player *p, int doorIdx) {
+    if (doorIdx < 0 || doorIdx >= doorCount) return;
+    Door *d = &doors[doorIdx];
+    if (d->opened) return;
+    if (p->points < d->cost) return;
+    p->points -= d->cost;
+    d->opened = true;
 }
 
 static void BuyAtWallServer(Player *p, int wbIdx) {
@@ -842,6 +936,7 @@ static void InteractServer(Player *p) {
     if      (ix.kind == IK_WALLBUY) BuyAtWallServer(p, ix.idx);
     else if (ix.kind == IK_PERK)    BuyPerkServer(p, ix.idx);
     else if (ix.kind == IK_PAP)     UsePackAPunchServer(p);
+    else if (ix.kind == IK_DOOR)    BuyDoorServer(p, ix.idx);
 }
 
 static void UpdatePaP(float dt) {
@@ -922,6 +1017,7 @@ static void WorldTick(float dt) {
 
     UpdateBullets(dt);
     UpdateEnemies(dt);
+    SeparateEnemies();
     UpdateSpawns(dt);
     UpdatePaP(dt);
     UpdateRepairsServer(dt);
@@ -1025,6 +1121,7 @@ typedef struct {
     float    papTimer;
     int8_t   papSlotInProgress;
     int8_t   papOwnerPlayer;
+    uint8_t  doorsOpened;             // bit i = door i opened
     uint16_t numEnemies;
     uint16_t numBullets;
     SerPlayer players[NET_MAX_PLAYERS];
@@ -1099,6 +1196,11 @@ static void HostBroadcastSnapshot(void) {
     hdr->papTimer = pap.activeTimer;
     hdr->papSlotInProgress = (int8_t)pap.slotInProgress;
     hdr->papOwnerPlayer = (int8_t)pap.ownerPlayer;
+    {
+        uint8_t mask = 0;
+        for (int i = 0; i < doorCount && i < 8; i++) if (doors[i].opened) mask |= (uint8_t)(1u << i);
+        hdr->doorsOpened = mask;
+    }
 
     for (int i = 0; i < NET_MAX_PLAYERS; i++) SerializePlayer(&hdr->players[i], &players[i]);
 
@@ -1150,6 +1252,7 @@ static void ClientApplySnapshot(uint8_t *data, size_t len) {
     pap.activeTimer = hdr->papTimer;
     pap.slotInProgress = hdr->papSlotInProgress;
     pap.ownerPlayer = hdr->papOwnerPlayer;
+    for (int i = 0; i < doorCount && i < 8; i++) doors[i].opened = (hdr->doorsOpened & (1u << i)) != 0;
 
     for (int i = 0; i < NET_MAX_PLAYERS; i++)
         DeserializePlayer(&players[i], &hdr->players[i], i == localPlayerIdx);
@@ -1387,6 +1490,29 @@ static void DrawArena(void) {
     }
 }
 
+static void DrawInteriorWalls(void) {
+    for (int i = 0; i < interiorWallCount; i++) {
+        DrawCubeV(interiorWalls[i].center, interiorWalls[i].size, (Color){80, 90, 100, 255});
+        DrawCubeWiresV(interiorWalls[i].center, interiorWalls[i].size, (Color){40, 50, 60, 255});
+    }
+}
+
+static void DrawDoors(void) {
+    for (int i = 0; i < doorCount; i++) {
+        if (doors[i].opened) continue;
+        Box b = doors[i].box;
+        DrawCubeV(b.center, b.size, (Color){130, 80, 50, 255});
+        DrawCubeWiresV(b.center, b.size, (Color){40, 25, 15, 255});
+        // Decorative planks
+        for (int k = 0; k < 3; k++) {
+            float y = b.center.y - b.size.y*0.3f + k * (b.size.y*0.3f);
+            Vector3 c2 = { b.center.x, y, b.center.z };
+            Vector3 sz = { b.size.x * 0.96f, 0.08f, b.size.z * 1.05f };
+            DrawCubeV(c2, sz, (Color){90, 55, 30, 255});
+        }
+    }
+}
+
 static void DrawWindows(void) {
     for (int i = 0; i < windowCount; i++) {
         Window3D *w = &windows[i];
@@ -1616,6 +1742,14 @@ static void DrawHUD(int sw, int sh, Interact ix) {
             border = (Color){200, 160, 80, 255};
             if (w->boards >= MAX_BOARDS_PER_WIN) { snprintf(prompt, sizeof prompt, "Window sealed"); promptColor = GRAY; }
             else snprintf(prompt, sizeof prompt, "[Hold E]  REPAIR BOARD");
+        } else if (ix.kind == IK_DOOR) {
+            Door *d = &doors[ix.idx];
+            border = (Color){200, 150, 100, 255};
+            if (d->opened) { snprintf(prompt, sizeof prompt, "Door open"); promptColor = GRAY; }
+            else {
+                snprintf(prompt, sizeof prompt, "[F]  OPEN DOOR  -  %d", d->cost);
+                if (me->points < d->cost) promptColor = (Color){200,80,80,255};
+            }
         }
 
         if (prompt[0]) {
@@ -1689,6 +1823,7 @@ static void StartHosting(void) {
     ResetPlayerForGame(0, playerName);
     gamePhase = GS_PRE_GAME;
     uiState = UI_HOST_LOBBY;
+    hostIpCount = Net_GetLocalIPs(hostIps, 8);
     snprintf(statusMsg, sizeof statusMsg, "Hosting on port %d", NET_PORT_DEFAULT);
 }
 
@@ -1818,15 +1953,39 @@ static void DrawLobby(int sw, int sh, bool isHost) {
     DrawRectangle(0, 0, sw, sh, (Color){15, 18, 25, 255});
     const char *t = isHost ? "HOST  LOBBY" : "WAITING FOR HOST";
     int ts = 48; int tw = MeasureText(t, ts);
-    DrawText(t, sw/2 - tw/2, 70, ts, RAYWHITE);
+    DrawText(t, sw/2 - tw/2, 50, ts, RAYWHITE);
 
     char info[128];
     snprintf(info, sizeof info, "Port %d  -  %d / %d players",
              NET_PORT_DEFAULT, ActivePlayerCount(), NET_MAX_PLAYERS);
     int iw = MeasureText(info, 20);
-    DrawText(info, sw/2 - iw/2, 130, 20, GRAY);
+    DrawText(info, sw/2 - iw/2, 108, 20, GRAY);
 
-    int rowH = 44, listY = 190;
+    int listY = 280;
+    if (isHost) {
+        const char *hint = "Players join by entering one of these addresses:";
+        int hw = MeasureText(hint, 18);
+        DrawText(hint, sw/2 - hw/2, 140, 18, (Color){200,200,200,200});
+        if (hostIpCount == 0) {
+            const char *na = "(no network interface found - use 127.0.0.1 on this machine)";
+            int nw = MeasureText(na, 18);
+            DrawText(na, sw/2 - nw/2, 168, 18, GRAY);
+        } else {
+            int boxW = 380, boxH = 30 * hostIpCount + 16;
+            int bx = sw/2 - boxW/2, by = 164;
+            DrawRectangle(bx, by, boxW, boxH, (Color){25,30,40,255});
+            DrawRectangleLines(bx, by, boxW, boxH, (Color){200,200,200,180});
+            for (int i = 0; i < hostIpCount; i++) {
+                char line[80];
+                snprintf(line, sizeof line, "%s : %d", hostIps[i], NET_PORT_DEFAULT);
+                int lw = MeasureText(line, 24);
+                DrawText(line, sw/2 - lw/2, by + 8 + i*30, 24, YELLOW);
+            }
+            listY = by + boxH + 24;
+        }
+    }
+
+    int rowH = 44;
     for (int i = 0; i < NET_MAX_PLAYERS; i++) {
         int ry = listY + i * rowH;
         DrawRectangle(sw/2 - 220, ry, 440, rowH - 6, (Color){25,30,40,255});
@@ -2027,6 +2186,8 @@ int main(void) {
             // In-game: render 3D
             BeginMode3D(camera);
                 DrawArena();
+                DrawInteriorWalls();
+                DrawDoors();
                 DrawWindows();
                 DrawWallBuys();
                 DrawPerkMachines();
@@ -2084,6 +2245,20 @@ int main(void) {
                     DrawRectangle((int)sp.x - lw/2 - 6, (int)sp.y - 12, lw + 12, 24, (Color){0,0,0,160});
                     DrawText(label, (int)sp.x - lw/2, (int)sp.y - 9, 18, (Color){200,150,255,255});
                 }
+            }
+            // Doors
+            for (int i = 0; i < doorCount; i++) {
+                if (doors[i].opened) continue;
+                Vector3 above = { doors[i].box.center.x,
+                                  doors[i].box.center.y + doors[i].box.size.y*0.5f + 0.8f,
+                                  doors[i].box.center.z };
+                Vector2 sp = GetWorldToScreen(above, camera);
+                if (sp.x < -200 || sp.y < -100 || sp.x > sw + 200 || sp.y > sh + 100) continue;
+                char label[64];
+                snprintf(label, sizeof label, "DOOR  %d", doors[i].cost);
+                int lw = MeasureText(label, 18);
+                DrawRectangle((int)sp.x - lw/2 - 6, (int)sp.y - 12, lw + 12, 24, (Color){0,0,0,160});
+                DrawText(label, (int)sp.x - lw/2, (int)sp.y - 9, 18, (Color){220,170,110,255});
             }
 
             DrawHUD(sw, sh, (uiState == UI_PLAY) ? ix : (Interact){ IK_NONE, -1, 0 });

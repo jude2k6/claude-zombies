@@ -1,0 +1,39 @@
+# build artifacts
+build/
+build-*/
+cmake-build-*/
+out/
+
+# editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# binaries
+*.o
+*.obj
+*.exe
+*.dll
+*.so
+*.dylib
+*.a
+*.lib
+*.pdb
+*.ilk
+
+# CMake leftovers
+CMakeCache.txt
+CMakeFiles/
+CMakeScripts/
+cmake_install.cmake
+install_manifest.txt
+Makefile
+compile_commands.json
+
+# fetched deps (if anyone configures outside build/)
+_deps/
+
+# local agent config
+.claude/

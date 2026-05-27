@@ -25,6 +25,12 @@
 static float snapshotAccum = 0.0f;
 static float inputAccum    = 0.0f;
 
+// Spectator camera state (used while local player is downed)
+static Vector3 specPos;
+static float   specYaw   = 0.0f;
+static float   specPitch = 0.0f;
+static bool    specInit  = false;
+
 static void PollNetwork(void) {
     NetEvent events[32];
     int n = Net_Poll(events, 32);
@@ -67,6 +73,7 @@ static void HandleLocalActions(Player *me) {
     bool slot1Edge  = IsKeyPressed(KEY_ONE) && me->alive;
     bool slot2Edge  = IsKeyPressed(KEY_TWO) && me->alive;
     bool interactEdge = IsKeyPressed(KEY_F) && me->alive;
+    bool meleeEdge  = IsKeyPressed(KEY_V) && me->alive;
 
     int swapTarget = -1;
     if (swapEdge) {
@@ -80,6 +87,7 @@ static void HandleLocalActions(Player *me) {
         if (reloadEdge)   Weapon_StartReload(me);
         if (swapTarget >= 0) Weapon_SwapSlot(me, swapTarget);
         if (interactEdge) Interact_Do(me);
+        if (meleeEdge)    Weapon_Melee(me);
     } else {
         if (reloadEdge) {
             PktAction a = { .type = PKT_ACTION, .action = ACT_RELOAD };
@@ -92,6 +100,10 @@ static void HandleLocalActions(Player *me) {
         }
         if (interactEdge) {
             PktAction a = { .type = PKT_ACTION, .action = ACT_INTERACT_F };
+            Net_SendTo(0, &a, sizeof a, true);
+        }
+        if (meleeEdge) {
+            PktAction a = { .type = PKT_ACTION, .action = ACT_MELEE };
             Net_SendTo(0, &a, sizeof a, true);
         }
     }
@@ -145,6 +157,34 @@ int main(void) {
             if (me->alive) {
                 Player_ApplyLocalLook(me, mouseSens);
                 Player_ApplyLocalMove(me, dt);
+                specInit = false; // re-init next time we die
+            } else {
+                if (!specInit) {
+                    specPos   = (Vector3){ me->pos.x, PLAYER_EYE + 1.5f, me->pos.z };
+                    specYaw   = me->yaw;
+                    specPitch = me->pitch;
+                    specInit  = true;
+                }
+                Vector2 md = GetMouseDelta();
+                specYaw   += md.x * mouseSens;
+                specPitch -= md.y * mouseSens;
+                if (specPitch >  1.55f) specPitch =  1.55f;
+                if (specPitch < -1.55f) specPitch = -1.55f;
+
+                Vector3 fwd = Player_LookDir(specYaw, specPitch);
+                Vector3 right = { cosf(specYaw), 0, sinf(specYaw) };
+                Vector3 up    = { 0, 1, 0 };
+                Vector3 move  = { 0 };
+                if (IsKeyDown(KEY_W)) move = Vector3Add(move, fwd);
+                if (IsKeyDown(KEY_S)) move = Vector3Subtract(move, fwd);
+                if (IsKeyDown(KEY_D)) move = Vector3Add(move, right);
+                if (IsKeyDown(KEY_A)) move = Vector3Subtract(move, right);
+                if (IsKeyDown(KEY_SPACE))      move = Vector3Add(move, up);
+                if (IsKeyDown(KEY_LEFT_SHIFT)) move = Vector3Subtract(move, up);
+                if (Vector3LengthSqr(move) > 0.0001f) {
+                    move = Vector3Scale(Vector3Normalize(move), 14.0f * dt);
+                    specPos = Vector3Add(specPos, move);
+                }
             }
             me->fireHeld     = IsMouseButtonDown(MOUSE_BUTTON_LEFT) && me->alive;
             me->interactHeld = IsKeyDown(KEY_E) && me->alive;
@@ -177,9 +217,17 @@ int main(void) {
             if (muzzleFlashLocal > 0) muzzleFlashLocal -= dt;
         }
 
-        camera.position = (Vector3){ me->pos.x, PLAYER_EYE, me->pos.z };
-        Vector3 dir = Player_LookDir(me->yaw, me->pitch);
-        camera.target = Vector3Add(camera.position, dir);
+        float eyeY = PLAYER_EYE;
+        if (me->alive && uiState == UI_PLAY && (IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_C))) eyeY = PLAYER_EYE - 0.6f;
+        if (me->alive || !specInit) {
+            camera.position = (Vector3){ me->pos.x, eyeY, me->pos.z };
+            Vector3 dir = Player_LookDir(me->yaw, me->pitch);
+            camera.target = Vector3Add(camera.position, dir);
+        } else {
+            camera.position = specPos;
+            Vector3 dir = Player_LookDir(specYaw, specPitch);
+            camera.target = Vector3Add(camera.position, dir);
+        }
         camera.fovy = fovSetting;
 
         BeginDrawing();

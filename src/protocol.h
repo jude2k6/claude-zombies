@@ -8,7 +8,7 @@ enum {
     PKT_INPUT, PKT_ACTION, PKT_SNAPSHOT,
 };
 
-enum { ACT_RELOAD = 1, ACT_SWAP_SLOT, ACT_INTERACT_F };
+enum { ACT_RELOAD = 1, ACT_SWAP_SLOT, ACT_INTERACT_F, ACT_MELEE };
 enum { REJECT_PROTO = 1, REJECT_FULL };
 
 #pragma pack(push, 1)

@@ -25,4 +25,7 @@ void  Weapon_SwapSlot(Player *p, int target);
 // Misc
 Vector3 Weapon_SpreadDir(Vector3 base, float degrees);
 
+// Melee
+void  Weapon_Melee(Player *p);
+
 #endif

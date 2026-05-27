@@ -62,6 +62,7 @@ void Game_Tick(float dt) {
             }
         }
         if (p->damageFlash > 0) p->damageFlash -= dt * 1.5f;
+        if (p->meleeTimer  > 0) p->meleeTimer  -= dt;
     }
 
     Bullets_Update(dt);
@@ -70,6 +71,8 @@ void Game_Tick(float dt) {
     Enemies_UpdateSpawns(roundNum, dt);
     Interact_UpdatePaP(dt);
     Interact_UpdateRepairs(dt);
+    PowerUps_Update(dt);
+    PowerUps_Pickup();
 
     if (gamePhase == GS_PLAY) {
         if (Player_AliveActiveCount() == 0 && Player_ActiveCount() > 0) {

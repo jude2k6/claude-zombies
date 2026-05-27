@@ -55,6 +55,11 @@
 #define SNAPSHOT_HZ        20.0f
 #define INPUT_HZ           30.0f
 
+#define MAX_POWERUPS       16
+#define POWERUP_LIFETIME   30.0f
+#define POWERUP_PICKUP_R    1.4f
+#define POWERUP_DROP_CHANCE 0.06f
+
 // ============================================================================
 //  Weapons
 // ============================================================================
@@ -119,6 +124,7 @@ typedef struct {
     bool       interactHeld;
 
     float      damageFlash;
+    float      meleeTimer;
 } Player;
 
 // ============================================================================
@@ -208,5 +214,22 @@ typedef enum {
 } InteractKind;
 
 typedef struct { InteractKind kind; int idx; float dist; } Interact;
+
+// ============================================================================
+//  Power-ups
+// ============================================================================
+
+typedef enum {
+    PU_MAX_AMMO = 0, PU_NUKE, PU_DOUBLE_POINTS, PU_INSTAKILL, PU_CARPENTER,
+    PU_COUNT
+} PowerUpType;
+
+typedef struct {
+    bool        active;
+    PowerUpType type;
+    Vector3     pos;
+    float       bob;
+    float       lifetime;
+} PowerUp;
 
 #endif

@@ -97,6 +97,20 @@ void Hud_Draw(int sw, int sh, Player *me, Interact ix) {
         DrawText(gm, sw - gw - 20, 145, 22, (Color){255,220,100,255});
     }
 
+    // Power-up status (centered under crosshair)
+    int puY = sh / 2 + 30;
+    if (doublePointsTimer > 0) {
+        char b[32]; snprintf(b, sizeof b, "DOUBLE POINTS  %.1fs", doublePointsTimer);
+        int tw = MeasureText(b, 20);
+        DrawText(b, sw/2 - tw/2, puY, 20, (Color){240,220,60,255});
+        puY += 24;
+    }
+    if (instaKillTimer > 0) {
+        char b[32]; snprintf(b, sizeof b, "INSTA-KILL  %.1fs", instaKillTimer);
+        int tw = MeasureText(b, 20);
+        DrawText(b, sw/2 - tw/2, puY, 20, (Color){240,80,80,255});
+    }
+
     int rx = sw - 220, ry = 10, rh = 28;
     int actCount = Player_ActiveCount();
     if (actCount > 1) {
@@ -132,6 +146,12 @@ void Hud_Draw(int sw, int sh, Player *me, Interact ix) {
                 if (s->reserve >= cap) { snprintf(prompt, sizeof prompt, "%s ammo: FULL", w->name); promptColor = GRAY; }
                 else { snprintf(prompt, sizeof prompt, "[F]  %s AMMO  -  %d", w->name, w->ammoPrice);
                        if (me->points < w->ammoPrice) promptColor = (Color){200,80,80,255}; }
+            } else if (Weapon_FirstEmptySlot(me) < 0) {
+                // Both slots full — buy will replace the currently-held weapon
+                const WeaponDef *cur = &WEAPONS[me->inventory[me->currentSlot].weaponIdx];
+                snprintf(prompt, sizeof prompt, "[F]  BUY %s (replaces %s)  -  %d",
+                         w->name, cur->name, w->buyPrice);
+                if (me->points < w->buyPrice) promptColor = (Color){200,80,80,255};
             } else {
                 snprintf(prompt, sizeof prompt, "[F]  BUY %s  -  %d", w->name, w->buyPrice);
                 if (me->points < w->buyPrice) promptColor = (Color){200,80,80,255};

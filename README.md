@@ -33,7 +33,10 @@ Built end-to-end with [Claude Code](https://claude.com/claude-code).
 |----------------------|---------------------------------|
 | `W` `A` `S` `D`      | Move                            |
 | Mouse                | Look                            |
+| `Shift` (hold)       | Sprint                          |
+| `C` / `Ctrl` (hold)  | Crouch                          |
 | Left click           | Fire                            |
+| `V`                  | Melee (knife)                   |
 | `R`                  | Reload                          |
 | `Q` / `Tab` / `1` `2`| Swap weapon slot                |
 | `F`                  | Buy wall weapon / perk / PaP    |
@@ -41,6 +44,8 @@ Built end-to-end with [Claude Code](https://claude.com/claude-code).
 | `Esc`                | Pause                           |
 | `F11`                | Toggle fullscreen               |
 | `F3`                 | Toggle God Mode (cheat)         |
+
+When downed, your camera becomes free-fly: `W`/`A`/`S`/`D` + mouse, `Space` to ascend, `Shift` to descend. You revive automatically at the next round break.
 
 ## Build
 

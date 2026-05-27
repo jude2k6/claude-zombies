@@ -27,4 +27,15 @@ void  Bullets_Spawn(Vector3 origin, Vector3 dir, int damage, int ownerPlayer);
 void  Bullets_Update(float dt);
 void  Bullets_ClearAll(void);
 
+// Power-ups
+extern PowerUp powerUps[MAX_POWERUPS];
+extern float   doublePointsTimer;
+extern float   instaKillTimer;
+
+void PowerUps_ClearAll(void);
+void PowerUps_TryDrop(Vector3 pos);
+void PowerUps_Update(float dt);
+void PowerUps_Pickup(void);              // checks all players for pickups
+void PowerUps_Apply(PowerUpType type);   // server-side apply
+
 #endif

@@ -79,7 +79,7 @@ void Level_Build(void) {
     Box layout[] = {
         { (Vector3){  10,  1.5f,   5 }, (Vector3){ 4, 3, 4 } },
         { (Vector3){ -12,  1.0f,  -8 }, (Vector3){ 6, 2, 3 } },
-        { (Vector3){   0,  1.5f, -18 }, (Vector3){ 8, 3, 2 } },
+        { (Vector3){ -10,  1.5f, -16 }, (Vector3){ 4, 3, 4 } },
         { (Vector3){  18,  1.0f, -15 }, (Vector3){ 3, 2, 6 } },
         { (Vector3){ -20,  1.5f,  12 }, (Vector3){ 5, 3, 5 } },
         { (Vector3){   8,  1.0f,  20 }, (Vector3){ 7, 2, 2 } },

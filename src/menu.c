@@ -3,6 +3,7 @@
 #include "game.h"
 #include "net.h"
 #include "protocol.h"
+#include "entities.h"
 #include "raygui.h"
 #include <stdlib.h>
 #include <string.h>
@@ -50,6 +51,7 @@ void Menu_StartSoloGame(void) {
     localPlayerIdx = 0;
     for (int i = 0; i < NET_MAX_PLAYERS; i++) memset(&players[i], 0, sizeof players[i]);
     Player_ResetForGame(0, playerName);
+    PowerUps_ClearAll();
     Game_StartRound(1);
     gamePhase = GS_ROUND_BREAK;
     roundBreakTimer = 3.0f;
@@ -72,6 +74,7 @@ void Menu_StartHosting(void) {
 }
 
 void Menu_StartHostedGame(void) {
+    PowerUps_ClearAll();
     Game_StartRound(1);
     gamePhase = GS_ROUND_BREAK;
     roundBreakTimer = 3.0f;

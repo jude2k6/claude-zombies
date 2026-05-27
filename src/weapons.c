@@ -110,3 +110,41 @@ void Weapon_SwapSlot(Player *p, int target) {
     if (target < 0 || target >= INV_SLOTS) return;
     if (p->inventory[target].owned) p->currentSlot = target;
 }
+
+// Forward decls into entities
+extern Enemy enemies[MAX_ENEMIES];
+extern int   enemiesAlive;
+
+#define MELEE_RANGE       1.8f
+#define MELEE_DAMAGE      150
+#define MELEE_KILL_POINTS 130
+#define MELEE_COOLDOWN    0.6f
+
+void Weapon_Melee(Player *p) {
+    if (!p->alive) return;
+    if (p->meleeTimer > 0) return;
+    p->meleeTimer = MELEE_COOLDOWN;
+
+    Vector3 fwd = { sinf(p->yaw), 0, -cosf(p->yaw) };
+    int ownerIdx = (int)(p - players);
+    for (int i = 0; i < MAX_ENEMIES; i++) {
+        if (!enemies[i].alive) continue;
+        float dx = enemies[i].pos.x - p->pos.x;
+        float dz = enemies[i].pos.z - p->pos.z;
+        float d2 = dx*dx + dz*dz;
+        if (d2 > MELEE_RANGE * MELEE_RANGE) continue;
+        float d = sqrtf(d2);
+        if (d < 0.0001f) d = 0.0001f;
+        float dot = (dx * fwd.x + dz * fwd.z) / d;
+        if (dot < 0.3f) continue;   // ~70deg forward arc
+        enemies[i].hp -= MELEE_DAMAGE;
+        if (enemies[i].hp <= 0) {
+            enemies[i].alive = false;
+            enemiesAlive--;
+            if (ownerIdx >= 0 && ownerIdx < NET_MAX_PLAYERS && players[ownerIdx].active)
+                players[ownerIdx].points += MELEE_KILL_POINTS;
+        } else if (ownerIdx >= 0 && ownerIdx < NET_MAX_PLAYERS && players[ownerIdx].active) {
+            players[ownerIdx].points += HIT_POINTS;
+        }
+    }
+}

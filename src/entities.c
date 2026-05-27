@@ -1,6 +1,7 @@
 #include "entities.h"
 #include "level.h"
 #include "player.h"
+#include "weapons.h"
 #include "raymath.h"
 #include <math.h>
 #include <stdlib.h>
@@ -11,6 +12,10 @@ int   enemiesToSpawn = 0;
 float spawnTimer = 0.0f;
 
 Bullet bullets[MAX_BULLETS];
+
+PowerUp powerUps[MAX_POWERUPS] = {0};
+float   doublePointsTimer = 0.0f;
+float   instaKillTimer    = 0.0f;
 
 int Enemies_RoundHP(int r)        { return 30 + r * 22; }
 float Enemies_RoundSpeed(int r)   { float s = 1.6f + r * 0.10f; return s > 4.5f ? 4.5f : s; }
@@ -219,22 +224,123 @@ void Bullets_Update(float dt) {
             float dx = bullets[i].pos.x - enemies[e].pos.x;
             float dz = bullets[i].pos.z - enemies[e].pos.z;
             float dy = bullets[i].pos.y - enemies[e].pos.y;
+            // Hit envelope: body cylinder of radius r, plus a slightly wider
+            // head sphere on top.
             float r  = ENEMY_RADIUS + 0.15f;
-            if (dx*dx + dz*dz < r*r && fabsf(dy) < ENEMY_HEIGHT*0.6f) {
-                enemies[e].hp -= bullets[i].damage;
+            bool bodyHit = (dx*dx + dz*dz < r*r) && fabsf(dy) < ENEMY_HEIGHT*0.6f;
+            float headDy = dy - (ENEMY_HEIGHT * 0.5f + 0.3f);
+            float headR  = 0.35f;
+            bool headHit = (dx*dx + dz*dz < headR*headR) && fabsf(headDy) < headR;
+            if (bodyHit || headHit) {
+                int dmg = bullets[i].damage * (headHit ? 2 : 1);
+                if (instaKillTimer > 0) dmg = 99999;
+                enemies[e].hp -= dmg;
                 bullets[i].alive = false;
                 int op = bullets[i].ownerPlayer;
+                int hitPts  = HIT_POINTS + (headHit ? 30 : 0);
+                int killPts = KILL_POINTS + (headHit ? 50 : 0);
+                if (doublePointsTimer > 0) { hitPts *= 2; killPts *= 2; }
                 if (op >= 0 && op < NET_MAX_PLAYERS && players[op].active) {
-                    players[op].points += HIT_POINTS;
+                    players[op].points += hitPts;
                     if (enemies[e].hp <= 0) {
                         enemies[e].alive = false;
                         enemiesAlive--;
-                        players[op].points += KILL_POINTS;
+                        players[op].points += killPts;
+                        PowerUps_TryDrop(enemies[e].pos);
                     }
                 } else if (enemies[e].hp <= 0) {
                     enemies[e].alive = false;
                     enemiesAlive--;
+                    PowerUps_TryDrop(enemies[e].pos);
                 }
+                break;
+            }
+        }
+    }
+}
+
+// ============================================================================
+//  Power-ups
+// ============================================================================
+
+void PowerUps_ClearAll(void) {
+    for (int i = 0; i < MAX_POWERUPS; i++) powerUps[i].active = false;
+    doublePointsTimer = 0;
+    instaKillTimer = 0;
+}
+
+void PowerUps_TryDrop(Vector3 pos) {
+    if (Level_RandRange(0, 1) > POWERUP_DROP_CHANCE) return;
+    for (int i = 0; i < MAX_POWERUPS; i++) {
+        if (!powerUps[i].active) {
+            powerUps[i].active = true;
+            powerUps[i].type = (PowerUpType)(rand() % PU_COUNT);
+            powerUps[i].pos = (Vector3){ pos.x, 0.6f, pos.z };
+            powerUps[i].bob = Level_RandRange(0, 6.28f);
+            powerUps[i].lifetime = POWERUP_LIFETIME;
+            return;
+        }
+    }
+}
+
+void PowerUps_Update(float dt) {
+    for (int i = 0; i < MAX_POWERUPS; i++) {
+        if (!powerUps[i].active) continue;
+        powerUps[i].bob += dt * 3.0f;
+        powerUps[i].lifetime -= dt;
+        if (powerUps[i].lifetime <= 0) powerUps[i].active = false;
+    }
+    if (doublePointsTimer > 0) doublePointsTimer -= dt;
+    if (instaKillTimer    > 0) instaKillTimer    -= dt;
+}
+
+void PowerUps_Apply(PowerUpType type) {
+    switch (type) {
+        case PU_MAX_AMMO:
+            for (int i = 0; i < NET_MAX_PLAYERS; i++) {
+                if (!players[i].active) continue;
+                for (int s = 0; s < INV_SLOTS; s++) {
+                    if (!players[i].inventory[s].owned) continue;
+                    int cap = WEAPONS[players[i].inventory[s].weaponIdx].reserveMax;
+                    if (players[i].inventory[s].packed) cap += 60;
+                    players[i].inventory[s].reserve = cap;
+                }
+            }
+            break;
+        case PU_NUKE:
+            for (int i = 0; i < MAX_ENEMIES; i++) {
+                if (!enemies[i].alive) continue;
+                enemies[i].alive = false;
+                enemiesAlive--;
+            }
+            for (int i = 0; i < NET_MAX_PLAYERS; i++)
+                if (players[i].active) players[i].points += 400;
+            break;
+        case PU_DOUBLE_POINTS:
+            doublePointsTimer = 20.0f;
+            break;
+        case PU_INSTAKILL:
+            instaKillTimer = 20.0f;
+            break;
+        case PU_CARPENTER:
+            for (int i = 0; i < windowCount; i++) windows[i].boards = MAX_BOARDS_PER_WIN;
+            for (int i = 0; i < NET_MAX_PLAYERS; i++)
+                if (players[i].active) players[i].points += 200;
+            break;
+        default: break;
+    }
+}
+
+void PowerUps_Pickup(void) {
+    for (int i = 0; i < MAX_POWERUPS; i++) {
+        if (!powerUps[i].active) continue;
+        for (int pi = 0; pi < NET_MAX_PLAYERS; pi++) {
+            if (!players[pi].active || !players[pi].alive) continue;
+            float dx = players[pi].pos.x - powerUps[i].pos.x;
+            float dz = players[pi].pos.z - powerUps[i].pos.z;
+            if (dx*dx + dz*dz < POWERUP_PICKUP_R * POWERUP_PICKUP_R) {
+                PowerUps_Apply(powerUps[i].type);
+                powerUps[i].active = false;
                 break;
             }
         }

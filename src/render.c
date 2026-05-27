@@ -166,6 +166,28 @@ static void DrawOtherPlayer(int idx) {
     DrawSphere(nose, 0.10f, BLACK);
 }
 
+static const Color POWERUP_COLORS[PU_COUNT] = {
+    {120, 200, 240, 255},   // MAX_AMMO  - cyan
+    {120, 120, 240, 255},   // NUKE      - blue
+    {240, 220,  60, 255},   // DOUBLE_PT - yellow
+    {240,  80,  80, 255},   // INSTAKILL - red
+    { 80, 200, 120, 255},   // CARPENTER - green
+};
+
+static const char *POWERUP_LETTERS[PU_COUNT] = { "A", "N", "2x", "X", "C" };
+
+static void DrawPowerUps(void) {
+    for (int i = 0; i < MAX_POWERUPS; i++) {
+        if (!powerUps[i].active) continue;
+        Vector3 p = powerUps[i].pos;
+        p.y += sinf(powerUps[i].bob) * 0.15f;
+        Color c = POWERUP_COLORS[powerUps[i].type];
+        DrawCube(p, 0.6f, 0.6f, 0.6f, c);
+        DrawCubeWires(p, 0.6f, 0.6f, 0.6f, BLACK);
+        DrawSphere((Vector3){p.x, p.y + 0.55f, p.z}, 0.08f, WHITE);
+    }
+}
+
 void Render_World3D(Camera camera) {
     BeginMode3D(camera);
         DrawArena();
@@ -175,6 +197,7 @@ void Render_World3D(Camera camera) {
         DrawWallBuys();
         DrawPerkMachines();
         DrawPaP();
+        DrawPowerUps();
         for (int i = 0; i < NET_MAX_PLAYERS; i++) {
             if (i == localPlayerIdx) continue;
             DrawOtherPlayer(i);
@@ -242,5 +265,15 @@ void Render_WorldLabels(Camera camera, int sw, int sh, Player *me) {
         int lw = MeasureText(label, 18);
         DrawRectangle((int)sp.x - lw/2 - 6, (int)sp.y - 12, lw + 12, 24, (Color){0,0,0,160});
         DrawText(label, (int)sp.x - lw/2, (int)sp.y - 9, 18, (Color){220,170,110,255});
+    }
+    // Power-up labels
+    for (int i = 0; i < MAX_POWERUPS; i++) {
+        if (!powerUps[i].active) continue;
+        Vector3 above = { powerUps[i].pos.x, powerUps[i].pos.y + 1.0f, powerUps[i].pos.z };
+        Vector2 sp = GetWorldToScreen(above, camera);
+        if (sp.x < -100 || sp.y < -100 || sp.x > sw + 100 || sp.y > sh + 100) continue;
+        const char *lbl = POWERUP_LETTERS[powerUps[i].type];
+        int lw = MeasureText(lbl, 22);
+        DrawText(lbl, (int)sp.x - lw/2, (int)sp.y - 10, 22, POWERUP_COLORS[powerUps[i].type]);
     }
 }

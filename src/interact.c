@@ -124,7 +124,7 @@ void Interact_UpdatePaP(float dt) {
 }
 
 void Interact_UpdateRepairs(float dt) {
-    for (int i = 0; i < windowCount; i++) windows[i].repairProgress = 0;
+    bool active[MAX_WINDOWS] = { false };
 
     for (int pi = 0; pi < NET_MAX_PLAYERS; pi++) {
         Player *p = &players[pi];
@@ -134,14 +134,22 @@ void Interact_UpdateRepairs(float dt) {
         Window3D *w = &windows[ix.idx];
         if (w->boards >= MAX_BOARDS_PER_WIN) continue;
         if (w->repairPlayer < 0 || w->repairPlayer == pi) {
-            w->repairProgress += dt / BOARD_REPAIR_TIME;
             w->repairPlayer = pi;
+            w->repairProgress += dt / BOARD_REPAIR_TIME;
+            active[ix.idx] = true;
             if (w->repairProgress >= 1.0f) {
                 w->boards++;
                 w->repairProgress = 0;
                 p->points += BOARD_REPAIR_PTS;
                 w->repairPlayer = -1;
             }
+        }
+    }
+    // Clear progress on any window nobody is currently working on
+    for (int i = 0; i < windowCount; i++) {
+        if (!active[i]) {
+            windows[i].repairProgress = 0;
+            windows[i].repairPlayer = -1;
         }
     }
 }

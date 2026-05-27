@@ -1,6 +1,7 @@
 #include "player.h"
 #include "level.h"
 #include "perks.h"
+#include "entities.h"
 #include "raymath.h"
 #include <string.h>
 #include <math.h>
@@ -82,9 +83,35 @@ void Player_ApplyLocalLook(Player *p, float mouseSens) {
     if (p->pitch < -1.55f) p->pitch = -1.55f;
 }
 
+static void PushOutOfEnemies(Player *p) {
+    float minD = PLAYER_RADIUS + ENEMY_RADIUS;
+    float minD2 = minD * minD;
+    for (int i = 0; i < MAX_ENEMIES; i++) {
+        if (!enemies[i].alive) continue;
+        if (enemies[i].state != ZS_INSIDE) continue;
+        float dx = p->pos.x - enemies[i].pos.x;
+        float dz = p->pos.z - enemies[i].pos.z;
+        float d2 = dx*dx + dz*dz;
+        if (d2 < minD2 && d2 > 1e-6f) {
+            float d = sqrtf(d2);
+            float push = (minD - d);
+            float nx = dx / d, nz = dz / d;
+            // Move both: player most of the way, zombie a small nudge
+            p->pos.x += nx * push * 0.7f;
+            p->pos.z += nz * push * 0.7f;
+            enemies[i].pos.x -= nx * push * 0.3f;
+            enemies[i].pos.z -= nz * push * 0.3f;
+        }
+    }
+}
+
 void Player_ApplyLocalMove(Player *p, float dt) {
     Vector3 fwd   = { sinf(p->yaw),  0, -cosf(p->yaw) };
     Vector3 right = { cosf(p->yaw),  0,  sinf(p->yaw) };
+
+    float speed = Perk_EffMoveSpeed(p);
+    if (IsKeyDown(KEY_LEFT_SHIFT)) speed *= 1.6f;          // sprint
+    if (IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_C)) speed *= 0.55f; // crouch
 
     Vector3 move = { 0 };
     if (IsKeyDown(KEY_W)) move = Vector3Add(move, fwd);
@@ -92,9 +119,12 @@ void Player_ApplyLocalMove(Player *p, float dt) {
     if (IsKeyDown(KEY_D)) move = Vector3Add(move, right);
     if (IsKeyDown(KEY_A)) move = Vector3Subtract(move, right);
     if (Vector3LengthSqr(move) > 0.0001f) {
-        move = Vector3Scale(Vector3Normalize(move), Perk_EffMoveSpeed(p) * dt);
+        move = Vector3Scale(Vector3Normalize(move), speed * dt);
     }
     Vector3 newPos = Vector3Add(p->pos, move);
     newPos.y = PLAYER_EYE;
     p->pos = Level_ResolveXZ(p->pos, newPos, PLAYER_RADIUS, true);
+    PushOutOfEnemies(p);
+    // Final clamp against level after enemy push
+    p->pos = Level_ResolveXZ(p->pos, p->pos, PLAYER_RADIUS, true);
 }

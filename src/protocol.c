@@ -57,10 +57,20 @@ typedef struct {
     int8_t   papSlotInProgress;
     int8_t   papOwnerPlayer;
     uint8_t  doorsOpened;
+    float    doublePointsTimer;
+    float    instaKillTimer;
     uint16_t numEnemies;
     uint16_t numBullets;
+    uint16_t numPowerUps;
     SerPlayer players[NET_MAX_PLAYERS];
 } PktSnapshotHeader;
+
+typedef struct {
+    uint8_t type;
+    float   px, py, pz;
+    float   bob;
+    float   lifetime;
+} SerPowerUp;
 #pragma pack(pop)
 
 static uint8_t snapshotBuf[16384];
@@ -134,6 +144,8 @@ void Protocol_HostBroadcastSnapshot(void) {
         for (int i = 0; i < doorCount && i < 8; i++) if (doors[i].opened) mask |= (uint8_t)(1u << i);
         hdr->doorsOpened = mask;
     }
+    hdr->doublePointsTimer = doublePointsTimer;
+    hdr->instaKillTimer    = instaKillTimer;
     for (int i = 0; i < NET_MAX_PLAYERS; i++) SerializePlayer(&hdr->players[i], &players[i]);
 
     size_t off = sizeof *hdr;
@@ -166,6 +178,19 @@ void Protocol_HostBroadcastSnapshot(void) {
     }
     hdr->numBullets = nb;
 
+    uint16_t np = 0;
+    for (int i = 0; i < MAX_POWERUPS && off + sizeof(SerPowerUp) <= sizeof snapshotBuf; i++) {
+        if (!powerUps[i].active) continue;
+        SerPowerUp sp = {
+            .type = (uint8_t)powerUps[i].type,
+            .px = powerUps[i].pos.x, .py = powerUps[i].pos.y, .pz = powerUps[i].pos.z,
+            .bob = powerUps[i].bob, .lifetime = powerUps[i].lifetime,
+        };
+        memcpy(snapshotBuf + off, &sp, sizeof sp);
+        off += sizeof sp; np++;
+    }
+    hdr->numPowerUps = np;
+
     Net_Broadcast(snapshotBuf, off, false);
 }
 
@@ -185,6 +210,8 @@ void Protocol_ClientApplySnapshot(uint8_t *data, size_t len) {
     pap.slotInProgress = hdr->papSlotInProgress;
     pap.ownerPlayer = hdr->papOwnerPlayer;
     for (int i = 0; i < doorCount && i < 8; i++) doors[i].opened = (hdr->doorsOpened & (1u << i)) != 0;
+    doublePointsTimer = hdr->doublePointsTimer;
+    instaKillTimer    = hdr->instaKillTimer;
 
     for (int i = 0; i < NET_MAX_PLAYERS; i++)
         DeserializePlayer(&players[i], &hdr->players[i], i == localPlayerIdx);
@@ -211,6 +238,16 @@ void Protocol_ClientApplySnapshot(uint8_t *data, size_t len) {
         bullets[i].life = sb.life;
         bullets[i].ownerPlayer = sb.ownerPlayer;
         bullets[i].alive = true;
+    }
+    for (int i = 0; i < MAX_POWERUPS; i++) powerUps[i].active = false;
+    for (int i = 0; i < hdr->numPowerUps && off + sizeof(SerPowerUp) <= len && i < MAX_POWERUPS; i++) {
+        SerPowerUp sp;
+        memcpy(&sp, data + off, sizeof sp); off += sizeof sp;
+        powerUps[i].type = (PowerUpType)sp.type;
+        powerUps[i].pos = (Vector3){ sp.px, sp.py, sp.pz };
+        powerUps[i].bob = sp.bob;
+        powerUps[i].lifetime = sp.lifetime;
+        powerUps[i].active = true;
     }
 }
 
@@ -269,6 +306,7 @@ void Protocol_HostHandlePacket(int peerIdx, uint8_t *data, size_t len) {
         if      (a->action == ACT_RELOAD)     Weapon_StartReload(p);
         else if (a->action == ACT_SWAP_SLOT)  Weapon_SwapSlot(p, a->arg);
         else if (a->action == ACT_INTERACT_F) Interact_Do(p);
+        else if (a->action == ACT_MELEE)      Weapon_Melee(p);
     }
 }
 

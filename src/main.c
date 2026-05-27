@@ -292,6 +292,10 @@ static char        statusMsg[128] = "";
 static char        hostIps[8][64];
 static int         hostIpCount = 0;
 
+// Cheat: toggled with F3. Only fully effective in solo or as host
+// (clients can toggle the indicator but the server is authoritative on HP).
+static bool        godMode = false;
+
 static Camera      camera;
 
 // Local fire-edge tracker (for non-auto weapons we still rely on key-press
@@ -708,10 +712,13 @@ static void UpdateEnemies(float dt) {
             Vector2 pXZ = { tp->pos.x, tp->pos.z };
             Vector2 eXZ = { e->pos.x, e->pos.z };
             if (Vector2Distance(pXZ, eXZ) < PLAYER_RADIUS + ENEMY_RADIUS + 0.1f && e->touchTimer <= 0) {
-                tp->hp -= ENEMY_DAMAGE;
+                bool cheatProtected = godMode && (int)(tp - players) == localPlayerIdx;
+                if (!cheatProtected) {
+                    tp->hp -= ENEMY_DAMAGE;
+                    tp->damageFlash = 0.5f;
+                    if (tp->hp <= 0) { tp->hp = 0; tp->alive = false; }
+                }
                 e->touchTimer = ENEMY_TOUCH_COOLDOWN;
-                tp->damageFlash = 0.5f;
-                if (tp->hp <= 0) { tp->hp = 0; tp->alive = false; }
             }
         }
     }
@@ -1683,6 +1690,14 @@ static void DrawHUD(int sw, int sh, Interact ix) {
 
     DrawPerkIcons(sw, sh);
 
+    if (godMode) {
+        const char *gm = "GOD MODE";
+        int gw = MeasureText(gm, 22);
+        DrawRectangle(sw - gw - 30, 140, gw + 20, 30, (Color){0,0,0,160});
+        DrawRectangleLines(sw - gw - 30, 140, gw + 20, 30, (Color){255,220,100,255});
+        DrawText(gm, sw - gw - 20, 145, 22, (Color){255,220,100,255});
+    }
+
     // Other player roster (top right)
     int rx = sw - 220, ry = 10, rh = 28;
     int actCount = ActivePlayerCount();
@@ -1848,7 +1863,7 @@ static void StartConnecting(void) {
 
 static void DrawMenu(int sw, int sh) {
     DrawRectangle(0, 0, sw, sh, (Color){15, 18, 25, 255});
-    const char *title = "SHOOTER  ZOMBIES";
+    const char *title = "CLAUDE  ZOMBIES";
     int ts = 72;
     int tw = MeasureText(title, ts);
     DrawText(title, sw/2 - tw/2 + 3, sh/6 + 3, ts, (Color){80, 0, 0, 255});
@@ -2052,7 +2067,7 @@ static void DrawGameOver(int sw, int sh) {
 
 int main(void) {
     SetConfigFlags(FLAG_MSAA_4X_HINT | FLAG_VSYNC_HINT | FLAG_WINDOW_RESIZABLE);
-    InitWindow(WINDOW_W_DEFAULT, WINDOW_H_DEFAULT, "Shooter Zombies");
+    InitWindow(WINDOW_W_DEFAULT, WINDOW_H_DEFAULT, "Claude Zombies");
     SetTargetFPS(60);
     SetExitKey(0);
 
@@ -2087,6 +2102,7 @@ int main(void) {
             else if (uiState == UI_JOIN_INPUT)  uiState = UI_MENU;
         }
         if (IsKeyPressed(KEY_F11)) ToggleFullscreenSafe();
+        if (IsKeyPressed(KEY_F3))  godMode = !godMode;
 
         // ---- Networking pump ----
         if (netMode != NET_SOLO) PollNetwork();
@@ -2142,6 +2158,13 @@ int main(void) {
 
             if (IsHost()) {
                 WorldTick(dt);
+
+                if (godMode) {
+                    Player *gp = &players[localPlayerIdx];
+                    gp->points = 999999;
+                    gp->hp = EffMaxHP(gp);
+                    gp->alive = true;
+                }
 
                 snapshotAccum += dt;
                 if (snapshotAccum >= 1.0f / SNAPSHOT_HZ && netMode == NET_HOST) {

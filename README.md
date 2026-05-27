@@ -1,9 +1,10 @@
-# claude-zombies
+# Claude Zombies
 
 A 3D zombies shooter written in C with [raylib](https://www.raylib.com/),
 [raygui](https://github.com/raysan5/raygui), and [enet](http://enet.bespin.org/).
 Round-based survival in the style of *Call of Duty: Zombies* — wall-buys,
-perks, Pack-a-Punch, boardable windows, and up to **4-player coop** over UDP.
+perks, Pack-a-Punch, purchasable doors, boardable windows, and up to
+**4-player coop** over UDP.
 
 Built end-to-end with [Claude Code](https://claude.com/claude-code).
 
@@ -12,6 +13,9 @@ Built end-to-end with [Claude Code](https://claude.com/claude-code).
 - **Round-based survival** — endless waves, scaling zombie HP/speed/count
 - **Boarded windows** — zombies spawn outside, break boards to enter,
   hold `E` to repair (and earn points)
+- **Purchasable doors** — the south room (with Pack-a-Punch and the M14
+  wall-buy) is locked behind a door. Spend points to open it and unlock
+  that area's window as well.
 - **5 weapons** with wall-buys and ammo refills
   - M1911 (starter pistol)
   - MP5 SMG · Olympia shotgun · M14 rifle · Ray Gun
@@ -36,6 +40,7 @@ Built end-to-end with [Claude Code](https://claude.com/claude-code).
 | `E` (hold)           | Repair window board             |
 | `Esc`                | Pause                           |
 | `F11`                | Toggle fullscreen               |
+| `F3`                 | Toggle God Mode (cheat)         |
 
 ## Build
 
@@ -97,6 +102,14 @@ render server snapshots at 20 Hz.
 Caveats: this is minimal coop netcode — no remote-player interpolation
 or lag compensation. Mid-game joiners spawn at the next round break with
 the starter loadout. Host disconnect kicks everyone to the menu.
+
+## Cheats
+
+Press `F3` in-game to toggle **God Mode**: invincible + unlimited points.
+A yellow "GOD MODE" indicator appears in the top-right corner when active.
+Works fully in solo and as the host. In client mode the toggle still
+shows, but the server is authoritative on HP and points so the cheat
+won't have any real effect.
 
 ## Layout
 

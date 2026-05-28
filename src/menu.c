@@ -180,13 +180,12 @@ void Menu_DrawMenu(int sw, int sh) {
     int tagw = MeasureText(tagline, 20);
     DrawText(tagline, sw/2 - tagw/2, sh/6 + ts + 16, 20, (Color){200,200,200,255});
 
-    int bw = 260, bh = 50, bx = sw/2 - bw/2, by = sh/2 - 80;
+    int bw = 260, bh = 50, bx = sw/2 - bw/2, by = sh/2 - 60;
     GuiSetStyle(DEFAULT, TEXT_SIZE, 22);
-    if (GuiButton((Rectangle){bx, by,        bw, bh}, "SOLO PLAY"))   { uiState = UI_SOLO_LOBBY; statusMsg[0]=0; }
-    if (GuiButton((Rectangle){bx, by + 64,   bw, bh}, "HOST GAME"))   Menu_StartHosting();
-    if (GuiButton((Rectangle){bx, by + 128,  bw, bh}, "JOIN GAME"))   { uiState = UI_JOIN_INPUT; statusMsg[0]=0; }
-    if (GuiButton((Rectangle){bx, by + 192,  bw, bh}, "SETTINGS"))    uiState = UI_SETTINGS;
-    if (GuiButton((Rectangle){bx, by + 256,  bw, bh}, "QUIT"))        { CloseWindow(); exit(0); }
+    if (GuiButton((Rectangle){bx, by,        bw, bh}, "SOLO PLAY"))    { uiState = UI_SOLO_LOBBY; statusMsg[0]=0; }
+    if (GuiButton((Rectangle){bx, by + 64,   bw, bh}, "MULTIPLAYER"))  { uiState = UI_MP_MENU;    statusMsg[0]=0; }
+    if (GuiButton((Rectangle){bx, by + 128,  bw, bh}, "SETTINGS"))     uiState = UI_SETTINGS;
+    if (GuiButton((Rectangle){bx, by + 192,  bw, bh}, "QUIT"))         { CloseWindow(); exit(0); }
     GuiSetStyle(DEFAULT, TEXT_SIZE, 16);
 
     if (statusMsg[0]) {
@@ -272,6 +271,29 @@ void Menu_DrawConnecting(int sw, int sh) {
         Net_Shutdown(); netMode = NET_SOLO; uiState = UI_MENU;
     }
     GuiSetStyle(DEFAULT, TEXT_SIZE, 16);
+}
+
+void Menu_DrawMultiplayer(int sw, int sh) {
+    DrawRectangle(0, 0, sw, sh, (Color){15, 18, 25, 255});
+    const char *t = "MULTIPLAYER";
+    int ts = 56; int tw = MeasureText(t, ts);
+    DrawText(t, sw/2 - tw/2, 60, ts, RAYWHITE);
+
+    const char *sub = "Host your own server, or join a friend.";
+    int sbw = MeasureText(sub, 20);
+    DrawText(sub, sw/2 - sbw/2, 60 + ts + 12, 20, (Color){200,200,200,255});
+
+    int bw = 260, bh = 50, bx = sw/2 - bw/2, by = sh/2 - 40;
+    GuiSetStyle(DEFAULT, TEXT_SIZE, 22);
+    if (GuiButton((Rectangle){bx, by,       bw, bh}, "HOST GAME")) Menu_StartHosting();
+    if (GuiButton((Rectangle){bx, by + 64,  bw, bh}, "JOIN GAME")) { uiState = UI_JOIN_INPUT; statusMsg[0]=0; }
+    if (GuiButton((Rectangle){bx, by + 128, bw, bh}, "BACK"))      uiState = UI_MENU;
+    GuiSetStyle(DEFAULT, TEXT_SIZE, 16);
+
+    if (statusMsg[0]) {
+        int tw2 = MeasureText(statusMsg, 18);
+        DrawText(statusMsg, sw/2 - tw2/2, sh - 60, 18, (Color){200,180,180,255});
+    }
 }
 
 void Menu_DrawSoloLobby(int sw, int sh) {

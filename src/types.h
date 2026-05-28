@@ -256,7 +256,7 @@ typedef enum {
 
 typedef enum {
     UI_MENU, UI_SETTINGS, UI_JOIN_INPUT, UI_CONNECTING,
-    UI_SOLO_LOBBY,
+    UI_SOLO_LOBBY, UI_MP_MENU,
     UI_HOST_LOBBY, UI_CLIENT_LOBBY, UI_PLAY, UI_PAUSE,
 } UiState;
 

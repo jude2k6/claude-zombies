@@ -43,6 +43,7 @@ void Menu_DrawSettings(int sw, int sh);
 void Menu_DrawJoinInput(int sw, int sh);
 void Menu_DrawConnecting(int sw, int sh);
 void Menu_DrawSoloLobby(int sw, int sh);
+void Menu_DrawMultiplayer(int sw, int sh);
 void Menu_DrawLobby(int sw, int sh, bool isHost);
 void Menu_DrawPause(int sw, int sh);
 void Menu_DrawGameOver(int sw, int sh);

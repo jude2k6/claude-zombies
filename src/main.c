@@ -153,6 +153,7 @@ int main(void) {
             else if (uiState == UI_SETTINGS)    uiState = UI_MENU;
             else if (uiState == UI_JOIN_INPUT)  uiState = UI_MENU;
             else if (uiState == UI_SOLO_LOBBY)  uiState = UI_MENU;
+            else if (uiState == UI_MP_MENU)     uiState = UI_MENU;
         }
         if (IsKeyPressed(KEY_F11)) Menu_ToggleFullscreenSafe();
         if (IsKeyPressed(KEY_F3))  godMode = !godMode;
@@ -270,6 +271,8 @@ int main(void) {
             Menu_DrawConnecting(sw, sh);
         } else if (uiState == UI_SOLO_LOBBY) {
             Menu_DrawSoloLobby(sw, sh);
+        } else if (uiState == UI_MP_MENU) {
+            Menu_DrawMultiplayer(sw, sh);
         } else if (uiState == UI_HOST_LOBBY) {
             Menu_DrawLobby(sw, sh, true);
         } else if (uiState == UI_CLIENT_LOBBY) {

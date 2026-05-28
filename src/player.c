@@ -2,6 +2,7 @@
 #include "level.h"
 #include "perks.h"
 #include "entities.h"
+#include "pad.h"
 #include "raymath.h"
 #include <string.h>
 #include <math.h>
@@ -79,6 +80,13 @@ void Player_ApplyLocalLook(Player *p, float mouseSens) {
     Vector2 md = GetMouseDelta();
     p->yaw   += md.x * mouseSens;
     p->pitch -= md.y * mouseSens;
+    // Right stick look. Slower while ADS, like every modern shooter.
+    if (Pad_Connected()) {
+        float dt = GetFrameTime();
+        float adsMul = p->adsHeld ? 0.55f : 1.0f;
+        p->yaw   += Pad_StickX(1) * padLookYawRate   * adsMul * dt;
+        p->pitch -= Pad_StickY(1) * padLookPitchRate * adsMul * dt;
+    }
     if (p->pitch >  1.55f) p->pitch =  1.55f;
     if (p->pitch < -1.55f) p->pitch = -1.55f;
 }
@@ -110,11 +118,14 @@ void Player_ApplyLocalMove(Player *p, float dt) {
     Vector3 right = { cosf(p->yaw),  0,  sinf(p->yaw) };
 
     float speed = Perk_EffMoveSpeed(p);
-    bool wantSprint = IsKeyDown(KEY_LEFT_SHIFT);
-    bool moving = (IsKeyDown(KEY_W) || IsKeyDown(KEY_S) || IsKeyDown(KEY_A) || IsKeyDown(KEY_D));
+    float padX = Pad_StickX(0), padY = Pad_StickY(0);  // forward = -Y
+    bool wantSprint = IsKeyDown(KEY_LEFT_SHIFT) || Pad_Down(PAD_L3);
+    bool kbdMove   = (IsKeyDown(KEY_W) || IsKeyDown(KEY_S) || IsKeyDown(KEY_A) || IsKeyDown(KEY_D));
+    bool padMove   = (fabsf(padX) > 0.01f || fabsf(padY) > 0.01f);
+    bool moving    = kbdMove || padMove;
     bool sprinting = wantSprint && moving && p->stamina > 1.0f && !p->adsHeld;
     if (sprinting) speed *= 1.6f;
-    if (IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_C)) speed *= 0.55f; // crouch
+    if (IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_C) || Pad_Down(PAD_B)) speed *= 0.55f; // crouch
     if (p->adsHeld) speed *= ADS_MOVE_MUL;
 
     // Stamina drain/regen (local only)
@@ -128,12 +139,19 @@ void Player_ApplyLocalMove(Player *p, float dt) {
     if (IsKeyDown(KEY_S)) move = Vector3Subtract(move, fwd);
     if (IsKeyDown(KEY_D)) move = Vector3Add(move, right);
     if (IsKeyDown(KEY_A)) move = Vector3Subtract(move, right);
+    if (padMove) {
+        move = Vector3Add(move, Vector3Scale(fwd,   -padY));
+        move = Vector3Add(move, Vector3Scale(right,  padX));
+    }
     if (Vector3LengthSqr(move) > 0.0001f) {
-        move = Vector3Scale(Vector3Normalize(move), speed * dt);
+        Vector3 dir = Vector3Normalize(move);
+        // Analog magnitude: scale stick contribution; keyboard always = 1.
+        float mag = kbdMove ? 1.0f : fminf(1.0f, sqrtf(padX*padX + padY*padY));
+        move = Vector3Scale(dir, speed * dt * mag);
     }
 
     // Jump: triggered only on rising edge while grounded.
-    if (p->onGround && IsKeyPressed(KEY_SPACE)) {
+    if (p->onGround && (IsKeyPressed(KEY_SPACE) || Pad_Pressed(PAD_A))) {
         p->velY = PLAYER_JUMP_VEL;
         p->onGround = false;
     }

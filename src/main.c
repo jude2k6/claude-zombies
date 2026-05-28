@@ -17,6 +17,7 @@
 #include "render.h"
 #include "hud.h"
 #include "menu.h"
+#include "pad.h"
 
 #include <stdio.h>
 #include <stdint.h>
@@ -61,19 +62,21 @@ static void PollNetwork(void) {
 }
 
 static void HandleLocalActions(Player *me) {
-    if (IsKeyPressed(KEY_Q)) {
+    bool kbdSwap  = IsKeyPressed(KEY_Q);
+    bool padSwap  = Pad_Pressed(PAD_LB);
+    if (kbdSwap || padSwap) {
         int other = (me->currentSlot + 1) % INV_SLOTS;
         if (me->inventory[other].owned) me->currentSlot = other; // local predict
     }
-    if (IsKeyPressed(KEY_ONE) && me->inventory[0].owned) me->currentSlot = 0;
-    if (IsKeyPressed(KEY_TWO) && me->inventory[1].owned) me->currentSlot = 1;
+    if (IsKeyPressed(KEY_ONE) || Pad_Pressed(PAD_DP_LEFT))  { if (me->inventory[0].owned) me->currentSlot = 0; }
+    if (IsKeyPressed(KEY_TWO) || Pad_Pressed(PAD_DP_RIGHT)) { if (me->inventory[1].owned) me->currentSlot = 1; }
 
-    bool reloadEdge = IsKeyPressed(KEY_R) && me->alive;
-    bool swapEdge   = IsKeyPressed(KEY_Q) && me->alive;
-    bool slot1Edge  = IsKeyPressed(KEY_ONE) && me->alive;
-    bool slot2Edge  = IsKeyPressed(KEY_TWO) && me->alive;
-    bool interactEdge = IsKeyPressed(KEY_F) && me->alive;
-    bool meleeEdge  = IsKeyPressed(KEY_V) && me->alive;
+    bool reloadEdge   = (IsKeyPressed(KEY_R) || Pad_Pressed(PAD_Y)) && me->alive;
+    bool swapEdge     = (kbdSwap || padSwap) && me->alive;
+    bool slot1Edge    = (IsKeyPressed(KEY_ONE) || Pad_Pressed(PAD_DP_LEFT))  && me->alive;
+    bool slot2Edge    = (IsKeyPressed(KEY_TWO) || Pad_Pressed(PAD_DP_RIGHT)) && me->alive;
+    bool interactEdge = (IsKeyPressed(KEY_F) || Pad_Pressed(PAD_X)) && me->alive;
+    bool meleeEdge    = (IsKeyPressed(KEY_V) || Pad_Pressed(PAD_RB)) && me->alive;
 
     int swapTarget = -1;
     if (swapEdge) {
@@ -140,7 +143,8 @@ int main(void) {
             prevUi = uiState;
         }
 
-        if (IsKeyPressed(KEY_ESCAPE)) {
+        bool pauseEdge = IsKeyPressed(KEY_ESCAPE) || Pad_Pressed(PAD_START);
+        if (pauseEdge) {
             if      (uiState == UI_PLAY)       uiState = UI_PAUSE;
             else if (uiState == UI_PAUSE)      uiState = UI_PLAY;
             else if (uiState == UI_SETTINGS)   uiState = UI_MENU;
@@ -194,9 +198,10 @@ int main(void) {
                 // sync so the body faces wherever the camera is looking.
                 if (noclipMode && me->alive) { me->yaw = specYaw; me->pitch = specPitch; }
             }
-            me->fireHeld     = IsMouseButtonDown(MOUSE_BUTTON_LEFT) && me->alive && !noclipMode;
-            me->interactHeld = IsKeyDown(KEY_E) && me->alive && !noclipMode;
-            me->adsHeld      = IsMouseButtonDown(MOUSE_BUTTON_RIGHT) && me->alive && !noclipMode;
+            me->fireHeld     = (IsMouseButtonDown(MOUSE_BUTTON_LEFT)  || Pad_TriggerR()) && me->alive && !noclipMode;
+            // E (keyboard) or holding X (gamepad) drives revive/repair.
+            me->interactHeld = (IsKeyDown(KEY_E) || Pad_Down(PAD_X))   && me->alive && !noclipMode;
+            me->adsHeld      = (IsMouseButtonDown(MOUSE_BUTTON_RIGHT) || Pad_TriggerL()) && me->alive && !noclipMode;
 
             HandleLocalActions(me);
 

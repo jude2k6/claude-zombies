@@ -187,7 +187,21 @@ static void DrawOtherPlayer(int idx) {
     Player *p = &players[idx];
     if (!p->active) return;
     Color c = PLAYER_COLORS[idx];
-    if (!p->alive) c = (Color){ 100,100,100, 200 };
+    if (!p->alive)      c = (Color){ 100,100,100, 200 };
+    else if (p->downed) c = (Color){ 180, 60, 60, 230 };
+
+    if (p->alive && p->downed) {
+        // Prone: short, wide cuboid on the floor, head pointing forward.
+        Vector3 body = { p->pos.x, 0.30f, p->pos.z };
+        DrawCube(body, 1.6f, 0.45f, 0.55f, c);
+        DrawCubeWires(body, 1.6f, 0.45f, 0.55f, BLACK);
+        Vector3 fwd = { sinf(p->yaw), 0, -cosf(p->yaw) };
+        Vector3 head = Vector3Add(body, Vector3Scale(fwd, 0.7f));
+        head.y += 0.1f;
+        DrawSphere(head, 0.25f, c);
+        return;
+    }
+
     Vector3 body = { p->pos.x, ENEMY_HEIGHT*0.5f, p->pos.z };
     DrawCube(body, 0.55f, 1.6f, 0.55f, c);
     DrawCubeWires(body, 0.55f, 1.6f, 0.55f, BLACK);

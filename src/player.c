@@ -60,6 +60,8 @@ void Player_GiveStartingPistol(Player *p) {
     p->hp = 100;
     p->points = 500;
     p->alive = true;
+    p->downed = false;
+    p->bleedTimer = 0.0f;
     p->stamina = 100.0f;
     p->reviverIdx = -1;
     p->reviveAsTarget = 0.0f;

@@ -30,6 +30,9 @@ typedef struct {
     int16_t kills, headshots, meleeKills, revives;
     int32_t shotsFired, shotsHit;
     float   reviveAsTarget;
+    uint8_t downed;
+    float   bleedTimer;
+    uint8_t highestRound;
 } SerPlayer;
 
 typedef struct {
@@ -113,16 +116,23 @@ static void SerializePlayer(SerPlayer *dst, Player *src) {
     dst->shotsFired = (int32_t)src->shotsFired;
     dst->shotsHit   = (int32_t)src->shotsHit;
     dst->reviveAsTarget = src->reviveAsTarget;
+    dst->downed       = src->downed ? 1 : 0;
+    dst->bleedTimer   = src->bleedTimer;
+    dst->highestRound = (uint8_t)(src->highestRound > 255 ? 255 : src->highestRound);
 }
 
 static void DeserializePlayer(Player *dst, SerPlayer *src, bool isLocal) {
     bool wasActive = dst->active;
+    bool wasAlive  = dst->alive;
     dst->active = src->active;
     dst->alive  = src->alive;
     memcpy(dst->name, src->name, 32); dst->name[31] = 0;
     if (!isLocal) {
         dst->pos = (Vector3){ src->px, src->py, src->pz };
         dst->yaw = src->yaw; dst->pitch = src->pitch;
+    } else if (!wasAlive && src->alive) {
+        // Respawn for local: host moved us back to a spawn point, take it.
+        dst->pos = (Vector3){ src->px, src->py, src->pz };
     }
     dst->hp = src->hp;
     dst->points = src->points;
@@ -143,6 +153,9 @@ static void DeserializePlayer(Player *dst, SerPlayer *src, bool isLocal) {
     dst->shotsFired = src->shotsFired;
     dst->shotsHit   = src->shotsHit;
     dst->reviveAsTarget = src->reviveAsTarget;
+    dst->downed       = src->downed != 0;
+    dst->bleedTimer   = src->bleedTimer;
+    dst->highestRound = src->highestRound;
     if (!wasActive && src->active && isLocal)
         dst->pos = (Vector3){ src->px, src->py, src->pz };
 }

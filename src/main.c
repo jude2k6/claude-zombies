@@ -28,11 +28,34 @@
 static float snapshotAccum = 0.0f;
 static float inputAccum    = 0.0f;
 
-// Spectator camera state (used while local player is downed, or via F4 noclip cheat)
+// Spectator camera state (used while local player is dead, or via F4 noclip cheat)
 static Vector3 specPos;
 static float   specYaw   = 0.0f;
 static float   specPitch = 0.0f;
 static bool    specInit  = false;
+static int     specTarget = -1; // teammate idx the cam was last snapped to
+
+static int Spectator_NextTeammate(int after) {
+    for (int step = 1; step <= NET_MAX_PLAYERS; step++) {
+        int idx = (after + step) % NET_MAX_PLAYERS;
+        if (idx == localPlayerIdx) continue;
+        if (players[idx].active && players[idx].alive) return idx;
+    }
+    return -1;
+}
+
+static void Spectator_SnapTo(int idx) {
+    if (idx < 0) return;
+    Player *t = &players[idx];
+    Vector3 fwd = { sinf(t->yaw), 0, -cosf(t->yaw) };
+    // 3rd-person-ish, behind their shoulder.
+    specPos = (Vector3){ t->pos.x - fwd.x * 2.6f,
+                         t->pos.y + 1.2f,
+                         t->pos.z - fwd.z * 2.6f };
+    specYaw = t->yaw;
+    specPitch = -0.15f;
+    specTarget = idx;
+}
 
 static void PollNetwork(void) {
     NetEvent events[32];
@@ -64,21 +87,23 @@ static void PollNetwork(void) {
 }
 
 static void HandleLocalActions(Player *me) {
-    bool kbdSwap  = IsKeyPressed(KEY_Q);
-    bool padSwap  = Pad_Pressed(PAD_LB);
+    // Downed players can't act. They lay there until revived or bled out.
+    bool canAct = me->alive && !me->downed;
+    bool kbdSwap  = IsKeyPressed(KEY_Q) && canAct;
+    bool padSwap  = Pad_Pressed(PAD_LB) && canAct;
     if (kbdSwap || padSwap) {
         int other = (me->currentSlot + 1) % INV_SLOTS;
         if (me->inventory[other].owned) me->currentSlot = other; // local predict
     }
-    if (IsKeyPressed(KEY_ONE) || Pad_Pressed(PAD_DP_LEFT))  { if (me->inventory[0].owned) me->currentSlot = 0; }
-    if (IsKeyPressed(KEY_TWO) || Pad_Pressed(PAD_DP_RIGHT)) { if (me->inventory[1].owned) me->currentSlot = 1; }
+    if (canAct && (IsKeyPressed(KEY_ONE) || Pad_Pressed(PAD_DP_LEFT)))  { if (me->inventory[0].owned) me->currentSlot = 0; }
+    if (canAct && (IsKeyPressed(KEY_TWO) || Pad_Pressed(PAD_DP_RIGHT))) { if (me->inventory[1].owned) me->currentSlot = 1; }
 
-    bool reloadEdge   = (IsKeyPressed(KEY_R) || Pad_Pressed(PAD_Y)) && me->alive;
-    bool swapEdge     = (kbdSwap || padSwap) && me->alive;
-    bool slot1Edge    = (IsKeyPressed(KEY_ONE) || Pad_Pressed(PAD_DP_LEFT))  && me->alive;
-    bool slot2Edge    = (IsKeyPressed(KEY_TWO) || Pad_Pressed(PAD_DP_RIGHT)) && me->alive;
-    bool interactEdge = (IsKeyPressed(KEY_F) || Pad_Pressed(PAD_X)) && me->alive;
-    bool meleeEdge    = (IsKeyPressed(KEY_V) || Pad_Pressed(PAD_RB)) && me->alive;
+    bool reloadEdge   = (IsKeyPressed(KEY_R) || Pad_Pressed(PAD_Y)) && canAct;
+    bool swapEdge     = (kbdSwap || padSwap);
+    bool slot1Edge    = canAct && (IsKeyPressed(KEY_ONE) || Pad_Pressed(PAD_DP_LEFT));
+    bool slot2Edge    = canAct && (IsKeyPressed(KEY_TWO) || Pad_Pressed(PAD_DP_RIGHT));
+    bool interactEdge = canAct && (IsKeyPressed(KEY_F) || Pad_Pressed(PAD_X));
+    bool meleeEdge    = canAct && (IsKeyPressed(KEY_V) || Pad_Pressed(PAD_RB));
 
     int swapTarget = -1;
     if (swapEdge) {
@@ -165,18 +190,33 @@ int main(void) {
         Interact ix = { IK_NONE, -1, 0 };
 
         bool useFlyCam = (uiState == UI_PLAY) && (!me->alive || noclipMode);
+        bool meDowned = me->alive && me->downed;
         if (uiState == UI_PLAY) {
             if (me->alive && !noclipMode) {
                 Player_ApplyLocalLook(me, mouseSens);
-                Player_ApplyLocalMove(me, dt);
+                if (!meDowned) Player_ApplyLocalMove(me, dt);
                 specInit = false; // re-init next time we detach
             }
             if (useFlyCam) {
                 if (!specInit) {
-                    specPos   = (Vector3){ me->pos.x, me->pos.y + 1.5f, me->pos.z };
-                    specYaw   = me->yaw;
-                    specPitch = me->pitch;
+                    // If we just died (not noclip) and a teammate is alive,
+                    // start the spectate cam looking over their shoulder.
+                    int snap = (!me->alive && !noclipMode) ? Spectator_NextTeammate(localPlayerIdx) : -1;
+                    if (snap >= 0) {
+                        Spectator_SnapTo(snap);
+                    } else {
+                        specPos   = (Vector3){ me->pos.x, me->pos.y + 1.5f, me->pos.z };
+                        specYaw   = me->yaw;
+                        specPitch = me->pitch;
+                        specTarget = -1;
+                    }
                     specInit  = true;
+                }
+                // Press F / A to cycle to next teammate while spectating dead.
+                if (!me->alive && !noclipMode &&
+                    (IsKeyPressed(KEY_F) || IsMouseButtonPressed(MOUSE_BUTTON_LEFT) || Pad_Pressed(PAD_A))) {
+                    int next = Spectator_NextTeammate(specTarget >= 0 ? specTarget : localPlayerIdx);
+                    if (next >= 0) Spectator_SnapTo(next);
                 }
                 Vector2 md = GetMouseDelta();
                 specYaw   += md.x * mouseSens;
@@ -203,10 +243,11 @@ int main(void) {
                 // sync so the body faces wherever the camera is looking.
                 if (noclipMode && me->alive) { me->yaw = specYaw; me->pitch = specPitch; }
             }
-            me->fireHeld     = (IsMouseButtonDown(MOUSE_BUTTON_LEFT)  || Pad_TriggerR()) && me->alive && !noclipMode;
+            bool actable = me->alive && !me->downed && !noclipMode;
+            me->fireHeld     = (IsMouseButtonDown(MOUSE_BUTTON_LEFT)  || Pad_TriggerR()) && actable;
             // E (keyboard) or holding X (gamepad) drives revive/repair.
-            me->interactHeld = (IsKeyDown(KEY_E) || Pad_Down(PAD_X))   && me->alive && !noclipMode;
-            me->adsHeld      = (IsMouseButtonDown(MOUSE_BUTTON_RIGHT) || Pad_TriggerL()) && me->alive && !noclipMode;
+            me->interactHeld = (IsKeyDown(KEY_E) || Pad_Down(PAD_X))   && actable;
+            me->adsHeld      = (IsMouseButtonDown(MOUSE_BUTTON_RIGHT) || Pad_TriggerL()) && actable;
 
             HandleLocalActions(me);
 
@@ -240,7 +281,8 @@ int main(void) {
         if (uiState == UI_PLAY) Audio_Tick(me);
 
         float eyeY = me->pos.y;
-        if (me->alive && !noclipMode && uiState == UI_PLAY && (IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_C))) eyeY -= 0.6f;
+        if (meDowned) eyeY = me->pos.y - 1.1f; // prone
+        else if (me->alive && !noclipMode && uiState == UI_PLAY && (IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_C))) eyeY -= 0.6f;
         float yawJ = 0, pitchJ = 0;
         Vector3 shakeOff = Fx_CameraOffset(&yawJ, &pitchJ);
         if (useFlyCam && specInit) {

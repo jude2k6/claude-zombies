@@ -37,11 +37,12 @@ Interact Interact_FindFor(Player *p) {
         if (d < DOOR_INTERACT_DIST && d < best.dist + 0.5f)
             best = (Interact){ IK_DOOR, i, d };
     }
-    // Downed teammates within reach
+    // Downed teammates within reach. Dead (bled out) teammates can't be
+    // revived mid-round — they respawn at the next round break.
     int meIdx = (int)(p - players);
     for (int i = 0; i < NET_MAX_PLAYERS; i++) {
         if (i == meIdx) continue;
-        if (!players[i].active || players[i].alive) continue;
+        if (!players[i].active || !players[i].downed) continue;
         Vector2 q = { players[i].pos.x, players[i].pos.z };
         float d = Vector2Distance(pXZ, q);
         if (d < INTERACT_DIST && d < best.dist) best = (Interact){ IK_REVIVE, i, d };
@@ -216,12 +217,13 @@ void Interact_UpdateRepairs(float dt) {
             int ti = ix.idx;
             if (ti < 0 || ti >= NET_MAX_PLAYERS) continue;
             Player *tgt = &players[ti];
-            if (!tgt->active || tgt->alive) continue;
+            if (!tgt->active || !tgt->downed) continue;
             tgt->reviverIdx = pi;
             tgt->reviveAsTarget += dt / REVIVE_TIME;
             revActive[ti] = true;
             if (tgt->reviveAsTarget >= 1.0f) {
-                tgt->alive = true;
+                tgt->downed = false;
+                tgt->bleedTimer = 0;
                 tgt->hp = Perk_EffMaxHP(tgt);
                 tgt->reviveAsTarget = 0;
                 tgt->reviverIdx = -1;

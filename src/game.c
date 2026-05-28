@@ -23,9 +23,18 @@ void Game_StartRound(int r) {
         windows[i].repairPlayer = -1;
     }
     for (int i = 0; i < NET_MAX_PLAYERS; i++) {
-        if (players[i].active && !players[i].alive) {
+        if (!players[i].active) continue;
+        // Anyone who was dead or downed comes back upright at full HP, on
+        // their original spawn point (re-pick from the map's spawn list).
+        bool wasOut = !players[i].alive || players[i].downed;
+        if (wasOut) {
             players[i].alive = true;
+            players[i].downed = false;
+            players[i].bleedTimer = 0;
+            players[i].reviveAsTarget = 0;
+            players[i].reviverIdx = -1;
             players[i].hp = Perk_EffMaxHP(&players[i]);
+            players[i].pos = Player_Spawn(i);
             WeaponSlot *s = &players[i].inventory[players[i].currentSlot];
             if (s->owned) {
                 int need = Weapon_EffMagSize(s) - s->ammo;
@@ -33,6 +42,7 @@ void Game_StartRound(int r) {
                 s->ammo += take; s->reserve -= take;
             }
         }
+        if (r > players[i].highestRound) players[i].highestRound = r;
     }
     gamePhase = GS_PLAY;
 }
@@ -74,6 +84,28 @@ void Game_Tick(float dt) {
     Interact_UpdateMBox(dt);
     PowerUps_Update(dt);
     PowerUps_Pickup();
+
+    // Bleed-out: downed players lose their bleed timer. When it expires they
+    // fully die. If there's nobody else upright who could revive them, the
+    // timer drains 4x faster — keeps solo-style deaths snappy.
+    for (int i = 0; i < NET_MAX_PLAYERS; i++) {
+        Player *p = &players[i];
+        if (!p->active || !p->alive || !p->downed) continue;
+        int rescuers = 0;
+        for (int j = 0; j < NET_MAX_PLAYERS; j++) {
+            if (j == i) continue;
+            if (players[j].active && players[j].alive && !players[j].downed) rescuers++;
+        }
+        float rate = (rescuers > 0) ? 1.0f : 4.0f;
+        p->bleedTimer -= dt * rate;
+        if (p->bleedTimer <= 0) {
+            p->bleedTimer = 0;
+            p->downed = false;
+            p->alive = false;
+            p->reviveAsTarget = 0;
+            p->reviverIdx = -1;
+        }
+    }
 
     if (gamePhase == GS_PLAY) {
         if (Player_AliveActiveCount() == 0 && Player_ActiveCount() > 0) {

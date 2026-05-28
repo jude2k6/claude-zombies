@@ -43,6 +43,8 @@ static GamePhase hudLastPhase = GS_PRE_GAME;
 static int       hudLastRound = 0;
 static float     hudBonusToastTimer = 0.0f;
 static int       hudBonusToastAmount = 0;
+static float     hudRoundSplashTimer = 0.0f;
+static int       hudRoundSplashRound = 0;
 
 static void HudUpdateFeedback(Player *me, float dt) {
     if (hudLastShotsHit < 0) { hudLastShotsHit = me->shotsHit; hudLastHeadshots = me->headshots; }
@@ -76,12 +78,53 @@ static void HudUpdateFeedback(Player *me, float dt) {
         hudBonusToastAmount = 50 + roundNum * 10;
         hudBonusToastTimer  = 2.5f;
     }
+    // Transition into a fresh round (PRE_GAME or ROUND_BREAK → PLAY): big splash.
+    if (gamePhase == GS_PLAY && hudLastPhase != GS_PLAY && roundNum > 0) {
+        hudRoundSplashTimer = 2.6f;
+        hudRoundSplashRound = roundNum;
+    }
     hudLastPhase = gamePhase;
     hudLastRound = roundNum;
 
-    if (hudHitMarkerTimer  > 0) hudHitMarkerTimer  -= dt;
-    if (hudDmgDirTimer     > 0) hudDmgDirTimer     -= dt;
-    if (hudBonusToastTimer > 0) hudBonusToastTimer -= dt;
+    if (hudHitMarkerTimer    > 0) hudHitMarkerTimer    -= dt;
+    if (hudDmgDirTimer       > 0) hudDmgDirTimer       -= dt;
+    if (hudBonusToastTimer   > 0) hudBonusToastTimer   -= dt;
+    if (hudRoundSplashTimer  > 0) hudRoundSplashTimer  -= dt;
+}
+
+static void HudDrawRoundSplash(int sw, int sh) {
+    if (hudRoundSplashTimer <= 0) return;
+    float t = hudRoundSplashTimer / 2.6f;          // 1 → 0
+    float fadeIn  = 1.0f - (t - 0.6f) / 0.4f;      // first 0.4s fade-in
+    if (fadeIn > 1) fadeIn = 1; if (fadeIn < 0) fadeIn = 0;
+    float fadeOut = (t < 0.4f) ? (t / 0.4f) : 1.0f; // last 0.4s fade-out
+    float a = fadeIn * fadeOut;
+    // Letters drop in from above; settle by mid-life.
+    float settleP = 1.0f - t;
+    if (settleP > 1) settleP = 1; if (settleP < 0) settleP = 0;
+    float ease = 1.0f - (1.0f - settleP) * (1.0f - settleP);
+    int dropY = (int)((1.0f - ease) * -160.0f);
+
+    char rd[24]; snprintf(rd, sizeof rd, "ROUND  %d", hudRoundSplashRound);
+    int fs = 96;
+    int rw = MeasureText(rd, fs);
+    int x = sw/2 - rw/2;
+    int y = sh/3 + dropY;
+    unsigned char A   = (unsigned char)(220 * a);
+    unsigned char Aof = (unsigned char)(180 * a);
+    // Black panel behind so it pops over the world.
+    DrawRectangle(0, y - 14, sw, fs + 28, (Color){0,0,0,(unsigned char)(120 * a)});
+    DrawText(rd, x + 4, y + 4, fs, (Color){0, 0, 0, Aof});
+    DrawText(rd, x, y, fs, (Color){220, 50, 50, A});
+
+    // Subtitle: zombie count for the round.
+    int totalZ = enemiesAlive + enemiesToSpawn;
+    char sub[64];
+    if (totalZ > 0) snprintf(sub, sizeof sub, "%d  ZOMBIES INCOMING", totalZ);
+    else            snprintf(sub, sizeof sub, "BRACE  YOURSELF");
+    int subFs = 22;
+    int sw2 = MeasureText(sub, subFs);
+    DrawText(sub, sw/2 - sw2/2, y + fs + 8, subFs, (Color){220, 220, 220, A});
 }
 
 static void HudDrawCrosshair(int cx, int cy, Player *me, Color cross) {
@@ -354,10 +397,13 @@ void Hud_Draw(int sw, int sh, Player *me, Interact ix) {
             if (!players[i].active) continue;
             DrawRectangle(rx + 6, ry + 4 + row*rh + 4, 14, 14, PLAYER_COLORS[i]);
             char ln[64];
-            snprintf(ln, sizeof ln, "%s", players[i].name[0] ? players[i].name : "Player");
-            Color tc = players[i].alive ? RAYWHITE : (Color){180,80,80,255};
+            const char *suffix = players[i].downed ? "  (DOWN)" : (!players[i].alive ? "  (DEAD)" : "");
+            snprintf(ln, sizeof ln, "%s%s", players[i].name[0] ? players[i].name : "Player", suffix);
+            Color tc = (players[i].alive && !players[i].downed) ? RAYWHITE : (Color){220,90,90,255};
             DrawText(ln, rx + 26, ry + 4 + row*rh + 2, 16, tc);
-            char hpStr[32]; snprintf(hpStr, sizeof hpStr, "%d", players[i].hp);
+            char hpStr[32];
+            if (players[i].downed) snprintf(hpStr, sizeof hpStr, "%.0fs", players[i].bleedTimer);
+            else                   snprintf(hpStr, sizeof hpStr, "%d", players[i].hp);
             DrawText(hpStr, rx + 150, ry + 4 + row*rh + 2, 16, tc);
             row++;
         }
@@ -470,13 +516,32 @@ void Hud_Draw(int sw, int sh, Player *me, Interact ix) {
         DrawText(sub, cx - sw2/2, sh/2 + 30, 24, RAYWHITE);
     }
 
-    if (!me->alive && gamePhase != GS_GAME_OVER) {
-        DrawRectangle(0, sh/2 - 40, sw, 80, (Color){80, 0, 0, 160});
-        const char *down = "YOU ARE DOWN  —  revive at next round";
-        int dw = MeasureText(down, 28);
-        DrawText(down, sw/2 - dw/2, sh/2 - 14, 28, RAYWHITE);
+    if (me->alive && me->downed) {
+        DrawRectangle(0, sh/2 - 50, sw, 100, (Color){120, 0, 0, 170});
+        const char *title = "YOU ARE DOWN";
+        int tw1 = MeasureText(title, 36);
+        DrawText(title, sw/2 - tw1/2, sh/2 - 30, 36, RAYWHITE);
+        char sub[96];
+        int rescuers = 0;
+        for (int i = 0; i < NET_MAX_PLAYERS; i++)
+            if (i != localPlayerIdx && players[i].active && players[i].alive && !players[i].downed) rescuers++;
+        if (rescuers > 0)
+            snprintf(sub, sizeof sub, "Hold on — bleeding out in %.0fs", me->bleedTimer);
+        else
+            snprintf(sub, sizeof sub, "No one to revive you — bleeding out in %.0fs", me->bleedTimer);
+        int sw3 = MeasureText(sub, 20);
+        DrawText(sub, sw/2 - sw3/2, sh/2 + 14, 20, (Color){240, 220, 220, 230});
+    } else if (!me->alive && gamePhase != GS_GAME_OVER) {
+        DrawRectangle(0, sh/2 - 50, sw, 100, (Color){0, 0, 0, 170});
+        const char *title = "SPECTATING";
+        int tw1 = MeasureText(title, 36);
+        DrawText(title, sw/2 - tw1/2, sh/2 - 30, 36, RAYWHITE);
+        const char *sub = "Respawn at next round  -  [F / A] cycle teammate";
+        int sw3 = MeasureText(sub, 20);
+        DrawText(sub, sw/2 - sw3/2, sh/2 + 14, 20, (Color){220, 220, 220, 220});
     }
 
     HudDrawBonusToast(sw, sh);
+    HudDrawRoundSplash(sw, sh);
     if (IsKeyDown(KEY_TAB) || Pad_Down(PAD_BACK)) HudDrawScoreboard(sw, sh);
 }

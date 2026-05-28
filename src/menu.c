@@ -122,7 +122,11 @@ void Menu_StartSoloGame(void) {
     Level_Reset();
     Player_ResetForGame(0, playerName);
     PowerUps_ClearAll();
-    Game_StartRound(1);
+    Enemies_ClearAll();
+    Bullets_ClearAll();
+    // Start in the round-break: GS_ROUND_BREAK with roundNum=0 rolls into
+    // Game_StartRound(1) cleanly. Avoids the round-1 skip the prior code had.
+    roundNum = 0;
     gamePhase = GS_ROUND_BREAK;
     roundBreakTimer = 3.0f;
     uiState = UI_PLAY;
@@ -147,7 +151,9 @@ void Menu_StartHostedGame(void) {
     LoadSelectedMap();
     Level_Reset();
     PowerUps_ClearAll();
-    Game_StartRound(1);
+    Enemies_ClearAll();
+    Bullets_ClearAll();
+    roundNum = 0;
     gamePhase = GS_ROUND_BREAK;
     roundBreakTimer = 3.0f;
     PktStart s = { .type = PKT_START };
@@ -406,21 +412,32 @@ void Menu_DrawPause(int sw, int sh) {
 }
 
 void Menu_DrawGameOver(int sw, int sh) {
-    DrawRectangle(0, 0, sw, sh, (Color){120, 0, 0, 170});
+    // Dim the world behind, slight red tint.
+    DrawRectangle(0, 0, sw, sh, (Color){10, 0, 0, 180});
+
     const char *msg = "GAME OVER";
-    int fs = 72; int tw = MeasureText(msg, fs);
-    DrawText(msg, sw/2 - tw/2, 60, fs, RAYWHITE);
-    char rb[96]; snprintf(rb, sizeof rb, "Round %d reached", roundNum);
-    int rw = MeasureText(rb, 26);
-    DrawText(rb, sw/2 - rw/2, 60 + fs + 10, 26, RAYWHITE);
+    int fs = 76; int tw = MeasureText(msg, fs);
+    DrawText(msg, sw/2 - tw/2 + 3, 40 + 3, fs, (Color){80, 0, 0, 255});
+    DrawText(msg, sw/2 - tw/2,     40,     fs, (Color){230, 60, 60, 255});
+
+    // Big "Round X reached" centerpiece.
+    char rb[64]; snprintf(rb, sizeof rb, "REACHED  ROUND  %d", roundNum);
+    int rfs = 36;
+    int rw = MeasureText(rb, rfs);
+    DrawText(rb, sw/2 - rw/2, 130, rfs, (Color){220, 220, 220, 240});
+
+    // Find MVP (highest points).
+    int mvpIdx = -1, mvpPts = -1;
+    for (int i = 0; i < NET_MAX_PLAYERS; i++)
+        if (players[i].active && players[i].points > mvpPts) { mvpPts = players[i].points; mvpIdx = i; }
 
     // Stats table
-    int activePlayers = Player_ActiveCount();
     int colW = 110;
-    int totalW = 220 + colW * 7;
+    int totalW = 220 + colW * 6;
     int x0 = sw/2 - totalW/2;
-    int y0 = 220;
+    int y0 = 210;
 
+    DrawRectangle(x0 - 20, y0 - 14, totalW + 40, 24, (Color){0,0,0,180});
     DrawText("PLAYER",     x0,                       y0, 18, (Color){220,220,220,255});
     DrawText("POINTS",     x0 + 220,                 y0, 18, YELLOW);
     DrawText("KILLS",      x0 + 220 + colW,          y0, 18, RAYWHITE);
@@ -430,12 +447,21 @@ void Menu_DrawGameOver(int sw, int sh) {
     DrawText("REVIVES",    x0 + 220 + colW*5,        y0, 18, RAYWHITE);
     DrawLine(x0, y0 + 24, x0 + totalW, y0 + 24, (Color){200,200,200,180});
 
+    int teamKills = 0, teamHeads = 0, teamMelee = 0, teamRevives = 0;
+    int teamPoints = 0, teamFired = 0, teamHit = 0;
     int row = 0;
     for (int i = 0; i < NET_MAX_PLAYERS; i++) {
         if (!players[i].active) continue;
         Player *p = &players[i];
-        int yr = y0 + 36 + row * 26;
-        DrawText(p->name[0] ? p->name : "Player", x0, yr, 18, RAYWHITE);
+        int yr = y0 + 36 + row * 28;
+        if (i == mvpIdx) DrawRectangle(x0 - 20, yr - 4, totalW + 40, 26, (Color){80, 60, 0, 120});
+
+        const char *nameStr = p->name[0] ? p->name : "Player";
+        if (i == mvpIdx) {
+            DrawText("MVP", x0 - 64, yr, 18, (Color){240, 220, 60, 255});
+        }
+        DrawText(nameStr, x0, yr, 18, RAYWHITE);
+
         char buf[32];
         snprintf(buf, sizeof buf, "%d",  p->points);     DrawText(buf, x0 + 220,           yr, 18, YELLOW);
         snprintf(buf, sizeof buf, "%d",  p->kills);      DrawText(buf, x0 + 220 + colW,    yr, 18, RAYWHITE);
@@ -444,9 +470,26 @@ void Menu_DrawGameOver(int sw, int sh) {
         float acc = (p->shotsFired > 0) ? 100.0f * p->shotsHit / p->shotsFired : 0.0f;
         snprintf(buf, sizeof buf, "%.1f", acc);          DrawText(buf, x0 + 220 + colW*4,  yr, 18, RAYWHITE);
         snprintf(buf, sizeof buf, "%d",  p->revives);    DrawText(buf, x0 + 220 + colW*5,  yr, 18, RAYWHITE);
+        teamKills += p->kills;       teamHeads  += p->headshots;
+        teamMelee += p->meleeKills;  teamRevives += p->revives;
+        teamPoints += p->points;     teamFired  += p->shotsFired; teamHit += p->shotsHit;
         row++;
     }
-    (void)activePlayers;
+
+    if (row > 1) {
+        // Team totals line.
+        int yr = y0 + 36 + row * 28 + 6;
+        DrawLine(x0, yr - 6, x0 + totalW, yr - 6, (Color){200,200,200,140});
+        DrawText("TEAM", x0, yr, 18, (Color){200,200,200,200});
+        char buf[32];
+        snprintf(buf, sizeof buf, "%d",  teamPoints);  DrawText(buf, x0 + 220,           yr, 18, YELLOW);
+        snprintf(buf, sizeof buf, "%d",  teamKills);   DrawText(buf, x0 + 220 + colW,    yr, 18, (Color){200,200,200,200});
+        snprintf(buf, sizeof buf, "%d",  teamHeads);   DrawText(buf, x0 + 220 + colW*2,  yr, 18, (Color){200,200,200,200});
+        snprintf(buf, sizeof buf, "%d",  teamMelee);   DrawText(buf, x0 + 220 + colW*3,  yr, 18, (Color){200,200,200,200});
+        float teamAcc = (teamFired > 0) ? 100.0f * teamHit / teamFired : 0.0f;
+        snprintf(buf, sizeof buf, "%.1f", teamAcc);    DrawText(buf, x0 + 220 + colW*4,  yr, 18, (Color){200,200,200,200});
+        snprintf(buf, sizeof buf, "%d",  teamRevives); DrawText(buf, x0 + 220 + colW*5,  yr, 18, (Color){200,200,200,200});
+    }
 
     int bw = 260, bh = 50, bx = sw/2 - bw/2, by = sh - 120;
     GuiSetStyle(DEFAULT, TEXT_SIZE, 22);

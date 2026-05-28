@@ -254,10 +254,28 @@ void Enemies_Update(float dt) {
             Vector2 eXZ = { e->pos.x, e->pos.z };
             if (Vector2Distance(pXZ, eXZ) < PLAYER_RADIUS + ENEMY_RADIUS + 0.1f && e->touchTimer <= 0) {
                 bool cheatProtected = godMode && (int)(tp - players) == localPlayerIdx;
+                // Downed players are incapacitated — only the bleed timer kills them.
+                if (tp->downed) cheatProtected = true;
                 if (!cheatProtected) {
                     tp->hp -= ENEMY_DAMAGE;
                     tp->damageFlash = 0.5f;
-                    if (tp->hp <= 0) { tp->hp = 0; tp->alive = false; }
+                    if (tp->hp <= 0) {
+                        tp->hp = 0;
+                        // Drop into downed state if a teammate can possibly
+                        // revive us, otherwise die outright (solo flow).
+                        int otherUp = 0;
+                        int meIdx = (int)(tp - players);
+                        for (int j = 0; j < NET_MAX_PLAYERS; j++) {
+                            if (j == meIdx) continue;
+                            if (players[j].active && players[j].alive && !players[j].downed) otherUp++;
+                        }
+                        if (otherUp > 0) {
+                            tp->downed = true;
+                            tp->bleedTimer = BLEED_TIME;
+                        } else {
+                            tp->alive = false;
+                        }
+                    }
                     if ((int)(tp - players) == localPlayerIdx) {
                         Fx_PunchAndRumble(tp->hp <= 0 ? 0.65f : 0.30f,
                                           0.55f, 0.55f, 0.15f);

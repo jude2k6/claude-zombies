@@ -43,6 +43,8 @@
 #define INV_SLOTS           2
 #define INTERACT_DIST       3.0f
 #define DOOR_INTERACT_DIST  3.5f
+#define BLEED_TIME         30.0f
+#define ROUND_RESPAWN_DELAY 1.0f
 
 #define HIT_POINTS         10
 #define KILL_POINTS        50
@@ -149,6 +151,13 @@ typedef struct {
     // Target for hold-action (revive)
     float      reviveAsTarget;  // progress while another player revives THIS one
     int        reviverIdx;       // who is reviving us, -1 if none
+
+    // Downed/spectator state. `alive` stays true while downed; `downed` lets
+    // the player be revived. `bleedTimer` ticks while downed, and on expiry
+    // we transition to alive=false (full death + spectator until next round).
+    bool       downed;
+    float      bleedTimer;
+    int        highestRound;  // peak round this player reached this match
 } Player;
 
 // ============================================================================

@@ -53,6 +53,7 @@ add_executable(shooter
     src/menu.c
     src/pad.c
     src/fx.c
+    src/audio.c
 )
 target_include_directories(shooter PRIVATE
     ${raygui_SOURCE_DIR}/src

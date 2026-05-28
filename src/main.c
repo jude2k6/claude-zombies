@@ -19,6 +19,7 @@
 #include "menu.h"
 #include "pad.h"
 #include "fx.h"
+#include "audio.h"
 
 #include <stdio.h>
 #include <stdint.h>
@@ -121,6 +122,7 @@ int main(void) {
 
     GuiSetStyle(DEFAULT, TEXT_SIZE, 16);
 
+    Audio_Init();
     Level_Build();
     Menu_ScanMaps();
     for (int i = 0; i < NET_MAX_PLAYERS; i++) memset(&players[i], 0, sizeof players[i]);
@@ -233,6 +235,7 @@ int main(void) {
         }
 
         Fx_Tick(dt);
+        if (uiState == UI_PLAY) Audio_Tick(me);
 
         float eyeY = me->pos.y;
         if (me->alive && !noclipMode && uiState == UI_PLAY && (IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_C))) eyeY -= 0.6f;
@@ -279,6 +282,7 @@ int main(void) {
         EndDrawing();
     }
 
+    Audio_Shutdown();
     Net_Shutdown();
     CloseWindow();
     return 0;

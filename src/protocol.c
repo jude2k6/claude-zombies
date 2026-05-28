@@ -374,7 +374,21 @@ void Protocol_ClientHandlePacket(uint8_t *data, size_t len, const char *playerNa
             players[i].name[31] = 0;
         }
     }
-    else if (type == PKT_START) {
+    else if (type == PKT_START && len >= sizeof(PktStart)) {
+        PktStart *s = (PktStart *)data;
+        // Match the host's selected map by name. If we don't have it locally,
+        // fall back to whatever Level_Build picked up at startup.
+        if (s->mapName[0]) {
+            bool loaded = false;
+            for (int i = 0; i < mapListCount; i++) {
+                if (strncmp(mapList[i].name, s->mapName, sizeof mapList[0].name) == 0) {
+                    if (Level_LoadFromFile(mapList[i].path)) { loaded = true; selectedMapIdx = i; }
+                    break;
+                }
+            }
+            if (!loaded) Level_Build();
+            Level_Reset();
+        }
         uiState = UI_PLAY;
     }
     else if (type == PKT_SNAPSHOT) {

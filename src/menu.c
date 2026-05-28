@@ -60,6 +60,43 @@ static void LoadSelectedMap(void) {
     Level_Build();
 }
 
+// Renders a < MAP: name > picker as a horizontal row centered on x. Returns
+// the row height. Disabled (read-only label) when canEdit is false.
+static int DrawMapPicker(int cx, int y, bool canEdit) {
+    int mw = 240, ah = 36;
+    int rowW = mw + 2 * ah + 16;
+    int x = cx - rowW / 2;
+    if (mapListCount == 0) {
+        const char *no = "(no maps found)";
+        int tw = MeasureText(no, 20);
+        DrawText(no, cx - tw/2, y + ah/2 - 10, 20, GRAY);
+        return ah;
+    }
+    if (canEdit) {
+        if (GuiButton((Rectangle){x, y, ah, ah}, "<")) {
+            selectedMapIdx = (selectedMapIdx - 1 + mapListCount) % mapListCount;
+        }
+    } else {
+        DrawRectangle(x, y, ah, ah, (Color){40,45,55,255});
+        DrawText("<", x + ah/2 - 4, y + ah/2 - 8, 18, GRAY);
+    }
+    char label[80];
+    snprintf(label, sizeof label, "MAP:  %s", mapList[selectedMapIdx].name);
+    int lw = MeasureText(label, 20);
+    DrawRectangle(x + ah + 8, y, mw, ah, (Color){25,30,40,255});
+    DrawRectangleLines(x + ah + 8, y, mw, ah, (Color){200,200,200,180});
+    DrawText(label, x + ah + 8 + mw/2 - lw/2, y + ah/2 - 10, 20, RAYWHITE);
+    if (canEdit) {
+        if (GuiButton((Rectangle){x + ah + 8 + mw + 8, y, ah, ah}, ">")) {
+            selectedMapIdx = (selectedMapIdx + 1) % mapListCount;
+        }
+    } else {
+        DrawRectangle(x + ah + 8 + mw + 8, y, ah, ah, (Color){40,45,55,255});
+        DrawText(">", x + ah + 8 + mw + 8 + ah/2 - 4, y + ah/2 - 8, 18, GRAY);
+    }
+    return ah;
+}
+
 static const Color PLAYER_COLORS[NET_MAX_PLAYERS] = {
     {220, 80, 80, 255}, {80, 120, 220, 255}, {90, 200, 90, 255}, {220, 200, 80, 255},
 };
@@ -114,6 +151,9 @@ void Menu_StartHostedGame(void) {
     gamePhase = GS_ROUND_BREAK;
     roundBreakTimer = 3.0f;
     PktStart s = { .type = PKT_START };
+    if (mapListCount > 0 && selectedMapIdx >= 0 && selectedMapIdx < mapListCount) {
+        strncpy(s.mapName, mapList[selectedMapIdx].name, sizeof s.mapName - 1);
+    }
     Net_Broadcast(&s, sizeof s, true);
     uiState = UI_PLAY;
 }
@@ -140,31 +180,11 @@ void Menu_DrawMenu(int sw, int sh) {
     int tagw = MeasureText(tagline, 20);
     DrawText(tagline, sw/2 - tagw/2, sh/6 + ts + 16, 20, (Color){200,200,200,255});
 
-    int bw = 260, bh = 50, bx = sw/2 - bw/2, by = sh/2 - 110;
+    int bw = 260, bh = 50, bx = sw/2 - bw/2, by = sh/2 - 80;
     GuiSetStyle(DEFAULT, TEXT_SIZE, 22);
-
-    // Map picker row (only if we found at least one map)
-    if (mapListCount > 0) {
-        int mw = 220, ah = 36;
-        int mx = sw/2 - (mw + 2*ah + 16)/2;
-        int my = by;
-        if (GuiButton((Rectangle){mx, my, ah, ah}, "<")) {
-            selectedMapIdx = (selectedMapIdx - 1 + mapListCount) % mapListCount;
-        }
-        char label[80]; snprintf(label, sizeof label, "MAP:  %s", mapList[selectedMapIdx].name);
-        int lw = MeasureText(label, 20);
-        DrawRectangle(mx + ah + 8, my, mw, ah, (Color){25,30,40,255});
-        DrawRectangleLines(mx + ah + 8, my, mw, ah, (Color){200,200,200,180});
-        DrawText(label, mx + ah + 8 + mw/2 - lw/2, my + ah/2 - 10, 20, RAYWHITE);
-        if (GuiButton((Rectangle){mx + ah + 8 + mw + 8, my, ah, ah}, ">")) {
-            selectedMapIdx = (selectedMapIdx + 1) % mapListCount;
-        }
-        by += 56;
-    }
-
-    if (GuiButton((Rectangle){bx, by,        bw, bh}, "HOST GAME"))   Menu_StartHosting();
-    if (GuiButton((Rectangle){bx, by + 64,   bw, bh}, "JOIN GAME"))   { uiState = UI_JOIN_INPUT; statusMsg[0]=0; }
-    if (GuiButton((Rectangle){bx, by + 128,  bw, bh}, "SOLO PLAY"))   Menu_StartSoloGame();
+    if (GuiButton((Rectangle){bx, by,        bw, bh}, "SOLO PLAY"))   { uiState = UI_SOLO_LOBBY; statusMsg[0]=0; }
+    if (GuiButton((Rectangle){bx, by + 64,   bw, bh}, "HOST GAME"))   Menu_StartHosting();
+    if (GuiButton((Rectangle){bx, by + 128,  bw, bh}, "JOIN GAME"))   { uiState = UI_JOIN_INPUT; statusMsg[0]=0; }
     if (GuiButton((Rectangle){bx, by + 192,  bw, bh}, "SETTINGS"))    uiState = UI_SETTINGS;
     if (GuiButton((Rectangle){bx, by + 256,  bw, bh}, "QUIT"))        { CloseWindow(); exit(0); }
     GuiSetStyle(DEFAULT, TEXT_SIZE, 16);
@@ -254,6 +274,24 @@ void Menu_DrawConnecting(int sw, int sh) {
     GuiSetStyle(DEFAULT, TEXT_SIZE, 16);
 }
 
+void Menu_DrawSoloLobby(int sw, int sh) {
+    DrawRectangle(0, 0, sw, sh, (Color){15, 18, 25, 255});
+    const char *t = "SOLO";
+    int ts = 56; int tw = MeasureText(t, ts);
+    DrawText(t, sw/2 - tw/2, 60, ts, RAYWHITE);
+
+    const char *sub = "Choose a map, then start your run.";
+    int sbw = MeasureText(sub, 20);
+    DrawText(sub, sw/2 - sbw/2, 60 + ts + 12, 20, (Color){200,200,200,255});
+
+    DrawMapPicker(sw/2, sh/2 - 40, true);
+
+    GuiSetStyle(DEFAULT, TEXT_SIZE, 22);
+    if (GuiButton((Rectangle){sw/2 - 200, sh - 110, 180, 50}, "START")) Menu_StartSoloGame();
+    if (GuiButton((Rectangle){sw/2 +  20, sh - 110, 180, 50}, "BACK"))  uiState = UI_MENU;
+    GuiSetStyle(DEFAULT, TEXT_SIZE, 16);
+}
+
 void Menu_DrawLobby(int sw, int sh, bool isHost) {
     DrawRectangle(0, 0, sw, sh, (Color){15, 18, 25, 255});
     const char *t = isHost ? "HOST  LOBBY" : "WAITING FOR HOST";
@@ -301,6 +339,17 @@ void Menu_DrawLobby(int sw, int sh, bool isHost) {
         Color tc = players[i].active ? RAYWHITE : GRAY;
         DrawText(line, sw/2 - 180, ry + 8, 22, tc);
         if (i == localPlayerIdx) DrawText("(you)", sw/2 + 140, ry + 10, 18, YELLOW);
+    }
+
+    // Map picker sits between the player list and the action buttons. Only
+    // the host can change it; clients see the host's selection at start time
+    // via PktStart.
+    int pickerY = listY + 4 * rowH + 18;
+    if (isHost) {
+        const char *mh = "Map";
+        int mhw = MeasureText(mh, 18);
+        DrawText(mh, sw/2 - mhw/2, pickerY, 18, (Color){200,200,200,200});
+        DrawMapPicker(sw/2, pickerY + 22, true);
     }
 
     GuiSetStyle(DEFAULT, TEXT_SIZE, 22);

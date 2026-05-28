@@ -20,7 +20,7 @@ typedef struct {
     uint8_t active[NET_MAX_PLAYERS];
     char    names[NET_MAX_PLAYERS][32];
 } PktLobby;
-typedef struct { uint8_t type; } PktStart;
+typedef struct { uint8_t type; char mapName[64]; } PktStart;
 typedef struct {
     uint8_t type;
     float   px, py, pz;

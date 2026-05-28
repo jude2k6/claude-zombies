@@ -1,6 +1,7 @@
 #include "weapons.h"
 #include "player.h"
 #include "level.h"
+#include "fx.h"
 #include "raymath.h"
 #include <math.h>
 
@@ -87,7 +88,17 @@ void Weapon_Fire(Player *p) {
     s->ammo--;
     s->fireTimer = Weapon_EffFireCD(p, s);
     p->shotsFired += w->pellets;
-    if (ownerIdx == localPlayerIdx) muzzleFlashLocal = 0.05f;
+    if (ownerIdx == localPlayerIdx) {
+        muzzleFlashLocal = 0.05f;
+        // Per-weapon recoil/rumble feel.
+        switch (s->weaponIdx) {
+            case W_SHOTGUN: Fx_PunchAndRumble(0.35f, 0.6f, 0.35f, 0.12f); break;
+            case W_RIFLE:   Fx_PunchAndRumble(0.22f, 0.45f, 0.30f, 0.08f); break;
+            case W_RAYGUN:  Fx_PunchAndRumble(0.28f, 0.30f, 0.55f, 0.10f); break;
+            case W_SMG:     Fx_PunchAndRumble(0.08f, 0.25f, 0.20f, 0.05f); break;
+            default:        Fx_PunchAndRumble(0.10f, 0.30f, 0.25f, 0.06f); break;
+        }
+    }
 }
 
 void Weapon_StartReload(Player *p) {

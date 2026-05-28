@@ -7,6 +7,7 @@
 #include "game.h"
 #include "entities.h"
 #include "pad.h"
+#include "fx.h"
 #include "raygui.h"
 #include "raymath.h"
 #include <math.h>
@@ -188,65 +189,128 @@ void Hud_Draw(int sw, int sh, Player *me, Interact ix) {
     HudDrawHitMarker(cx, cy);
     HudDrawDamageDir(cx, cy, me);
 
+    // Hit-flash from being struck.
     if (me->damageFlash > 0) {
         unsigned char a = (unsigned char)(me->damageFlash * 180);
         DrawRectangle(0, 0, sw, sh, (Color){180, 0, 0, a});
     }
-
-    DrawRectangle(10, 10, 280, 120, (Color){0,0,0,140});
-    DrawRectangleLines(10, 10, 280, 120, (Color){200,200,200,180});
+    // Nuke / big-flash effect (FX-driven white wash).
+    if (fxFlashAmount > 0) {
+        unsigned char a = (unsigned char)(fxFlashAmount * 220);
+        DrawRectangle(0, 0, sw, sh, (Color){255, 255, 255, a});
+    }
+    // Low-HP red vignette (radial-ish: 4 edge bands).
+    int hpMax = Perk_EffMaxHP(me);
+    float hpFrac = (hpMax > 0) ? ((float)me->hp / (float)hpMax) : 0.0f;
+    if (hpFrac < 0.4f && me->alive) {
+        float t = 1.0f - (hpFrac / 0.4f);   // 0..1 intensity
+        float pulse = 0.65f + 0.35f * sinf((float)GetTime() * 6.0f);
+        unsigned char a = (unsigned char)(t * pulse * 180);
+        int band = (int)(t * 140) + 40;
+        DrawRectangle(0,         0,         sw,   band, (Color){180, 20, 20, a});
+        DrawRectangle(0,         sh - band, sw,   band, (Color){180, 20, 20, a});
+        DrawRectangle(0,         0,         band, sh,   (Color){180, 20, 20, a});
+        DrawRectangle(sw - band, 0,         band, sh,   (Color){180, 20, 20, a});
+    }
 
     char buf[96];
-    DrawText("HP", 22, 22, 18, RAYWHITE);
-    float hpf = (float)me->hp, hpMax = (float)Perk_EffMaxHP(me);
-    GuiProgressBar((Rectangle){62, 22, 215, 18}, NULL, NULL, &hpf, 0.0f, hpMax);
-    snprintf(buf, sizeof buf, "%d / %d", me->hp, Perk_EffMaxHP(me));
-    DrawText(buf, 145, 22, 16, RAYWHITE);
-    // Stamina sliver under HP
-    {
-        float s = me->stamina;
-        GuiProgressBar((Rectangle){62, 42, 215, 6}, NULL, NULL, &s, 0.0f, 100.0f);
-    }
-    snprintf(buf, sizeof buf, "POINTS  %d", me->points);
-    DrawText(buf, 22, 52, 22, YELLOW);
-    snprintf(buf, sizeof buf, "ROUND  %d", roundNum);
-    DrawText(buf, 22, 80, 22, SKYBLUE);
-    snprintf(buf, sizeof buf, "ZOMBIES LEFT  %d", enemiesAlive + enemiesToSpawn);
-    DrawText(buf, 22, 106, 16, RAYWHITE);
 
+    // Top-center: round number with zombies-remaining underneath. Big and
+    // unframed, COD-style.
+    {
+        char rd[24]; snprintf(rd, sizeof rd, "%d", roundNum);
+        int fs = 56;
+        int rw = MeasureText(rd, fs);
+        DrawText(rd, sw/2 - rw/2 + 2, 22, fs, (Color){0,0,0,200});
+        DrawText(rd, sw/2 - rw/2,     20, fs, (Color){220, 60, 60, 255});
+        char zsub[40]; snprintf(zsub, sizeof zsub, "Zombies  %d", enemiesAlive + enemiesToSpawn);
+        int zw = MeasureText(zsub, 18);
+        DrawText(zsub, sw/2 - zw/2, 20 + fs + 4, 18, (Color){220,220,220,220});
+    }
+
+    // Bottom-left: compact HP bar (no panel chrome) + stamina sliver below.
+    // Sits above the perk icons.
+    {
+        int barW = 280, barH = 18;
+        int bx = 24, by = sh - 100;
+        DrawRectangle(bx - 2, by - 2, barW + 4, barH + 4, (Color){0,0,0,160});
+        Color hpCol = (hpFrac > 0.66f) ? (Color){80,200,80,230}
+                    : (hpFrac > 0.33f) ? (Color){220,200,60,230}
+                                       : (Color){220,60,60,230};
+        DrawRectangle(bx, by, (int)(barW * hpFrac), barH, hpCol);
+        DrawRectangleLines(bx - 2, by - 2, barW + 4, barH + 4, (Color){0,0,0,200});
+        snprintf(buf, sizeof buf, "%d / %d", me->hp, hpMax);
+        DrawText(buf, bx + 6, by - 1, 16, RAYWHITE);
+        // Stamina
+        int sy = by + barH + 4;
+        DrawRectangle(bx - 2, sy - 1, barW + 4, 7, (Color){0,0,0,160});
+        DrawRectangle(bx, sy, (int)(barW * me->stamina / 100.0f), 5, (Color){200,200,255,200});
+    }
+
+    // Bottom-center: points (small but always visible).
+    {
+        snprintf(buf, sizeof buf, "%d", me->points);
+        int fs = 28;
+        int tw = MeasureText(buf, fs);
+        DrawText(buf, sw/2 - tw/2 + 2, sh - 44 + 2, fs, (Color){0,0,0,200});
+        DrawText(buf, sw/2 - tw/2,     sh - 44,     fs, (Color){240, 220, 60, 255});
+        const char *plbl = "POINTS";
+        int plw = MeasureText(plbl, 12);
+        DrawText(plbl, sw/2 - plw/2, sh - 16, 12, (Color){200,200,200,180});
+    }
+
+    // Bottom-right: weapon + ammo, large, no boxed frame. Big ammo number.
     WeaponSlot *cur = &me->inventory[me->currentSlot];
     const WeaponDef *cw = &WEAPONS[cur->weaponIdx];
     const char *displayName = cur->packed ? cw->packedName : cw->name;
+    {
+        int rx = sw - 24, ry = sh - 90;
+        Color nameCol = cur->packed ? (Color){220,180,255,255} : RAYWHITE;
 
-    int panelW = 340, panelH = 110;
-    int px = sw - panelW - 10, py = sh - panelH - 10;
-    DrawRectangle(px, py, panelW, panelH, (Color){0,0,0,160});
-    DrawRectangleLines(px, py, panelW, panelH,
-                       cur->packed ? (Color){200,150,255,255} : (Color){200,200,200,180});
-    DrawRectangle(px + 8, py + 8, 14, panelH - 16, cw->tint);
-
-    if (cur->reloadTimer > 0) {
-        DrawText("RELOADING...", px + 32, py + 14, 22, ORANGE);
-        float t = 1.0f - (cur->reloadTimer / Weapon_EffReload(me, cur));
-        GuiProgressBar((Rectangle){px + 32, py + 46, panelW - 50, 14}, NULL, NULL, &t, 0.0f, 1.0f);
-    } else if (pap.activeTimer > 0 && pap.ownerPlayer == localPlayerIdx && pap.slotInProgress == me->currentSlot) {
-        DrawText("IN PACK-A-PUNCH...", px + 32, py + 14, 20, (Color){200,150,255,255});
-        float t = 1.0f - (pap.activeTimer / PAP_DURATION);
-        GuiProgressBar((Rectangle){px + 32, py + 46, panelW - 50, 14}, NULL, NULL, &t, 0.0f, 1.0f);
-    } else {
-        DrawText(displayName, px + 32, py + 14, 22, cur->packed ? (Color){220,180,255,255} : RAYWHITE);
-        snprintf(buf, sizeof buf, "%d / %d", cur->ammo, cur->reserve);
-        DrawText(buf, px + 32, py + 42, 28, (cur->ammo == 0) ? RED : YELLOW);
+        if (cur->reloadTimer > 0) {
+            const char *rl = "RELOADING";
+            int rlw = MeasureText(rl, 22);
+            DrawText(rl, rx - rlw, ry, 22, ORANGE);
+            float t = 1.0f - (cur->reloadTimer / Weapon_EffReload(me, cur));
+            DrawRectangle(rx - 220, ry + 30, 220, 6, (Color){80,40,0,180});
+            DrawRectangle(rx - 220, ry + 30, (int)(220 * t), 6, ORANGE);
+        } else if (pap.activeTimer > 0 && pap.ownerPlayer == localPlayerIdx && pap.slotInProgress == me->currentSlot) {
+            const char *pl = "PACK-A-PUNCH";
+            int plw = MeasureText(pl, 22);
+            DrawText(pl, rx - plw, ry, 22, (Color){200,150,255,255});
+            float t = 1.0f - (pap.activeTimer / PAP_DURATION);
+            DrawRectangle(rx - 220, ry + 30, 220, 6, (Color){40,20,60,180});
+            DrawRectangle(rx - 220, ry + 30, (int)(220 * t), 6, (Color){200,150,255,255});
+        } else {
+            int nameW = MeasureText(displayName, 22);
+            DrawText(displayName, rx - nameW, ry, 22, nameCol);
+            // Big ammo / reserve
+            char ammo[16]; snprintf(ammo, sizeof ammo, "%d", cur->ammo);
+            char rsv[24];  snprintf(rsv, sizeof rsv, "/ %d", cur->reserve);
+            int af = 44, rf = 22;
+            int aw = MeasureText(ammo, af);
+            int rw = MeasureText(rsv, rf);
+            Color ammoCol = (cur->ammo == 0) ? RED : (Color){240,220,60,255};
+            DrawText(rsv,  rx - rw,         ry + 36, rf, (Color){200,200,200,200});
+            DrawText(ammo, rx - rw - aw - 6, ry + 24, af, ammoCol);
+            // Small tint sliver under the gun name to identify weapon at a glance.
+            DrawRectangle(rx - nameW, ry + 24, nameW, 3, cw->tint);
+        }
     }
 
+    // Tiny alt-slot indicator above the weapon block.
     WeaponSlot *other = &me->inventory[(me->currentSlot + 1) % INV_SLOTS];
-    if (other->owned) {
-        const WeaponDef *ow = &WEAPONS[other->weaponIdx];
-        const char *on = other->packed ? ow->packedName : ow->name;
-        snprintf(buf, sizeof buf, "[Q] %s  %d/%d", on, other->ammo, other->reserve);
-        DrawText(buf, px + 32, py + 80, 16, GRAY);
-    } else {
-        DrawText("[Q] (empty slot)", px + 32, py + 80, 16, (Color){90,90,90,255});
+    {
+        int rx = sw - 24, ry = sh - 110;
+        if (other->owned) {
+            const WeaponDef *ow = &WEAPONS[other->weaponIdx];
+            const char *on = other->packed ? ow->packedName : ow->name;
+            snprintf(buf, sizeof buf, "[Q]  %s   %d / %d", on, other->ammo, other->reserve);
+        } else {
+            snprintf(buf, sizeof buf, "[Q]  (empty)");
+        }
+        int tw = MeasureText(buf, 14);
+        DrawText(buf, rx - tw, ry, 14, (Color){180,180,180,180});
     }
 
     DrawPerkIcons(sh, me);

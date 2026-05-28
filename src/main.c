@@ -18,6 +18,7 @@
 #include "hud.h"
 #include "menu.h"
 #include "pad.h"
+#include "fx.h"
 
 #include <stdio.h>
 #include <stdint.h>
@@ -231,15 +232,19 @@ int main(void) {
             if (muzzleFlashLocal > 0) muzzleFlashLocal -= dt;
         }
 
+        Fx_Tick(dt);
+
         float eyeY = me->pos.y;
         if (me->alive && !noclipMode && uiState == UI_PLAY && (IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_C))) eyeY -= 0.6f;
+        float yawJ = 0, pitchJ = 0;
+        Vector3 shakeOff = Fx_CameraOffset(&yawJ, &pitchJ);
         if (useFlyCam && specInit) {
             camera.position = specPos;
             Vector3 dir = Player_LookDir(specYaw, specPitch);
             camera.target = Vector3Add(camera.position, dir);
         } else {
-            camera.position = (Vector3){ me->pos.x, eyeY, me->pos.z };
-            Vector3 dir = Player_LookDir(me->yaw, me->pitch);
+            camera.position = (Vector3){ me->pos.x + shakeOff.x, eyeY + shakeOff.y, me->pos.z + shakeOff.z };
+            Vector3 dir = Player_LookDir(me->yaw + yawJ, me->pitch + pitchJ);
             camera.target = Vector3Add(camera.position, dir);
         }
         // Smoothly transition FOV when aiming down sights.

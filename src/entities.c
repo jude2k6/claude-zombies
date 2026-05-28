@@ -2,6 +2,7 @@
 #include "level.h"
 #include "player.h"
 #include "weapons.h"
+#include "fx.h"
 #include "raymath.h"
 #include <math.h>
 #include <stdlib.h>
@@ -257,6 +258,10 @@ void Enemies_Update(float dt) {
                     tp->hp -= ENEMY_DAMAGE;
                     tp->damageFlash = 0.5f;
                     if (tp->hp <= 0) { tp->hp = 0; tp->alive = false; }
+                    if ((int)(tp - players) == localPlayerIdx) {
+                        Fx_PunchAndRumble(tp->hp <= 0 ? 0.65f : 0.30f,
+                                          0.55f, 0.55f, 0.15f);
+                    }
                 }
                 e->touchTimer = ENEMY_TOUCH_COOLDOWN;
             }
@@ -400,6 +405,8 @@ void PowerUps_Apply(PowerUpType type) {
             }
             for (int i = 0; i < NET_MAX_PLAYERS; i++)
                 if (players[i].active) players[i].points += 400;
+            fxFlashAmount = 1.0f;
+            Fx_PunchAndRumble(0.9f, 1.0f, 1.0f, 0.5f);
             break;
         case PU_DOUBLE_POINTS:
             doublePointsTimer = 20.0f;

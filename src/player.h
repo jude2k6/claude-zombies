@@ -6,6 +6,7 @@
 extern Player players[NET_MAX_PLAYERS];
 extern int    localPlayerIdx;
 extern bool   godMode;
+extern bool   noclipMode;
 
 int     Player_ActiveCount(void);
 int     Player_AliveActiveCount(void);

@@ -9,6 +9,7 @@
 Player players[NET_MAX_PLAYERS];
 int    localPlayerIdx = 0;
 bool   godMode = false;
+bool   noclipMode = false;
 
 int Player_ActiveCount(void) {
     int n = 0;

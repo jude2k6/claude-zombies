@@ -25,7 +25,7 @@
 static float snapshotAccum = 0.0f;
 static float inputAccum    = 0.0f;
 
-// Spectator camera state (used while local player is downed)
+// Spectator camera state (used while local player is downed, or via F4 noclip cheat)
 static Vector3 specPos;
 static float   specYaw   = 0.0f;
 static float   specPitch = 0.0f;
@@ -148,20 +148,23 @@ int main(void) {
         }
         if (IsKeyPressed(KEY_F11)) Menu_ToggleFullscreenSafe();
         if (IsKeyPressed(KEY_F3))  godMode = !godMode;
+        if (IsKeyPressed(KEY_F4))  { noclipMode = !noclipMode; specInit = false; }
 
         if (netMode != NET_SOLO) PollNetwork();
 
         Player *me = &players[localPlayerIdx];
         Interact ix = { IK_NONE, -1, 0 };
 
+        bool useFlyCam = (uiState == UI_PLAY) && (!me->alive || noclipMode);
         if (uiState == UI_PLAY) {
-            if (me->alive) {
+            if (me->alive && !noclipMode) {
                 Player_ApplyLocalLook(me, mouseSens);
                 Player_ApplyLocalMove(me, dt);
-                specInit = false; // re-init next time we die
-            } else {
+                specInit = false; // re-init next time we detach
+            }
+            if (useFlyCam) {
                 if (!specInit) {
-                    specPos   = (Vector3){ me->pos.x, PLAYER_EYE + 1.5f, me->pos.z };
+                    specPos   = (Vector3){ me->pos.x, me->pos.y + 1.5f, me->pos.z };
                     specYaw   = me->yaw;
                     specPitch = me->pitch;
                     specInit  = true;
@@ -182,14 +185,18 @@ int main(void) {
                 if (IsKeyDown(KEY_A)) move = Vector3Subtract(move, right);
                 if (IsKeyDown(KEY_SPACE))      move = Vector3Add(move, up);
                 if (IsKeyDown(KEY_LEFT_SHIFT)) move = Vector3Subtract(move, up);
+                float flySpeed = IsKeyDown(KEY_LEFT_CONTROL) ? 36.0f : 14.0f;
                 if (Vector3LengthSqr(move) > 0.0001f) {
-                    move = Vector3Scale(Vector3Normalize(move), 14.0f * dt);
+                    move = Vector3Scale(Vector3Normalize(move), flySpeed * dt);
                     specPos = Vector3Add(specPos, move);
                 }
+                // While noclipping alive, keep the player's view direction in
+                // sync so the body faces wherever the camera is looking.
+                if (noclipMode && me->alive) { me->yaw = specYaw; me->pitch = specPitch; }
             }
-            me->fireHeld     = IsMouseButtonDown(MOUSE_BUTTON_LEFT) && me->alive;
-            me->interactHeld = IsKeyDown(KEY_E) && me->alive;
-            me->adsHeld      = IsMouseButtonDown(MOUSE_BUTTON_RIGHT) && me->alive;
+            me->fireHeld     = IsMouseButtonDown(MOUSE_BUTTON_LEFT) && me->alive && !noclipMode;
+            me->interactHeld = IsKeyDown(KEY_E) && me->alive && !noclipMode;
+            me->adsHeld      = IsMouseButtonDown(MOUSE_BUTTON_RIGHT) && me->alive && !noclipMode;
 
             HandleLocalActions(me);
 
@@ -220,14 +227,14 @@ int main(void) {
         }
 
         float eyeY = me->pos.y;
-        if (me->alive && uiState == UI_PLAY && (IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_C))) eyeY -= 0.6f;
-        if (me->alive || !specInit) {
-            camera.position = (Vector3){ me->pos.x, eyeY, me->pos.z };
-            Vector3 dir = Player_LookDir(me->yaw, me->pitch);
-            camera.target = Vector3Add(camera.position, dir);
-        } else {
+        if (me->alive && !noclipMode && uiState == UI_PLAY && (IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_C))) eyeY -= 0.6f;
+        if (useFlyCam && specInit) {
             camera.position = specPos;
             Vector3 dir = Player_LookDir(specYaw, specPitch);
+            camera.target = Vector3Add(camera.position, dir);
+        } else {
+            camera.position = (Vector3){ me->pos.x, eyeY, me->pos.z };
+            Vector3 dir = Player_LookDir(me->yaw, me->pitch);
             camera.target = Vector3Add(camera.position, dir);
         }
         // Smoothly transition FOV when aiming down sights.

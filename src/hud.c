@@ -257,6 +257,13 @@ void Hud_Draw(int sw, int sh, Player *me, Interact ix) {
         DrawRectangleLines(sw - gw - 30, 140, gw + 20, 30, (Color){255,220,100,255});
         DrawText(gm, sw - gw - 20, 145, 22, (Color){255,220,100,255});
     }
+    if (noclipMode) {
+        const char *nm = "NOCLIP  (F4)";
+        int gw = MeasureText(nm, 22);
+        DrawRectangle(sw - gw - 30, 175, gw + 20, 30, (Color){0,0,0,160});
+        DrawRectangleLines(sw - gw - 30, 175, gw + 20, 30, (Color){120,220,255,255});
+        DrawText(nm, sw - gw - 20, 180, 22, (Color){120,220,255,255});
+    }
 
     // Power-up status (centered under crosshair)
     int puY = sh / 2 + 30;

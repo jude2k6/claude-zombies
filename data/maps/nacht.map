@@ -1,0 +1,66 @@
+# Claude Zombies - Nacht der Untoten
+#
+# Inspired by the original Nacht der Untoten from Call of Duty: World at War.
+# Cramped spawn bunker with 4 boarded windows. Two doors lead deeper into
+# the map: through the Help room and finally to the Pack-a-Punch back room.
+
+NAME Nacht der Untoten
+
+# Spawns - tight cluster at the south end of the bunker
+SPAWN   0 -22
+SPAWN   3 -22
+SPAWN  -3 -22
+SPAWN   0 -25
+
+# --- Spawn-room debris (cramped bunker feel) ---
+OBSTACLE -12  1.0 -22    3 2 3
+OBSTACLE  12  1.0 -22    3 2 3
+OBSTACLE   0  0.8 -14    6 1 2
+OBSTACLE  -8  0.8 -32    3 1 6
+
+# --- Help room debris ---
+OBSTACLE -10  1.0   2    3 2 3
+OBSTACLE  10  1.0   2    3 2 3
+OBSTACLE   0  1.5   8    4 3 1
+
+# --- Back room debris ---
+OBSTACLE   0  1.0  22    8 2 3
+OBSTACLE -16  1.0  18    3 2 4
+OBSTACLE  16  1.0  18    3 2 4
+OBSTACLE   0  0.6  32   10 1 2
+OBSTACLE -22  1.0  32    4 2 3
+
+# --- Wall splitting spawn room from help room (door at centre) ---
+WALL -21.5 2.5  -6   37 5 1
+WALL  21.5 2.5  -6   37 5 1
+DOOR   0   2.5  -6    6 5 1   1000
+
+# --- Wall splitting help room from back room (more expensive door) ---
+WALL -21.5 2.5  12   37 5 1
+WALL  21.5 2.5  12   37 5 1
+DOOR   0   2.5  12    6 5 1   1500
+
+# Windows - all four around the spawn bunker, like the original
+WINDOW -16.0  -40.0    0  1   -1
+WINDOW  16.0  -40.0    0  1   -1
+WINDOW -40.0  -20.0    1  0   -1
+WINDOW  40.0  -20.0   -1  0   -1
+
+# Wall buys spread across the three rooms
+WALLBUY  -5.0  -39.45    0  1   RIFLE
+WALLBUY -39.45 -32.0     1  0   SMG
+WALLBUY  39.45  -8.0    -1  0   SHOTGUN
+WALLBUY -39.45   8.0     1  0   RIFLE
+WALLBUY   0.0   39.45    0 -1   RAYGUN
+
+# Perk machines (one per room cluster)
+PERK -18.0 -18.0   SPEED
+PERK  18.0 -18.0   DTAP
+PERK -18.0   2.0   JUG
+PERK  18.0   2.0   STAMIN
+
+# Pack-a-Punch at the far end of the back room
+PAP   0  30
+
+# Mystery Box in the help room
+MBOX  0   4

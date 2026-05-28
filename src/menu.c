@@ -28,7 +28,37 @@ char    statusMsg[128] = "";
 char    hostIps[8][64];
 int     hostIpCount = 0;
 
+MapEntry mapList[MAP_LIST_MAX];
+int      mapListCount = 0;
+int      selectedMapIdx = 0;
+
 NetMode netMode = NET_SOLO;
+
+void Menu_ScanMaps(void) {
+    mapListCount = 0;
+    const char *dirs[] = { "data/maps", "../data/maps", "./data/maps" };
+    for (size_t i = 0; i < sizeof dirs / sizeof dirs[0] && mapListCount == 0; i++) {
+        if (!DirectoryExists(dirs[i])) continue;
+        FilePathList list = LoadDirectoryFilesEx(dirs[i], ".map", false);
+        for (unsigned int j = 0; j < list.count && mapListCount < MAP_LIST_MAX; j++) {
+            strncpy(mapList[mapListCount].path, list.paths[j], sizeof mapList[0].path - 1);
+            mapList[mapListCount].path[sizeof mapList[0].path - 1] = 0;
+            const char *base = GetFileNameWithoutExt(list.paths[j]);
+            strncpy(mapList[mapListCount].name, base ? base : "?", sizeof mapList[0].name - 1);
+            mapList[mapListCount].name[sizeof mapList[0].name - 1] = 0;
+            mapListCount++;
+        }
+        UnloadDirectoryFiles(list);
+    }
+    if (selectedMapIdx >= mapListCount) selectedMapIdx = 0;
+}
+
+static void LoadSelectedMap(void) {
+    if (mapListCount > 0 && selectedMapIdx >= 0 && selectedMapIdx < mapListCount) {
+        if (Level_LoadFromFile(mapList[selectedMapIdx].path)) return;
+    }
+    Level_Build();
+}
 
 static const Color PLAYER_COLORS[NET_MAX_PLAYERS] = {
     {220, 80, 80, 255}, {80, 120, 220, 255}, {90, 200, 90, 255}, {220, 200, 80, 255},
@@ -51,6 +81,7 @@ void Menu_StartSoloGame(void) {
     netMode = NET_SOLO;
     localPlayerIdx = 0;
     for (int i = 0; i < NET_MAX_PLAYERS; i++) memset(&players[i], 0, sizeof players[i]);
+    LoadSelectedMap();
     Level_Reset();
     Player_ResetForGame(0, playerName);
     PowerUps_ClearAll();
@@ -76,6 +107,7 @@ void Menu_StartHosting(void) {
 }
 
 void Menu_StartHostedGame(void) {
+    LoadSelectedMap();
     Level_Reset();
     PowerUps_ClearAll();
     Game_StartRound(1);
@@ -108,8 +140,28 @@ void Menu_DrawMenu(int sw, int sh) {
     int tagw = MeasureText(tagline, 20);
     DrawText(tagline, sw/2 - tagw/2, sh/6 + ts + 16, 20, (Color){200,200,200,255});
 
-    int bw = 260, bh = 50, bx = sw/2 - bw/2, by = sh/2 - 80;
+    int bw = 260, bh = 50, bx = sw/2 - bw/2, by = sh/2 - 110;
     GuiSetStyle(DEFAULT, TEXT_SIZE, 22);
+
+    // Map picker row (only if we found at least one map)
+    if (mapListCount > 0) {
+        int mw = 220, ah = 36;
+        int mx = sw/2 - (mw + 2*ah + 16)/2;
+        int my = by;
+        if (GuiButton((Rectangle){mx, my, ah, ah}, "<")) {
+            selectedMapIdx = (selectedMapIdx - 1 + mapListCount) % mapListCount;
+        }
+        char label[80]; snprintf(label, sizeof label, "MAP:  %s", mapList[selectedMapIdx].name);
+        int lw = MeasureText(label, 20);
+        DrawRectangle(mx + ah + 8, my, mw, ah, (Color){25,30,40,255});
+        DrawRectangleLines(mx + ah + 8, my, mw, ah, (Color){200,200,200,180});
+        DrawText(label, mx + ah + 8 + mw/2 - lw/2, my + ah/2 - 10, 20, RAYWHITE);
+        if (GuiButton((Rectangle){mx + ah + 8 + mw + 8, my, ah, ah}, ">")) {
+            selectedMapIdx = (selectedMapIdx + 1) % mapListCount;
+        }
+        by += 56;
+    }
+
     if (GuiButton((Rectangle){bx, by,        bw, bh}, "HOST GAME"))   Menu_StartHosting();
     if (GuiButton((Rectangle){bx, by + 64,   bw, bh}, "JOIN GAME"))   { uiState = UI_JOIN_INPUT; statusMsg[0]=0; }
     if (GuiButton((Rectangle){bx, by + 128,  bw, bh}, "SOLO PLAY"))   Menu_StartSoloGame();

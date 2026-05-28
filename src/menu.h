@@ -24,6 +24,13 @@ extern int     hostIpCount;
 
 extern NetMode netMode;
 
+#define MAP_LIST_MAX 16
+typedef struct { char path[256]; char name[64]; } MapEntry;
+extern MapEntry mapList[MAP_LIST_MAX];
+extern int      mapListCount;
+extern int      selectedMapIdx;
+
+void Menu_ScanMaps(void);
 void Menu_ToggleFullscreenSafe(void);
 
 void Menu_StartSoloGame(void);

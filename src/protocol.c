@@ -305,6 +305,7 @@ void Protocol_ClientSendInput(Player *p) {
         .currentSlot = (uint8_t)p->currentSlot,
         .fireDown = (uint8_t)(p->fireHeld ? 1 : 0),
         .interactHeld = (uint8_t)(p->interactHeld ? 1 : 0),
+        .adsHeld = (uint8_t)(p->adsHeld ? 1 : 0),
     };
     Net_SendTo(0, &in, sizeof in, false);
 }
@@ -334,6 +335,7 @@ void Protocol_HostHandlePacket(int peerIdx, uint8_t *data, size_t len) {
         p->currentSlot = in->currentSlot < INV_SLOTS ? in->currentSlot : 0;
         p->fireHeld = in->fireDown != 0;
         p->interactHeld = in->interactHeld != 0;
+        p->adsHeld = in->adsHeld != 0;
     }
     else if (type == PKT_ACTION && len >= sizeof(PktAction)) {
         PktAction *a = (PktAction *)data;

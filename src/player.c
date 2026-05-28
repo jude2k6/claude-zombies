@@ -111,9 +111,10 @@ void Player_ApplyLocalMove(Player *p, float dt) {
     float speed = Perk_EffMoveSpeed(p);
     bool wantSprint = IsKeyDown(KEY_LEFT_SHIFT);
     bool moving = (IsKeyDown(KEY_W) || IsKeyDown(KEY_S) || IsKeyDown(KEY_A) || IsKeyDown(KEY_D));
-    bool sprinting = wantSprint && moving && p->stamina > 1.0f;
+    bool sprinting = wantSprint && moving && p->stamina > 1.0f && !p->adsHeld;
     if (sprinting) speed *= 1.6f;
     if (IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_C)) speed *= 0.55f; // crouch
+    if (p->adsHeld) speed *= ADS_MOVE_MUL;
 
     // Stamina drain/regen (local only)
     if (sprinting) p->stamina -= 28.0f * dt;
@@ -129,9 +130,27 @@ void Player_ApplyLocalMove(Player *p, float dt) {
     if (Vector3LengthSqr(move) > 0.0001f) {
         move = Vector3Scale(Vector3Normalize(move), speed * dt);
     }
+
+    // Jump: triggered only on rising edge while grounded.
+    if (p->onGround && IsKeyPressed(KEY_SPACE)) {
+        p->velY = PLAYER_JUMP_VEL;
+        p->onGround = false;
+    }
+    p->velY -= PLAYER_GRAVITY * dt;
+    float newY = p->pos.y + p->velY * dt;
+    if (newY <= PLAYER_EYE) {
+        newY = PLAYER_EYE;
+        p->velY = 0.0f;
+        p->onGround = true;
+    } else {
+        p->onGround = false;
+    }
+
     Vector3 newPos = Vector3Add(p->pos, move);
-    newPos.y = PLAYER_EYE;
+    newPos.y = newY;
     p->pos = Level_ResolveXZ(p->pos, newPos, PLAYER_RADIUS, true);
+    p->pos.y = newY;
     PushOutOfEnemies(p);
     p->pos = Level_ResolveXZ(p->pos, p->pos, PLAYER_RADIUS, true);
+    p->pos.y = newY;
 }

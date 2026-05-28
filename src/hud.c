@@ -7,6 +7,8 @@
 #include "game.h"
 #include "entities.h"
 #include "raygui.h"
+#include "raymath.h"
+#include <math.h>
 #include <stdio.h>
 
 static const Color PLAYER_COLORS[NET_MAX_PLAYERS] = {
@@ -24,12 +26,166 @@ static void DrawPerkIcons(int sh, Player *me) {
     }
 }
 
-void Hud_Draw(int sw, int sh, Player *me, Interact ix) {
-    int cx = sw / 2, cy = sh / 2;
-    Color cross = (muzzleFlashLocal > 0) ? YELLOW : RAYWHITE;
+// Hit marker / damage-direction / round-bonus toast state. All inferred from
+// values the snapshot already provides, so this works for both host and clients.
+static int       hudLastShotsHit = -1;
+static int       hudLastHeadshots = -1;
+static float     hudHitMarkerTimer = 0.0f;
+static bool      hudHitMarkerHead = false;
+
+static int       hudLastHp = -1;
+static float     hudDmgDirTimer = 0.0f;
+static Vector3   hudDmgDirVec = { 0, 0, 1 };
+
+static GamePhase hudLastPhase = GS_PRE_GAME;
+static int       hudLastRound = 0;
+static float     hudBonusToastTimer = 0.0f;
+static int       hudBonusToastAmount = 0;
+
+static void HudUpdateFeedback(Player *me, float dt) {
+    if (hudLastShotsHit < 0) { hudLastShotsHit = me->shotsHit; hudLastHeadshots = me->headshots; }
+    if (me->shotsHit > hudLastShotsHit) {
+        hudHitMarkerTimer = 0.20f;
+        hudHitMarkerHead  = (me->headshots > hudLastHeadshots);
+    }
+    hudLastShotsHit = me->shotsHit;
+    hudLastHeadshots = me->headshots;
+
+    if (hudLastHp < 0) hudLastHp = me->hp;
+    if (me->alive && me->hp < hudLastHp) {
+        int bestE = -1; float bestD = 1e9f;
+        for (int i = 0; i < MAX_ENEMIES; i++) {
+            if (!enemies[i].alive) continue;
+            if (enemies[i].state != ZS_INSIDE) continue;
+            float dx = enemies[i].pos.x - me->pos.x;
+            float dz = enemies[i].pos.z - me->pos.z;
+            float d2 = dx*dx + dz*dz;
+            if (d2 < bestD) { bestD = d2; bestE = i; }
+        }
+        if (bestE >= 0) {
+            hudDmgDirVec = (Vector3){ enemies[bestE].pos.x - me->pos.x, 0,
+                                       enemies[bestE].pos.z - me->pos.z };
+            hudDmgDirTimer = 1.2f;
+        }
+    }
+    hudLastHp = me->hp;
+
+    if (gamePhase == GS_ROUND_BREAK && hudLastPhase == GS_PLAY) {
+        hudBonusToastAmount = 50 + roundNum * 10;
+        hudBonusToastTimer  = 2.5f;
+    }
+    hudLastPhase = gamePhase;
+    hudLastRound = roundNum;
+
+    if (hudHitMarkerTimer  > 0) hudHitMarkerTimer  -= dt;
+    if (hudDmgDirTimer     > 0) hudDmgDirTimer     -= dt;
+    if (hudBonusToastTimer > 0) hudBonusToastTimer -= dt;
+}
+
+static void HudDrawCrosshair(int cx, int cy, Player *me, Color cross) {
+    if (me->adsHeld) {
+        // Tighter dot crosshair while aiming.
+        DrawCircleLines(cx, cy, 3, cross);
+        DrawPixel(cx, cy, cross);
+        return;
+    }
     DrawLine(cx - 10, cy, cx + 10, cy, cross);
     DrawLine(cx, cy - 10, cx, cy + 10, cross);
     DrawCircleLines(cx, cy, 2, cross);
+}
+
+static void HudDrawHitMarker(int cx, int cy) {
+    if (hudHitMarkerTimer <= 0) return;
+    float a = hudHitMarkerTimer / 0.20f;
+    if (a > 1) a = 1;
+    Color c = hudHitMarkerHead ? (Color){255, 200, 80, (unsigned char)(255 * a)}
+                               : (Color){255, 255, 255, (unsigned char)(220 * a)};
+    int r = hudHitMarkerHead ? 11 : 8;
+    DrawLine(cx - r, cy - r, cx - r + 4, cy - r + 4, c);
+    DrawLine(cx + r, cy - r, cx + r - 4, cy - r + 4, c);
+    DrawLine(cx - r, cy + r, cx - r + 4, cy + r - 4, c);
+    DrawLine(cx + r, cy + r, cx + r - 4, cy + r - 4, c);
+}
+
+static void HudDrawDamageDir(int cx, int cy, Player *me) {
+    if (hudDmgDirTimer <= 0) return;
+    // World-space attacker dir → screen-space arc angle relative to look.
+    Vector3 fwd  = { sinf(me->yaw), 0, -cosf(me->yaw) };
+    Vector3 dir  = Vector3Normalize(hudDmgDirVec);
+    float dot   = fwd.x * dir.x + fwd.z * dir.z;
+    float cross = fwd.x * dir.z - fwd.z * dir.x; // sign tells left vs right
+    float angle = atan2f(cross, dot);
+    float radius = 96.0f;
+    float ax = cx + sinf(angle) * radius;
+    float ay = cy - cosf(angle) * radius;
+    float a = hudDmgDirTimer / 1.2f;
+    if (a > 1) a = 1;
+    Color c = (Color){ 240, 60, 60, (unsigned char)(220 * a) };
+
+    Vector2 tip   = { ax, ay };
+    Vector2 dirV  = { sinf(angle), -cosf(angle) };
+    Vector2 perp  = { -dirV.y, dirV.x };
+    Vector2 base  = { tip.x - dirV.x * 22, tip.y - dirV.y * 22 };
+    Vector2 left  = { base.x + perp.x * 10, base.y + perp.y * 10 };
+    Vector2 right = { base.x - perp.x * 10, base.y - perp.y * 10 };
+    DrawTriangle(tip, right, left, c);
+}
+
+static void HudDrawScoreboard(int sw, int sh) {
+    int rows = 0;
+    for (int i = 0; i < NET_MAX_PLAYERS; i++) if (players[i].active) rows++;
+    if (rows == 0) return;
+    int rowH = 32;
+    int w = 720, h = 80 + rows * rowH;
+    int x = sw/2 - w/2, y = sh/2 - h/2;
+    DrawRectangle(x, y, w, h, (Color){0, 0, 0, 200});
+    DrawRectangleLines(x, y, w, h, (Color){200, 200, 200, 200});
+    DrawText("SCOREBOARD", x + 20, y + 14, 26, RAYWHITE);
+    int hy = y + 56;
+    DrawText("PLAYER",    x + 20,  hy, 18, GRAY);
+    DrawText("POINTS",    x + 220, hy, 18, GRAY);
+    DrawText("KILLS",     x + 340, hy, 18, GRAY);
+    DrawText("HEADSHOTS", x + 440, hy, 18, GRAY);
+    DrawText("ACC %",     x + 580, hy, 18, GRAY);
+    int row = 0;
+    for (int i = 0; i < NET_MAX_PLAYERS; i++) {
+        if (!players[i].active) continue;
+        Player *p = &players[i];
+        int yr = hy + 24 + row * rowH;
+        Color tc = p->alive ? RAYWHITE : (Color){180, 80, 80, 255};
+        DrawText(p->name[0] ? p->name : "Player", x + 20, yr, 20, tc);
+        char buf[32];
+        snprintf(buf, sizeof buf, "%d", p->points);     DrawText(buf, x + 220, yr, 20, YELLOW);
+        snprintf(buf, sizeof buf, "%d", p->kills);      DrawText(buf, x + 340, yr, 20, tc);
+        snprintf(buf, sizeof buf, "%d", p->headshots);  DrawText(buf, x + 440, yr, 20, tc);
+        float acc = (p->shotsFired > 0) ? 100.0f * p->shotsHit / p->shotsFired : 0.0f;
+        snprintf(buf, sizeof buf, "%.1f", acc);         DrawText(buf, x + 580, yr, 20, tc);
+        row++;
+    }
+}
+
+static void HudDrawBonusToast(int sw, int sh) {
+    if (hudBonusToastTimer <= 0) return;
+    float a = hudBonusToastTimer / 2.5f;
+    if (a > 1) a = 1;
+    char buf[64];
+    snprintf(buf, sizeof buf, "+%d  ROUND BONUS", hudBonusToastAmount);
+    int fs = 32;
+    int tw = MeasureText(buf, fs);
+    int x = sw/2 - tw/2, y = sh/3;
+    unsigned char alpha = (unsigned char)(220 * a);
+    DrawRectangle(x - 16, y - 6, tw + 32, fs + 12, (Color){0, 0, 0, (unsigned char)(160 * a)});
+    DrawText(buf, x, y, fs, (Color){240, 220, 60, alpha});
+}
+
+void Hud_Draw(int sw, int sh, Player *me, Interact ix) {
+    HudUpdateFeedback(me, GetFrameTime());
+
+    int cx = sw / 2, cy = sh / 2;
+    Color cross = (muzzleFlashLocal > 0) ? YELLOW : RAYWHITE;
+    HudDrawCrosshair(cx, cy, me, cross);
+    HudDrawHitMarker(cx, cy);
+    HudDrawDamageDir(cx, cy, me);
 
     if (me->damageFlash > 0) {
         unsigned char a = (unsigned char)(me->damageFlash * 180);
@@ -248,4 +404,7 @@ void Hud_Draw(int sw, int sh, Player *me, Interact ix) {
         int dw = MeasureText(down, 28);
         DrawText(down, sw/2 - dw/2, sh/2 - 14, 28, RAYWHITE);
     }
+
+    HudDrawBonusToast(sw, sh);
+    if (IsKeyDown(KEY_TAB)) HudDrawScoreboard(sw, sh);
 }

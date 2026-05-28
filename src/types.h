@@ -20,6 +20,10 @@
 #define PLAYER_EYE          1.7f
 #define PLAYER_RADIUS       0.4f
 #define BASE_MOVE_SPEED     7.0f
+#define PLAYER_GRAVITY     22.0f
+#define PLAYER_JUMP_VEL     7.5f
+#define ADS_FOV_MUL         0.65f
+#define ADS_MOVE_MUL        0.55f
 
 #define MAX_ENEMIES        48
 #define ENEMY_RADIUS        0.6f
@@ -122,9 +126,14 @@ typedef struct {
 
     bool       fireHeld;
     bool       interactHeld;
+    bool       adsHeld;
 
     float      damageFlash;
     float      meleeTimer;
+
+    // Vertical movement (gravity / jump)
+    float      velY;
+    bool       onGround;
 
     // Stats
     int        kills;

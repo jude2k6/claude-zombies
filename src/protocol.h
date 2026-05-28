@@ -28,6 +28,7 @@ typedef struct {
     uint8_t currentSlot;
     uint8_t fireDown;
     uint8_t interactHeld;
+    uint8_t adsHeld;
 } PktInput;
 typedef struct { uint8_t type, action, arg; } PktAction;
 #pragma pack(pop)

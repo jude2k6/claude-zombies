@@ -1,0 +1,52 @@
+# Claude Zombies - Factory map
+#
+# Tighter, more vertical-feeling layout with two interior rooms.
+
+NAME Factory
+
+SPAWN  0 0
+SPAWN  3 0
+SPAWN -3 0
+SPAWN  0 3
+
+# Crates and machinery
+OBSTACLE   6 1.0   6    3 2 3
+OBSTACLE  -6 1.5   6    3 3 3
+OBSTACLE  14 1.0  -4    2 2 6
+OBSTACLE -14 1.0  -4    2 2 6
+OBSTACLE   0 1.5 -10    8 3 2
+OBSTACLE  22 1.0  18    4 2 4
+OBSTACLE -22 1.0  18    4 2 4
+OBSTACLE  -8 0.5  28    16 1 2
+
+# East/west interior walls forming the central corridor
+WALL  -14.0 2.5  14   12 5 1
+WALL   14.0 2.5  14   12 5 1
+
+# Two doors into the back rooms
+DOOR  -22.0 2.5  14    4 5 1  1000
+DOOR   22.0 2.5  14    4 5 1  1000
+
+# Wall buys spread around the perimeter
+WALLBUY  10.0  39.45    0 -1   SHOTGUN
+WALLBUY  39.45   6.0   -1  0   SMG
+WALLBUY -10.0 -39.45    0  1   RIFLE
+WALLBUY -39.45  -6.0    1  0   RAYGUN
+
+# Windows
+WINDOW  -10.0  40.0   0 -1   -1
+WINDOW   40.0  -8.0  -1  0   -1
+WINDOW    8.0 -40.0   0  1   -1
+WINDOW  -40.0  16.0   1  0    1
+
+# Perks
+PERK  -20.0  24.0   JUG
+PERK   20.0  24.0   SPEED
+PERK    0.0 -22.0   DTAP
+PERK   24.0  -22.0  STAMIN
+
+# Pack-a-Punch (east back room)
+PAP   28 22
+
+# Mystery Box (west back room)
+MBOX -28 22

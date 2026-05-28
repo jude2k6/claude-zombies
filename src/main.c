@@ -61,7 +61,7 @@ static void PollNetwork(void) {
 }
 
 static void HandleLocalActions(Player *me) {
-    if (IsKeyPressed(KEY_Q) || IsKeyPressed(KEY_TAB)) {
+    if (IsKeyPressed(KEY_Q)) {
         int other = (me->currentSlot + 1) % INV_SLOTS;
         if (me->inventory[other].owned) me->currentSlot = other; // local predict
     }
@@ -69,7 +69,7 @@ static void HandleLocalActions(Player *me) {
     if (IsKeyPressed(KEY_TWO) && me->inventory[1].owned) me->currentSlot = 1;
 
     bool reloadEdge = IsKeyPressed(KEY_R) && me->alive;
-    bool swapEdge   = (IsKeyPressed(KEY_Q) || IsKeyPressed(KEY_TAB)) && me->alive;
+    bool swapEdge   = IsKeyPressed(KEY_Q) && me->alive;
     bool slot1Edge  = IsKeyPressed(KEY_ONE) && me->alive;
     bool slot2Edge  = IsKeyPressed(KEY_TWO) && me->alive;
     bool interactEdge = IsKeyPressed(KEY_F) && me->alive;
@@ -118,6 +118,7 @@ int main(void) {
     GuiSetStyle(DEFAULT, TEXT_SIZE, 16);
 
     Level_Build();
+    Menu_ScanMaps();
     for (int i = 0; i < NET_MAX_PLAYERS; i++) memset(&players[i], 0, sizeof players[i]);
     Player_ResetForGame(0, playerName);
 
@@ -188,6 +189,7 @@ int main(void) {
             }
             me->fireHeld     = IsMouseButtonDown(MOUSE_BUTTON_LEFT) && me->alive;
             me->interactHeld = IsKeyDown(KEY_E) && me->alive;
+            me->adsHeld      = IsMouseButtonDown(MOUSE_BUTTON_RIGHT) && me->alive;
 
             HandleLocalActions(me);
 
@@ -217,8 +219,8 @@ int main(void) {
             if (muzzleFlashLocal > 0) muzzleFlashLocal -= dt;
         }
 
-        float eyeY = PLAYER_EYE;
-        if (me->alive && uiState == UI_PLAY && (IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_C))) eyeY = PLAYER_EYE - 0.6f;
+        float eyeY = me->pos.y;
+        if (me->alive && uiState == UI_PLAY && (IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_C))) eyeY -= 0.6f;
         if (me->alive || !specInit) {
             camera.position = (Vector3){ me->pos.x, eyeY, me->pos.z };
             Vector3 dir = Player_LookDir(me->yaw, me->pitch);
@@ -228,7 +230,11 @@ int main(void) {
             Vector3 dir = Player_LookDir(specYaw, specPitch);
             camera.target = Vector3Add(camera.position, dir);
         }
-        camera.fovy = fovSetting;
+        // Smoothly transition FOV when aiming down sights.
+        {
+            float targetFov = me->adsHeld ? (fovSetting * ADS_FOV_MUL) : fovSetting;
+            camera.fovy += (targetFov - camera.fovy) * fminf(1.0f, dt * 12.0f);
+        }
 
         BeginDrawing();
         ClearBackground((Color){20,25,35,255});

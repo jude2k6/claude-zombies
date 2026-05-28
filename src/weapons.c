@@ -75,12 +75,13 @@ void Weapon_Fire(Player *p) {
     if (pap.activeTimer > 0 && pap.slotInProgress == p->currentSlot && pap.ownerPlayer == (int)(p - players)) return;
 
     const WeaponDef *w = &WEAPONS[s->weaponIdx];
-    Vector3 origin = (Vector3){ p->pos.x, PLAYER_EYE, p->pos.z };
+    Vector3 origin = (Vector3){ p->pos.x, p->pos.y, p->pos.z };
     Vector3 dir = Player_LookDir(p->yaw, p->pitch);
     int dmg = Weapon_EffDamage(p, s);
     int ownerIdx = (int)(p - players);
+    float spread = w->spreadDeg * (p->adsHeld ? 0.25f : 1.0f);
     for (int k = 0; k < w->pellets; k++) {
-        Vector3 d = Weapon_SpreadDir(dir, w->spreadDeg);
+        Vector3 d = Weapon_SpreadDir(dir, spread);
         Bullets_Spawn(origin, d, dmg, ownerIdx);
     }
     s->ammo--;

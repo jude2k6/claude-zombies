@@ -264,9 +264,31 @@ void Render_World3D(Camera camera) {
     EndMode3D();
 }
 
+// Labels are only drawn when the player is close enough, and fade smoothly
+// over the last few metres so they don't pop on/off.
+#define LABEL_FULL_DIST  6.0f
+#define LABEL_FADE_DIST 12.0f
+
+static float LabelAlpha(Vector3 from, Vector3 target) {
+    float dx = from.x - target.x, dz = from.z - target.z;
+    float d = sqrtf(dx*dx + dz*dz);
+    if (d <= LABEL_FULL_DIST) return 1.0f;
+    if (d >= LABEL_FADE_DIST) return 0.0f;
+    return 1.0f - (d - LABEL_FULL_DIST) / (LABEL_FADE_DIST - LABEL_FULL_DIST);
+}
+
+static Color FadeColor(Color c, float a) {
+    c.a = (unsigned char)(c.a * a);
+    return c;
+}
+
 void Render_WorldLabels(Camera camera, int sw, int sh, Player *me) {
+    Vector3 mePos = me->pos;
+
     for (int i = 0; i < wallBuyCount; i++) {
         WallBuy *wb = &wallBuys[i];
+        float a = LabelAlpha(mePos, wb->pos);
+        if (a <= 0) continue;
         const WeaponDef *w = &WEAPONS[wb->weaponIdx];
         Vector3 above = { wb->pos.x, wb->pos.y + 1.2f, wb->pos.z };
         Vector3 toCam = Vector3Subtract(camera.position, wb->pos);
@@ -278,11 +300,14 @@ void Render_WorldLabels(Camera camera, int sw, int sh, Player *me) {
         snprintf(label, sizeof label, "%s  %d",
                  w->name, (owned >= 0) ? w->ammoPrice : w->buyPrice);
         int lw = MeasureText(label, 18);
-        DrawRectangle((int)sp.x - lw/2 - 6, (int)sp.y - 12, lw + 12, 24, (Color){0,0,0,160});
-        DrawText(label, (int)sp.x - lw/2, (int)sp.y - 9, 18, w->tint);
+        DrawRectangle((int)sp.x - lw/2 - 6, (int)sp.y - 12, lw + 12, 24,
+                      FadeColor((Color){0,0,0,160}, a));
+        DrawText(label, (int)sp.x - lw/2, (int)sp.y - 9, 18, FadeColor(w->tint, a));
     }
     for (int i = 0; i < perkMachineCount; i++) {
         PerkMachine *pm = &perkMachines[i];
+        float a = LabelAlpha(mePos, pm->pos);
+        if (a <= 0) continue;
         const PerkDef *pd = &PERKS[pm->perkIdx];
         Vector3 above = { pm->pos.x, 3.3f, pm->pos.z };
         Vector2 sp = GetWorldToScreen(above, camera);
@@ -291,23 +316,31 @@ void Render_WorldLabels(Camera camera, int sw, int sh, Player *me) {
         if (me->hasPerk[pm->perkIdx]) snprintf(label, sizeof label, "%s", pd->name);
         else                          snprintf(label, sizeof label, "%s  %d", pd->name, pd->cost);
         int lw = MeasureText(label, 18);
-        DrawRectangle((int)sp.x - lw/2 - 6, (int)sp.y - 12, lw + 12, 24, (Color){0,0,0,160});
+        DrawRectangle((int)sp.x - lw/2 - 6, (int)sp.y - 12, lw + 12, 24,
+                      FadeColor((Color){0,0,0,160}, a));
         DrawText(label, (int)sp.x - lw/2, (int)sp.y - 9, 18,
-                 me->hasPerk[pm->perkIdx] ? GRAY : pd->tint);
+                 FadeColor(me->hasPerk[pm->perkIdx] ? GRAY : pd->tint, a));
     }
     {
-        Vector3 above = { pap.pos.x, 3.4f, pap.pos.z };
-        Vector2 sp = GetWorldToScreen(above, camera);
-        if (sp.x > -200 && sp.x < sw + 200 && sp.y > -200 && sp.y < sh + 200) {
-            char label[64];
-            snprintf(label, sizeof label, "PACK-A-PUNCH  %d", PAP_COST);
-            int lw = MeasureText(label, 18);
-            DrawRectangle((int)sp.x - lw/2 - 6, (int)sp.y - 12, lw + 12, 24, (Color){0,0,0,160});
-            DrawText(label, (int)sp.x - lw/2, (int)sp.y - 9, 18, (Color){200,150,255,255});
+        float a = LabelAlpha(mePos, pap.pos);
+        if (a > 0) {
+            Vector3 above = { pap.pos.x, 3.4f, pap.pos.z };
+            Vector2 sp = GetWorldToScreen(above, camera);
+            if (sp.x > -200 && sp.x < sw + 200 && sp.y > -200 && sp.y < sh + 200) {
+                char label[64];
+                snprintf(label, sizeof label, "PACK-A-PUNCH  %d", PAP_COST);
+                int lw = MeasureText(label, 18);
+                DrawRectangle((int)sp.x - lw/2 - 6, (int)sp.y - 12, lw + 12, 24,
+                              FadeColor((Color){0,0,0,160}, a));
+                DrawText(label, (int)sp.x - lw/2, (int)sp.y - 9, 18,
+                         FadeColor((Color){200,150,255,255}, a));
+            }
         }
     }
     for (int i = 0; i < doorCount; i++) {
         if (doors[i].opened) continue;
+        float a = LabelAlpha(mePos, doors[i].box.center);
+        if (a <= 0) continue;
         Vector3 above = { doors[i].box.center.x,
                           doors[i].box.center.y + doors[i].box.size.y*0.5f + 0.8f,
                           doors[i].box.center.z };
@@ -316,17 +349,26 @@ void Render_WorldLabels(Camera camera, int sw, int sh, Player *me) {
         char label[64];
         snprintf(label, sizeof label, "DOOR  %d", doors[i].cost);
         int lw = MeasureText(label, 18);
-        DrawRectangle((int)sp.x - lw/2 - 6, (int)sp.y - 12, lw + 12, 24, (Color){0,0,0,160});
-        DrawText(label, (int)sp.x - lw/2, (int)sp.y - 9, 18, (Color){220,170,110,255});
+        DrawRectangle((int)sp.x - lw/2 - 6, (int)sp.y - 12, lw + 12, 24,
+                      FadeColor((Color){0,0,0,160}, a));
+        DrawText(label, (int)sp.x - lw/2, (int)sp.y - 9, 18,
+                 FadeColor((Color){220,170,110,255}, a));
     }
-    // Power-up labels
+    // Power-up labels (single letter — keep visible a bit further than the
+    // full prompts since they communicate type at a glance).
     for (int i = 0; i < MAX_POWERUPS; i++) {
         if (!powerUps[i].active) continue;
+        float dx = mePos.x - powerUps[i].pos.x;
+        float dz = mePos.z - powerUps[i].pos.z;
+        float d = sqrtf(dx*dx + dz*dz);
+        if (d > 18.0f) continue;
+        float a = (d < 10.0f) ? 1.0f : 1.0f - (d - 10.0f) / 8.0f;
         Vector3 above = { powerUps[i].pos.x, powerUps[i].pos.y + 1.0f, powerUps[i].pos.z };
         Vector2 sp = GetWorldToScreen(above, camera);
         if (sp.x < -100 || sp.y < -100 || sp.x > sw + 100 || sp.y > sh + 100) continue;
         const char *lbl = POWERUP_LETTERS[powerUps[i].type];
         int lw = MeasureText(lbl, 22);
-        DrawText(lbl, (int)sp.x - lw/2, (int)sp.y - 10, 22, POWERUP_COLORS[powerUps[i].type]);
+        DrawText(lbl, (int)sp.x - lw/2, (int)sp.y - 10, 22,
+                 FadeColor(POWERUP_COLORS[powerUps[i].type], a));
     }
 }

@@ -1,42 +1,43 @@
 # TODO
 
-## Done since last update
+## Done in this pass
 
-- [x] **Doors stayed open across new games** — added `Level_Reset()` (closes
-      doors, refills boards, clears PaP) called from
-      `Menu_StartSoloGame` / `Menu_StartHostedGame`.
-- [x] **Map data lives in a file** — `data/maps/default.map`, parsed by
-      `Level_LoadFromFile`. Adding a new map is just dropping in another
-      `.map` file and the parser does the rest. Hardcoded fallback kept so
-      the binary still runs if the data dir is missing.
+- [x] **Player stats + game-over screen** — per-player kills, headshots,
+      melee kills, shots fired/hit (accuracy %), revives. Synced in the
+      snapshot (added to `SerPlayer`). Shown in a table on the game-over
+      screen.
+- [x] **Stamina** — local `Player.stamina` (0..100). Drains while
+      sprinting + moving, regens while walking. Sprint disables when
+      empty. Small sliver shown under the HP bar.
+- [x] **More zombie types** — `ZombieType` added: Runner (round 4+, x1.6
+      speed, x0.55 HP, yellow stripe), Crawler (round 7+, half height,
+      no head — can't be headshotted), Boss (round multiples of 5,
+      x1.5 size, x6 HP, magenta stripe). Picked at spawn time; rendered
+      with size/color cues; synced via `SerEnemy.type`.
+- [x] **Door pathfinding** — when a door sits between a chasing zombie
+      and its target and the door is open, the zombie routes via the
+      doorway position first.
+- [x] **Revive teammates** — hold `E` over a downed player for 4s. New
+      `IK_REVIVE` interactable; progress synced as `reviveAsTarget`.
+      Granting the revive credits the reviver's stats.
+- [x] **Mystery Box** — `MBOX x z` in map files. `F` to roll ($950,
+      4s spin animation), `F` again by the same player within 8s to take
+      the rolled weapon into the current slot. State synced via new
+      `mbox*` fields in the snapshot header.
 
-## Bugs
+## Bumped
 
-- [x] **Repair barricades is broken** — fixed: `Interact_UpdateRepairs` now
-      only zeroes windows nobody is repairing this tick, so progress
-      accumulates across frames.
-- [x] **Can't buy a 3rd weapon when both slots are full** — the underlying
-      buy logic was already replacing the current slot; added a clearer
-      prompt: "BUY *X* (replaces *Y*)" so the user can swap to the slot they
-      want to overwrite before pressing F.
-- [x] **Something blocks the doorway** — the obstacle at `(0, -18)` size
-      `(8, 3, 2)` was sitting directly in the door corridor. Moved it to
-      `(-10, -16)` and shrunk it.
+- Network protocol: v3 → v4 (snapshot layout changed for stats, revive,
+  zombie type, and Mystery Box).
 
-## Features
+## Future / not started
 
-- [x] **Zombie ↔ player collision** — local player gets pushed out of any
-      inside-state zombie it overlaps; zombie gets nudged back slightly.
-- [x] **Melee attack** — `V` swings a knife. 1.8m range, ~70° forward arc,
-      150 damage, 0.6s cooldown. Networked via `ACT_MELEE`.
-- [x] **Sprint** — hold `Shift` for ~×1.6 movement speed.
-- [x] **Crouch** — hold `C` or `Ctrl` for ~×0.55 speed and lower eye
-      height (~0.6m).
-- [ ] **Prone** — *deferred.*
-- [x] **Headshot damage** — bullets hitting the head sphere deal ×2 damage
-      and award bonus +30 hit / +50 kill points.
-- [x] **Spectator mode when downed** — free-fly camera (WASD + mouse,
-      Space/Shift for vertical). Reviving at round break is unchanged.
-- [x] **Power-up drops** — ~6% chance per kill. Five types: Max Ammo,
-      Nuke, Double Points (20s), Insta-Kill (20s), Carpenter. Sync over
-      snapshot. Pick up by walking over the floating cube.
+Still on the menu from the earlier ranked list:
+
+- Audio (procedural SFX)
+- Map selector + a second map (`MBOX` already supported, just need UI)
+- Mule Kick (3rd weapon slot)
+- Pack-a-Punch Tier 2
+- Floating damage numbers
+- Settings persistence
+- Prone

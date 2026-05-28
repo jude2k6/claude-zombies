@@ -37,6 +37,14 @@ void Enemies_ClearAll(void) {
     enemiesAlive = 0;
 }
 
+static ZombieType PickType(int round) {
+    // Boss every 5 rounds: 1 boss per spawn, chance scaled small so most are normals
+    if (round >= 5 && (round % 5) == 0 && Level_RandRange(0, 1) < 0.04f) return ZT_BOSS;
+    if (round >= 7 && Level_RandRange(0, 1) < 0.18f) return ZT_CRAWLER;
+    if (round >= 4 && Level_RandRange(0, 1) < 0.30f) return ZT_RUNNER;
+    return ZT_NORMAL;
+}
+
 void Enemies_TrySpawn(int round) {
     if (windowCount == 0) return;
     int accessible[MAX_WINDOWS]; int na = 0;
@@ -53,17 +61,30 @@ void Enemies_TrySpawn(int round) {
     spawn = Vector3Add(spawn, Vector3Scale(w->tangent, Level_RandRange(-1.2f, 1.2f)));
     spawn.y = ENEMY_HEIGHT * 0.5f;
 
+    ZombieType t = PickType(round);
+    int   baseHp    = Enemies_RoundHP(round);
+    float baseSpeed = Enemies_RoundSpeed(round);
+    int   hp = baseHp; float spd = baseSpeed;
+    switch (t) {
+        case ZT_RUNNER:  hp = (int)(baseHp * 0.55f); spd = baseSpeed * 1.6f; break;
+        case ZT_CRAWLER: hp = (int)(baseHp * 0.80f); spd = baseSpeed * 0.55f; break;
+        case ZT_BOSS:    hp = baseHp * 6;            spd = baseSpeed * 0.85f; break;
+        default: break;
+    }
+
     for (int i = 0; i < MAX_ENEMIES; i++) {
         if (!enemies[i].alive) {
             enemies[i] = (Enemy){
                 .pos = spawn,
-                .hp = Enemies_RoundHP(round), .maxHp = Enemies_RoundHP(round),
+                .hp = hp, .maxHp = hp,
                 .alive = true,
                 .bobPhase = Level_RandRange(0, 6.28f),
-                .speed = Enemies_RoundSpeed(round),
+                .speed = spd,
                 .state = ZS_OUTSIDE,
+                .type = t,
                 .targetWindow = wi,
                 .targetPlayer = -1,
+                .hasWaypoint = false,
             };
             enemiesAlive++;
             enemiesToSpawn--;
@@ -158,13 +179,74 @@ void Enemies_Update(float dt) {
             }
             if (e->targetPlayer < 0) continue;
             Player *tp = &players[e->targetPlayer];
-            Vector3 to = Vector3Subtract(tp->pos, e->pos);
+
+            // Route via an open door if one lies between us and the target.
+            // Use a two-stage waypoint: first line up perpendicular to the
+            // door on our side, then aim past it. Otherwise a steep approach
+            // angle pins zombies against the wall instead of the doorway.
+            Vector3 goal = tp->pos;
+            e->hasWaypoint = false;
+            for (int di = 0; di < doorCount; di++) {
+                if (!doors[di].opened) continue;
+                Box b = doors[di].box;
+                bool wallAlongX = b.size.x > b.size.z;
+                if (wallAlongX) {
+                    float wz = b.center.z;
+                    if ((e->pos.z - wz) * (tp->pos.z - wz) >= 0) continue;
+                    float zombieSide = (e->pos.z > wz) ? 1.0f : -1.0f;
+                    float halfX = b.size.x * 0.5f;
+                    float off   = b.size.z * 0.5f + 1.5f;
+                    if (fabsf(e->pos.x - b.center.x) > halfX - ENEMY_RADIUS) {
+                        goal = (Vector3){ b.center.x, 0, wz + zombieSide * off };
+                    } else {
+                        goal = (Vector3){ b.center.x, 0, wz - zombieSide * off };
+                    }
+                    e->waypoint = goal; e->hasWaypoint = true;
+                    break;
+                } else {
+                    float wx = b.center.x;
+                    if ((e->pos.x - wx) * (tp->pos.x - wx) >= 0) continue;
+                    float zombieSide = (e->pos.x > wx) ? 1.0f : -1.0f;
+                    float halfZ = b.size.z * 0.5f;
+                    float off   = b.size.x * 0.5f + 1.5f;
+                    if (fabsf(e->pos.z - b.center.z) > halfZ - ENEMY_RADIUS) {
+                        goal = (Vector3){ wx + zombieSide * off, 0, b.center.z };
+                    } else {
+                        goal = (Vector3){ wx - zombieSide * off, 0, b.center.z };
+                    }
+                    e->waypoint = goal; e->hasWaypoint = true;
+                    break;
+                }
+            }
+
+            Vector3 to = Vector3Subtract(goal, e->pos);
             to.y = 0;
             float d = Vector3Length(to);
+            Vector3 dirGoal = (d > 0.01f) ? Vector3Scale(to, 1.0f / d) : (Vector3){0,0,0};
+
+            Vector3 oldPos = e->pos;
             if (d > 0.01f) {
-                Vector3 dir = Vector3Scale(to, 1.0f / d);
-                Vector3 want = Vector3Add(e->pos, Vector3Scale(dir, e->speed * dt));
+                Vector3 moveDir = dirGoal;
+                if (e->escapeTimer > 0) {
+                    moveDir = e->escapeDir;
+                    e->escapeTimer -= dt;
+                }
+                Vector3 want = Vector3Add(e->pos, Vector3Scale(moveDir, e->speed * dt));
                 e->pos = Level_ResolveXZ(e->pos, want, ENEMY_RADIUS, true);
+            }
+
+            // Stuck detection: if we wanted to move but barely did, commit to
+            // a perpendicular sidestep for a beat. Alternate sides so we
+            // probe both ways around an obstacle/wall.
+            float mdx = e->pos.x - oldPos.x;
+            float mdz = e->pos.z - oldPos.z;
+            float thresh = e->speed * dt * 0.3f;
+            if ((mdx*mdx + mdz*mdz) < (thresh*thresh) && d > 0.5f && e->escapeTimer <= 0) {
+                e->escapeDir = e->stuckBias
+                    ? (Vector3){ -dirGoal.z, 0,  dirGoal.x }
+                    : (Vector3){  dirGoal.z, 0, -dirGoal.x };
+                e->escapeTimer = 0.35f;
+                e->stuckBias = e->stuckBias ? 0 : 1;
             }
 
             Vector2 pXZ = { tp->pos.x, tp->pos.z };
@@ -242,10 +324,13 @@ void Bullets_Update(float dt) {
                 if (doublePointsTimer > 0) { hitPts *= 2; killPts *= 2; }
                 if (op >= 0 && op < NET_MAX_PLAYERS && players[op].active) {
                     players[op].points += hitPts;
+                    players[op].shotsHit++;
+                    if (headHit) players[op].headshots++;
                     if (enemies[e].hp <= 0) {
                         enemies[e].alive = false;
                         enemiesAlive--;
                         players[op].points += killPts;
+                        players[op].kills++;
                         PowerUps_TryDrop(enemies[e].pos);
                     }
                 } else if (enemies[e].hp <= 0) {

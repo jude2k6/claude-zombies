@@ -4,6 +4,7 @@
 #include "player.h"
 #include "level.h"
 #include "raymath.h"
+#include <stdlib.h>
 
 Interact Interact_FindFor(Player *p) {
     Interact best = { IK_NONE, -1, INTERACT_DIST };
@@ -35,6 +36,21 @@ Interact Interact_FindFor(Player *p) {
         float d = Vector2Distance(pXZ, q);
         if (d < DOOR_INTERACT_DIST && d < best.dist + 0.5f)
             best = (Interact){ IK_DOOR, i, d };
+    }
+    // Downed teammates within reach
+    int meIdx = (int)(p - players);
+    for (int i = 0; i < NET_MAX_PLAYERS; i++) {
+        if (i == meIdx) continue;
+        if (!players[i].active || players[i].alive) continue;
+        Vector2 q = { players[i].pos.x, players[i].pos.z };
+        float d = Vector2Distance(pXZ, q);
+        if (d < INTERACT_DIST && d < best.dist) best = (Interact){ IK_REVIVE, i, d };
+    }
+    // Mystery Box
+    if (mbox.placed) {
+        Vector2 q = { mbox.pos.x, mbox.pos.z };
+        float d = Vector2Distance(pXZ, q);
+        if (d < INTERACT_DIST && d < best.dist) best = (Interact){ IK_MBOX, 0, d };
     }
     return best;
 }
@@ -94,12 +110,62 @@ void Interact_UsePackAPunch(Player *p) {
     pap.ownerPlayer = (int)(p - players);
 }
 
+void Interact_UseMBox(Player *p) {
+    if (!mbox.placed) return;
+    int meIdx = (int)(p - players);
+    if (mbox.state == MBOX_IDLE) {
+        if (p->points < MBOX_COST) return;
+        p->points -= MBOX_COST;
+        mbox.state = MBOX_ROLLING;
+        mbox.timer = MBOX_ROLL_TIME;
+        mbox.ownerPlayer = meIdx;
+        mbox.finalWeapon = rand() % W_COUNT;
+        mbox.showingWeapon = 0;
+    } else if (mbox.state == MBOX_WAITING && meIdx == mbox.ownerPlayer) {
+        const WeaponDef *w = &WEAPONS[mbox.finalWeapon];
+        int slot = Weapon_FirstEmptySlot(p);
+        if (slot < 0) slot = p->currentSlot;
+        p->inventory[slot] = (WeaponSlot){
+            .weaponIdx = mbox.finalWeapon,
+            .ammo = w->magSize,
+            .reserve = w->reserveMax,
+            .owned = true,
+        };
+        p->currentSlot = slot;
+        mbox.state = MBOX_IDLE;
+        mbox.ownerPlayer = -1;
+    }
+}
+
+void Interact_UpdateMBox(float dt) {
+    if (!mbox.placed) return;
+    mbox.bob += dt * 3.0f;
+    if (mbox.state == MBOX_ROLLING) {
+        mbox.timer -= dt;
+        // Cycle the visible weapon at ~10 Hz
+        mbox.showingWeapon = ((int)(mbox.timer * 12.0f)) % W_COUNT;
+        if (mbox.showingWeapon < 0) mbox.showingWeapon += W_COUNT;
+        if (mbox.timer <= 0) {
+            mbox.state = MBOX_WAITING;
+            mbox.timer = MBOX_WAIT_TIME;
+            mbox.showingWeapon = mbox.finalWeapon;
+        }
+    } else if (mbox.state == MBOX_WAITING) {
+        mbox.timer -= dt;
+        if (mbox.timer <= 0) {
+            mbox.state = MBOX_IDLE;
+            mbox.ownerPlayer = -1;
+        }
+    }
+}
+
 void Interact_Do(Player *p) {
     Interact ix = Interact_FindFor(p);
     if      (ix.kind == IK_WALLBUY) Interact_BuyAtWall(p, ix.idx);
     else if (ix.kind == IK_PERK)    Interact_BuyPerk(p, ix.idx);
     else if (ix.kind == IK_PAP)     Interact_UsePackAPunch(p);
     else if (ix.kind == IK_DOOR)    Interact_BuyDoor(p, ix.idx);
+    else if (ix.kind == IK_MBOX)    Interact_UseMBox(p);
 }
 
 void Interact_UpdatePaP(float dt) {
@@ -124,32 +190,58 @@ void Interact_UpdatePaP(float dt) {
 }
 
 void Interact_UpdateRepairs(float dt) {
-    bool active[MAX_WINDOWS] = { false };
+    bool winActive[MAX_WINDOWS] = { false };
+    bool revActive[NET_MAX_PLAYERS] = { false };
 
     for (int pi = 0; pi < NET_MAX_PLAYERS; pi++) {
         Player *p = &players[pi];
         if (!p->active || !p->alive || !p->interactHeld) continue;
         Interact ix = Interact_FindFor(p);
-        if (ix.kind != IK_WINDOW) continue;
-        Window3D *w = &windows[ix.idx];
-        if (w->boards >= MAX_BOARDS_PER_WIN) continue;
-        if (w->repairPlayer < 0 || w->repairPlayer == pi) {
-            w->repairPlayer = pi;
-            w->repairProgress += dt / BOARD_REPAIR_TIME;
-            active[ix.idx] = true;
-            if (w->repairProgress >= 1.0f) {
-                w->boards++;
-                w->repairProgress = 0;
-                p->points += BOARD_REPAIR_PTS;
-                w->repairPlayer = -1;
+        if (ix.kind == IK_WINDOW) {
+            Window3D *w = &windows[ix.idx];
+            if (w->boards >= MAX_BOARDS_PER_WIN) continue;
+            if (w->repairPlayer < 0 || w->repairPlayer == pi) {
+                w->repairPlayer = pi;
+                w->repairProgress += dt / BOARD_REPAIR_TIME;
+                winActive[ix.idx] = true;
+                if (w->repairProgress >= 1.0f) {
+                    w->boards++;
+                    w->repairProgress = 0;
+                    p->points += BOARD_REPAIR_PTS;
+                    w->repairPlayer = -1;
+                }
+            }
+        }
+        else if (ix.kind == IK_REVIVE) {
+            int ti = ix.idx;
+            if (ti < 0 || ti >= NET_MAX_PLAYERS) continue;
+            Player *tgt = &players[ti];
+            if (!tgt->active || tgt->alive) continue;
+            tgt->reviverIdx = pi;
+            tgt->reviveAsTarget += dt / REVIVE_TIME;
+            revActive[ti] = true;
+            if (tgt->reviveAsTarget >= 1.0f) {
+                tgt->alive = true;
+                tgt->hp = Perk_EffMaxHP(tgt);
+                tgt->reviveAsTarget = 0;
+                tgt->reviverIdx = -1;
+                p->revives++;
             }
         }
     }
-    // Clear progress on any window nobody is currently working on
+    // Clear inactive repair / revive accumulators
     for (int i = 0; i < windowCount; i++) {
-        if (!active[i]) {
+        if (!winActive[i]) {
             windows[i].repairProgress = 0;
             windows[i].repairPlayer = -1;
+        }
+    }
+    for (int i = 0; i < NET_MAX_PLAYERS; i++) {
+        if (!revActive[i]) {
+            // decay so an interrupted revive doesn't snap to 0 instantly
+            players[i].reviveAsTarget *= (1.0f - dt * 2.0f);
+            if (players[i].reviveAsTarget < 0) players[i].reviveAsTarget = 0;
+            players[i].reviverIdx = -1;
         }
     }
 }

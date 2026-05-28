@@ -18,6 +18,7 @@ int         windowCount = 0;
 PerkMachine perkMachines[PERK_COUNT];
 int         perkMachineCount = 0;
 PackAPunch  pap;
+MysteryBox  mbox;
 Vector3     mapSpawns[NET_MAX_PLAYERS];
 int         mapSpawnCount = 0;
 char        mapName[64] = "Default";
@@ -113,6 +114,8 @@ static void ClearLevel(void) {
     mapSpawnCount = 0;
     mapName[0] = 0;
     pap = (PackAPunch){ .pos = {0,0,0}, .activeTimer = 0, .slotInProgress = -1, .ownerPlayer = -1 };
+    mbox = (MysteryBox){ .placed = false, .pos = {0,0,0}, .state = MBOX_IDLE,
+                         .timer = 0, .showingWeapon = 0, .finalWeapon = 0, .ownerPlayer = -1, .bob = 0 };
 }
 
 bool Level_LoadFromFile(const char *path) {
@@ -223,6 +226,15 @@ bool Level_LoadFromFile(const char *path) {
                 pap = (PackAPunch){ .pos = {x, 0, z}, .activeTimer = 0, .slotInProgress = -1, .ownerPlayer = -1 };
             }
         }
+        else if (strcmp(key, "MBOX") == 0) {
+            float x, z;
+            if (sscanf(p, "%*s %f %f", &x, &z) == 2) {
+                mbox = (MysteryBox){ .placed = true, .pos = {x, 0.5f, z},
+                                     .state = MBOX_IDLE, .timer = 0,
+                                     .showingWeapon = 0, .finalWeapon = 0,
+                                     .ownerPlayer = -1, .bob = 0 };
+            }
+        }
         else {
             fprintf(stderr, "map: unknown key '%s' on line %d\n", key, lineNo);
         }
@@ -285,6 +297,10 @@ void Level_LoadHardcodedFallback(void) {
     perkMachines[perkMachineCount++] = (PerkMachine){ {-25.0f, 0,-22.0f }, PERK_STAMIN };
 
     pap = (PackAPunch){ .pos = { 0, 0, -28.0f }, .activeTimer = 0, .slotInProgress = -1, .ownerPlayer = -1 };
+    mbox = (MysteryBox){ .placed = true, .pos = { -22.0f, 0.5f, 15.0f },
+                         .state = MBOX_IDLE, .timer = 0,
+                         .showingWeapon = 0, .finalWeapon = 0,
+                         .ownerPlayer = -1, .bob = 0 };
 }
 
 void Level_Build(void) {
@@ -312,4 +328,7 @@ void Level_Reset(void) {
     pap.activeTimer = 0;
     pap.slotInProgress = -1;
     pap.ownerPlayer = -1;
+    mbox.state = MBOX_IDLE;
+    mbox.timer = 0;
+    mbox.ownerPlayer = -1;
 }

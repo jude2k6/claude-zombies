@@ -71,6 +71,7 @@ void Game_Tick(float dt) {
     Enemies_UpdateSpawns(roundNum, dt);
     Interact_UpdatePaP(dt);
     Interact_UpdateRepairs(dt);
+    Interact_UpdateMBox(dt);
     PowerUps_Update(dt);
     PowerUps_Pickup();
 

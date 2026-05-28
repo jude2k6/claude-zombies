@@ -143,13 +143,44 @@ static void DrawEnemy(Enemy *e) {
     float bob = sinf(e->bobPhase) * 0.06f;
     Vector3 body = { e->pos.x, e->pos.y + bob, e->pos.z };
     float t = (float)e->hp / (float)(e->maxHp > 0 ? e->maxHp : 1);
-    Color tint;
-    if      (t > 0.66f) tint = (Color){80, 140, 60, 255};
-    else if (t > 0.33f) tint = (Color){180,160, 40, 255};
-    else                tint = (Color){200, 60, 50, 255};
-    DrawCube(body, ENEMY_RADIUS*2, ENEMY_HEIGHT, ENEMY_RADIUS*2, tint);
-    DrawCubeWires(body, ENEMY_RADIUS*2, ENEMY_HEIGHT, ENEMY_RADIUS*2, BLACK);
-    DrawSphere((Vector3){body.x, body.y + ENEMY_HEIGHT*0.5f + 0.3f, body.z}, 0.28f, tint);
+    Color hpTint;
+    if      (t > 0.66f) hpTint = (Color){80, 140, 60, 255};
+    else if (t > 0.33f) hpTint = (Color){180,160, 40, 255};
+    else                hpTint = (Color){200, 60, 50, 255};
+
+    float w = ENEMY_RADIUS * 2.0f, h = ENEMY_HEIGHT;
+    bool drawHead = true;
+    Color stripe = (Color){0, 0, 0, 0};
+    switch (e->type) {
+        case ZT_RUNNER:
+            w *= 0.85f; h *= 0.95f;
+            stripe = (Color){255, 220, 50, 255};
+            break;
+        case ZT_CRAWLER:
+            w *= 1.0f;  h *= 0.45f;
+            body.y -= h * 0.5f * 0.4f;  // lower
+            drawHead = false;
+            hpTint.r = (unsigned char)(hpTint.r * 0.7f);
+            hpTint.g = (unsigned char)(hpTint.g * 0.5f);
+            hpTint.b = (unsigned char)(hpTint.b * 0.5f);
+            break;
+        case ZT_BOSS:
+            w *= 1.7f; h *= 1.5f;
+            body.y += (h - ENEMY_HEIGHT) * 0.5f;
+            stripe = (Color){200, 40, 200, 255};
+            break;
+        default: break;
+    }
+
+    DrawCube(body, w, h, w, hpTint);
+    DrawCubeWires(body, w, h, w, BLACK);
+    if (stripe.a) {
+        DrawCube((Vector3){body.x, body.y, body.z}, w * 1.02f, h * 0.10f, w * 1.02f, stripe);
+    }
+    if (drawHead) {
+        DrawSphere((Vector3){body.x, body.y + h*0.5f + 0.3f, body.z},
+                   (e->type == ZT_BOSS ? 0.45f : 0.28f), hpTint);
+    }
 }
 
 static void DrawOtherPlayer(int idx) {
@@ -176,6 +207,27 @@ static const Color POWERUP_COLORS[PU_COUNT] = {
 
 static const char *POWERUP_LETTERS[PU_COUNT] = { "A", "N", "2x", "X", "C" };
 
+static void DrawMysteryBox(void) {
+    if (!mbox.placed) return;
+    Vector3 b = mbox.pos;
+    Color crate = (mbox.state == MBOX_IDLE) ? (Color){120, 80, 50, 255} : (Color){160, 100, 60, 255};
+    DrawCube(b, 1.8f, 1.0f, 1.2f, crate);
+    DrawCubeWires(b, 1.8f, 1.0f, 1.2f, BLACK);
+    // Yellow lid for visibility
+    DrawCube((Vector3){ b.x, b.y + 0.55f, b.z }, 1.8f, 0.1f, 1.2f, (Color){240, 200, 80, 255});
+
+    if (mbox.state == MBOX_ROLLING || mbox.state == MBOX_WAITING) {
+        Vector3 wp = { b.x, b.y + 1.4f + sinf(mbox.bob * 2.0f) * 0.1f, b.z };
+        rlPushMatrix();
+        rlTranslatef(wp.x, wp.y, wp.z);
+        rlRotatef(mbox.bob * 60.0f, 0, 1, 0);
+        Color wc = WEAPONS[mbox.showingWeapon].tint;
+        DrawCube((Vector3){0,0,0}, 0.9f, 0.25f, 0.2f, wc);
+        DrawCubeWires((Vector3){0,0,0}, 0.9f, 0.25f, 0.2f, BLACK);
+        rlPopMatrix();
+    }
+}
+
 static void DrawPowerUps(void) {
     for (int i = 0; i < MAX_POWERUPS; i++) {
         if (!powerUps[i].active) continue;
@@ -197,6 +249,7 @@ void Render_World3D(Camera camera) {
         DrawWallBuys();
         DrawPerkMachines();
         DrawPaP();
+        DrawMysteryBox();
         DrawPowerUps();
         for (int i = 0; i < NET_MAX_PLAYERS; i++) {
             if (i == localPlayerIdx) continue;

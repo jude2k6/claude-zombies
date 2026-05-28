@@ -45,6 +45,11 @@ void Hud_Draw(int sw, int sh, Player *me, Interact ix) {
     GuiProgressBar((Rectangle){62, 22, 215, 18}, NULL, NULL, &hpf, 0.0f, hpMax);
     snprintf(buf, sizeof buf, "%d / %d", me->hp, Perk_EffMaxHP(me));
     DrawText(buf, 145, 22, 16, RAYWHITE);
+    // Stamina sliver under HP
+    {
+        float s = me->stamina;
+        GuiProgressBar((Rectangle){62, 42, 215, 6}, NULL, NULL, &s, 0.0f, 100.0f);
+    }
     snprintf(buf, sizeof buf, "POINTS  %d", me->points);
     DrawText(buf, 22, 52, 22, YELLOW);
     snprintf(buf, sizeof buf, "ROUND  %d", roundNum);
@@ -183,6 +188,31 @@ void Hud_Draw(int sw, int sh, Player *me, Interact ix) {
                 snprintf(prompt, sizeof prompt, "[F]  OPEN DOOR  -  %d", d->cost);
                 if (me->points < d->cost) promptColor = (Color){200,80,80,255};
             }
+        } else if (ix.kind == IK_REVIVE) {
+            Player *t = &players[ix.idx];
+            border = (Color){80, 200, 80, 255};
+            snprintf(prompt, sizeof prompt, "[Hold E]  REVIVE %s",
+                     t->name[0] ? t->name : "teammate");
+        } else if (ix.kind == IK_MBOX) {
+            border = (Color){200, 100, 200, 255};
+            int meIdx = localPlayerIdx;
+            if (mbox.state == MBOX_IDLE) {
+                snprintf(prompt, sizeof prompt, "[F]  MYSTERY BOX  -  %d", MBOX_COST);
+                if (me->points < MBOX_COST) promptColor = (Color){200,80,80,255};
+            } else if (mbox.state == MBOX_ROLLING) {
+                snprintf(prompt, sizeof prompt, "Rolling... %.1fs", mbox.timer);
+                promptColor = (Color){220,180,220,255};
+            } else if (mbox.state == MBOX_WAITING) {
+                const WeaponDef *w = &WEAPONS[mbox.showingWeapon];
+                if (meIdx == mbox.ownerPlayer) {
+                    snprintf(prompt, sizeof prompt, "[F]  TAKE %s  (%.1fs)", w->name, mbox.timer);
+                } else {
+                    snprintf(prompt, sizeof prompt, "%s  -  waiting for %s",
+                             w->name,
+                             players[mbox.ownerPlayer].name[0] ? players[mbox.ownerPlayer].name : "owner");
+                    promptColor = GRAY;
+                }
+            }
         }
 
         if (prompt[0]) {
@@ -193,6 +223,9 @@ void Hud_Draw(int sw, int sh, Player *me, Interact ix) {
             DrawText(prompt, cx - tw/2, by, 26, promptColor);
             if (ix.kind == IK_WINDOW) {
                 float p = windows[ix.idx].repairProgress;
+                if (p > 0) GuiProgressBar((Rectangle){cx - tw/2, by + 36, tw, 8}, NULL, NULL, &p, 0.0f, 1.0f);
+            } else if (ix.kind == IK_REVIVE) {
+                float p = players[ix.idx].reviveAsTarget;
                 if (p > 0) GuiProgressBar((Rectangle){cx - tw/2, by + 36, tw, 8}, NULL, NULL, &p, 0.0f, 1.0f);
             }
         }

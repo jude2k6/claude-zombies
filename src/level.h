@@ -16,6 +16,7 @@ extern int         windowCount;
 extern PerkMachine perkMachines[PERK_COUNT];
 extern int         perkMachineCount;
 extern PackAPunch  pap;
+extern MysteryBox  mbox;
 extern Vector3     mapSpawns[NET_MAX_PLAYERS];
 extern int         mapSpawnCount;
 extern char        mapName[64];

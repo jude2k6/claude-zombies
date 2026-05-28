@@ -21,11 +21,20 @@ Built end-to-end with [Claude Code](https://claude.com/claude-code).
   - MP5 SMG · Olympia shotgun · M14 rifle · Ray Gun
 - **Pack-a-Punch** — spend points to upgrade a weapon (damage x2.5, mag x2,
   new name)
+- **Mystery Box** — $950 to roll a random weapon from the pool; the owner
+  has a few seconds to take it
 - **4 perks** — Juggernog (more HP), Speed Cola (faster reload),
   Double Tap (more damage, faster fire), Stamin-Up (faster movement)
 - **Per-player progression** in coop — own HP, points, inventory, perks
-- **Down/revive** — at 0 HP you go down; revive at the next round break.
+- **Down/revive** — at 0 HP you go down; a teammate can hold `E` over you
+  for ~4s to bring you back, or you'll auto-revive at the next round break.
   Game over when everyone is down at the same time.
+- **Zombie types** — Runners appear from round 4 (faster, less HP),
+  Crawlers from round 7 (low/no head, can't be headshot), Bosses can spawn
+  every 5 rounds (huge HP)
+- **Door pathfinding** — zombies route via the doorway when chasing a
+  player through an opened door
+- **Stamina** — sprinting drains a small bar that regens while walking
 
 ## Controls
 
@@ -143,6 +152,7 @@ WALLBUY  x z nx nz   PISTOL|SMG|SHOTGUN|RIFLE|RAYGUN
 WINDOW   x z nx nz   lockedByDoor    (-1 = always open)
 PERK     x z         JUG|SPEED|DTAP|STAMIN
 PAP      x z
+MBOX     x z
 ```
 
 The build copies `data/` next to the executable, so the game finds it

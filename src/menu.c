@@ -285,13 +285,47 @@ void Menu_DrawPause(int sw, int sh) {
 void Menu_DrawGameOver(int sw, int sh) {
     DrawRectangle(0, 0, sw, sh, (Color){120, 0, 0, 170});
     const char *msg = "GAME OVER";
-    int fs = 96; int tw = MeasureText(msg, fs);
-    DrawText(msg, sw/2 - tw/2, sh/3, fs, RAYWHITE);
+    int fs = 72; int tw = MeasureText(msg, fs);
+    DrawText(msg, sw/2 - tw/2, 60, fs, RAYWHITE);
     char rb[96]; snprintf(rb, sizeof rb, "Round %d reached", roundNum);
-    int rw = MeasureText(rb, 28);
-    DrawText(rb, sw/2 - rw/2, sh/3 + fs + 20, 28, RAYWHITE);
+    int rw = MeasureText(rb, 26);
+    DrawText(rb, sw/2 - rw/2, 60 + fs + 10, 26, RAYWHITE);
 
-    int bw = 260, bh = 50, bx = sw/2 - bw/2, by = sh/2 + 100;
+    // Stats table
+    int activePlayers = Player_ActiveCount();
+    int colW = 110;
+    int totalW = 220 + colW * 7;
+    int x0 = sw/2 - totalW/2;
+    int y0 = 220;
+
+    DrawText("PLAYER",     x0,                       y0, 18, (Color){220,220,220,255});
+    DrawText("POINTS",     x0 + 220,                 y0, 18, YELLOW);
+    DrawText("KILLS",      x0 + 220 + colW,          y0, 18, RAYWHITE);
+    DrawText("HEADSHOTS",  x0 + 220 + colW*2,        y0, 18, RAYWHITE);
+    DrawText("MELEE",      x0 + 220 + colW*3,        y0, 18, RAYWHITE);
+    DrawText("ACC %",      x0 + 220 + colW*4,        y0, 18, RAYWHITE);
+    DrawText("REVIVES",    x0 + 220 + colW*5,        y0, 18, RAYWHITE);
+    DrawLine(x0, y0 + 24, x0 + totalW, y0 + 24, (Color){200,200,200,180});
+
+    int row = 0;
+    for (int i = 0; i < NET_MAX_PLAYERS; i++) {
+        if (!players[i].active) continue;
+        Player *p = &players[i];
+        int yr = y0 + 36 + row * 26;
+        DrawText(p->name[0] ? p->name : "Player", x0, yr, 18, RAYWHITE);
+        char buf[32];
+        snprintf(buf, sizeof buf, "%d",  p->points);     DrawText(buf, x0 + 220,           yr, 18, YELLOW);
+        snprintf(buf, sizeof buf, "%d",  p->kills);      DrawText(buf, x0 + 220 + colW,    yr, 18, RAYWHITE);
+        snprintf(buf, sizeof buf, "%d",  p->headshots);  DrawText(buf, x0 + 220 + colW*2,  yr, 18, RAYWHITE);
+        snprintf(buf, sizeof buf, "%d",  p->meleeKills); DrawText(buf, x0 + 220 + colW*3,  yr, 18, RAYWHITE);
+        float acc = (p->shotsFired > 0) ? 100.0f * p->shotsHit / p->shotsFired : 0.0f;
+        snprintf(buf, sizeof buf, "%.1f", acc);          DrawText(buf, x0 + 220 + colW*4,  yr, 18, RAYWHITE);
+        snprintf(buf, sizeof buf, "%d",  p->revives);    DrawText(buf, x0 + 220 + colW*5,  yr, 18, RAYWHITE);
+        row++;
+    }
+    (void)activePlayers;
+
+    int bw = 260, bh = 50, bx = sw/2 - bw/2, by = sh - 120;
     GuiSetStyle(DEFAULT, TEXT_SIZE, 22);
     if (GuiButton((Rectangle){bx, by, bw, bh}, "MAIN MENU")) {
         Net_Shutdown(); netMode = NET_SOLO; uiState = UI_MENU;

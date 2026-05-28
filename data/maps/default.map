@@ -56,3 +56,6 @@ PERK -25.0 -22.0   STAMIN
 
 # Pack-a-Punch (in the south room, behind the door)
 PAP  0 -28
+
+# Mystery Box (spawn room)
+MBOX -22 15

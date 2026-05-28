@@ -26,12 +26,17 @@ typedef struct {
     int16_t invAmmo[INV_SLOTS];
     int16_t invReserve[INV_SLOTS];
     float   invReloadTimer[INV_SLOTS];
+    // Stats
+    int16_t kills, headshots, meleeKills, revives;
+    int32_t shotsFired, shotsHit;
+    float   reviveAsTarget;
 } SerPlayer;
 
 typedef struct {
     float    px, py, pz;
     int16_t  hp, maxHp;
     uint8_t  state;
+    uint8_t  type;
     uint8_t  targetWindow;
     float    bobPhase;
 } SerEnemy;
@@ -59,6 +64,12 @@ typedef struct {
     uint8_t  doorsOpened;
     float    doublePointsTimer;
     float    instaKillTimer;
+    // Mystery Box
+    uint8_t  mboxState;
+    float    mboxTimer;
+    uint8_t  mboxShowingWeapon;
+    uint8_t  mboxFinalWeapon;
+    int8_t   mboxOwnerPlayer;
     uint16_t numEnemies;
     uint16_t numBullets;
     uint16_t numPowerUps;
@@ -95,6 +106,13 @@ static void SerializePlayer(SerPlayer *dst, Player *src) {
         dst->invReserve[s]= (int16_t)src->inventory[s].reserve;
         dst->invReloadTimer[s] = src->inventory[s].reloadTimer;
     }
+    dst->kills      = (int16_t)src->kills;
+    dst->headshots  = (int16_t)src->headshots;
+    dst->meleeKills = (int16_t)src->meleeKills;
+    dst->revives    = (int16_t)src->revives;
+    dst->shotsFired = (int32_t)src->shotsFired;
+    dst->shotsHit   = (int32_t)src->shotsHit;
+    dst->reviveAsTarget = src->reviveAsTarget;
 }
 
 static void DeserializePlayer(Player *dst, SerPlayer *src, bool isLocal) {
@@ -118,6 +136,13 @@ static void DeserializePlayer(Player *dst, SerPlayer *src, bool isLocal) {
         dst->inventory[s].reserve = src->invReserve[s];
         dst->inventory[s].reloadTimer = src->invReloadTimer[s];
     }
+    dst->kills      = src->kills;
+    dst->headshots  = src->headshots;
+    dst->meleeKills = src->meleeKills;
+    dst->revives    = src->revives;
+    dst->shotsFired = src->shotsFired;
+    dst->shotsHit   = src->shotsHit;
+    dst->reviveAsTarget = src->reviveAsTarget;
     if (!wasActive && src->active && isLocal)
         dst->pos = (Vector3){ src->px, src->py, src->pz };
 }
@@ -146,6 +171,11 @@ void Protocol_HostBroadcastSnapshot(void) {
     }
     hdr->doublePointsTimer = doublePointsTimer;
     hdr->instaKillTimer    = instaKillTimer;
+    hdr->mboxState         = (uint8_t)mbox.state;
+    hdr->mboxTimer         = mbox.timer;
+    hdr->mboxShowingWeapon = (uint8_t)mbox.showingWeapon;
+    hdr->mboxFinalWeapon   = (uint8_t)mbox.finalWeapon;
+    hdr->mboxOwnerPlayer   = (int8_t)mbox.ownerPlayer;
     for (int i = 0; i < NET_MAX_PLAYERS; i++) SerializePlayer(&hdr->players[i], &players[i]);
 
     size_t off = sizeof *hdr;
@@ -155,7 +185,8 @@ void Protocol_HostBroadcastSnapshot(void) {
         SerEnemy se = {
             .px = enemies[i].pos.x, .py = enemies[i].pos.y, .pz = enemies[i].pos.z,
             .hp = (int16_t)enemies[i].hp, .maxHp = (int16_t)enemies[i].maxHp,
-            .state = (uint8_t)enemies[i].state, .targetWindow = (uint8_t)enemies[i].targetWindow,
+            .state = (uint8_t)enemies[i].state, .type = (uint8_t)enemies[i].type,
+            .targetWindow = (uint8_t)enemies[i].targetWindow,
             .bobPhase = enemies[i].bobPhase,
         };
         memcpy(snapshotBuf + off, &se, sizeof se);
@@ -212,6 +243,11 @@ void Protocol_ClientApplySnapshot(uint8_t *data, size_t len) {
     for (int i = 0; i < doorCount && i < 8; i++) doors[i].opened = (hdr->doorsOpened & (1u << i)) != 0;
     doublePointsTimer = hdr->doublePointsTimer;
     instaKillTimer    = hdr->instaKillTimer;
+    mbox.state         = hdr->mboxState;
+    mbox.timer         = hdr->mboxTimer;
+    mbox.showingWeapon = hdr->mboxShowingWeapon;
+    mbox.finalWeapon   = hdr->mboxFinalWeapon;
+    mbox.ownerPlayer   = hdr->mboxOwnerPlayer;
 
     for (int i = 0; i < NET_MAX_PLAYERS; i++)
         DeserializePlayer(&players[i], &hdr->players[i], i == localPlayerIdx);
@@ -224,6 +260,7 @@ void Protocol_ClientApplySnapshot(uint8_t *data, size_t len) {
         enemies[i].pos = (Vector3){ se.px, se.py, se.pz };
         enemies[i].hp = se.hp; enemies[i].maxHp = se.maxHp;
         enemies[i].state = (ZombieState)se.state;
+        enemies[i].type  = (ZombieType)se.type;
         enemies[i].targetWindow = se.targetWindow;
         enemies[i].bobPhase = se.bobPhase;
         enemies[i].alive = true;

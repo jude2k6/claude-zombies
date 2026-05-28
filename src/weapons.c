@@ -85,6 +85,7 @@ void Weapon_Fire(Player *p) {
     }
     s->ammo--;
     s->fireTimer = Weapon_EffFireCD(p, s);
+    p->shotsFired += w->pellets;
     if (ownerIdx == localPlayerIdx) muzzleFlashLocal = 0.05f;
 }
 
@@ -141,8 +142,11 @@ void Weapon_Melee(Player *p) {
         if (enemies[i].hp <= 0) {
             enemies[i].alive = false;
             enemiesAlive--;
-            if (ownerIdx >= 0 && ownerIdx < NET_MAX_PLAYERS && players[ownerIdx].active)
+            if (ownerIdx >= 0 && ownerIdx < NET_MAX_PLAYERS && players[ownerIdx].active) {
                 players[ownerIdx].points += MELEE_KILL_POINTS;
+                players[ownerIdx].kills++;
+                players[ownerIdx].meleeKills++;
+            }
         } else if (ownerIdx >= 0 && ownerIdx < NET_MAX_PLAYERS && players[ownerIdx].active) {
             players[ownerIdx].points += HIT_POINTS;
         }

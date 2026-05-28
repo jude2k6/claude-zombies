@@ -58,6 +58,9 @@ void Player_GiveStartingPistol(Player *p) {
     p->hp = 100;
     p->points = 500;
     p->alive = true;
+    p->stamina = 100.0f;
+    p->reviverIdx = -1;
+    p->reviveAsTarget = 0.0f;
 }
 
 void Player_ResetForGame(int idx, const char *name) {
@@ -106,8 +109,17 @@ void Player_ApplyLocalMove(Player *p, float dt) {
     Vector3 right = { cosf(p->yaw),  0,  sinf(p->yaw) };
 
     float speed = Perk_EffMoveSpeed(p);
-    if (IsKeyDown(KEY_LEFT_SHIFT)) speed *= 1.6f;          // sprint
+    bool wantSprint = IsKeyDown(KEY_LEFT_SHIFT);
+    bool moving = (IsKeyDown(KEY_W) || IsKeyDown(KEY_S) || IsKeyDown(KEY_A) || IsKeyDown(KEY_D));
+    bool sprinting = wantSprint && moving && p->stamina > 1.0f;
+    if (sprinting) speed *= 1.6f;
     if (IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_C)) speed *= 0.55f; // crouch
+
+    // Stamina drain/regen (local only)
+    if (sprinting) p->stamina -= 28.0f * dt;
+    else           p->stamina += 22.0f * dt;
+    if (p->stamina < 0)   p->stamina = 0;
+    if (p->stamina > 100) p->stamina = 100;
 
     Vector3 move = { 0 };
     if (IsKeyDown(KEY_W)) move = Vector3Add(move, fwd);
@@ -121,6 +133,5 @@ void Player_ApplyLocalMove(Player *p, float dt) {
     newPos.y = PLAYER_EYE;
     p->pos = Level_ResolveXZ(p->pos, newPos, PLAYER_RADIUS, true);
     PushOutOfEnemies(p);
-    // Final clamp against level after enemy push
     p->pos = Level_ResolveXZ(p->pos, p->pos, PLAYER_RADIUS, true);
 }

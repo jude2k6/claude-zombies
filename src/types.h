@@ -125,6 +125,21 @@ typedef struct {
 
     float      damageFlash;
     float      meleeTimer;
+
+    // Stats
+    int        kills;
+    int        headshots;
+    int        shotsFired;
+    int        shotsHit;
+    int        meleeKills;
+    int        revives;
+
+    // Locally-tracked (not in snapshot)
+    float      stamina;       // 0..100
+
+    // Target for hold-action (revive)
+    float      reviveAsTarget;  // progress while another player revives THIS one
+    int        reviverIdx;       // who is reviving us, -1 if none
 } Player;
 
 // ============================================================================
@@ -132,6 +147,7 @@ typedef struct {
 // ============================================================================
 
 typedef enum { ZS_OUTSIDE, ZS_AT_WINDOW, ZS_INSIDE } ZombieState;
+typedef enum { ZT_NORMAL = 0, ZT_RUNNER, ZT_CRAWLER, ZT_BOSS, ZT_COUNT } ZombieType;
 
 typedef struct {
     Vector3      pos;
@@ -142,9 +158,16 @@ typedef struct {
     float        bobPhase;
     float        speed;
     ZombieState  state;
+    ZombieType   type;
     int          targetWindow;
     float        attackTimer;
     int          targetPlayer;
+    Vector3      waypoint;       // intermediate path target (door)
+    bool         hasWaypoint;
+    // Host-only AI escape: when stuck, sidestep perpendicular for a beat.
+    float        escapeTimer;
+    Vector3      escapeDir;
+    uint8_t      stuckBias;
 } Enemy;
 
 typedef struct {
@@ -196,6 +219,24 @@ typedef struct {
     float   bob;
 } PackAPunch;
 
+#define MBOX_IDLE       0
+#define MBOX_ROLLING    1
+#define MBOX_WAITING    2
+#define MBOX_COST       950
+#define MBOX_ROLL_TIME   4.0f
+#define MBOX_WAIT_TIME   8.0f
+
+typedef struct {
+    bool    placed;
+    Vector3 pos;
+    int     state;
+    float   timer;
+    int     showingWeapon;
+    int     finalWeapon;
+    int     ownerPlayer;
+    float   bob;
+} MysteryBox;
+
 // ============================================================================
 //  Game flow
 // ============================================================================
@@ -210,8 +251,11 @@ typedef enum {
 } UiState;
 
 typedef enum {
-    IK_NONE, IK_WALLBUY, IK_PERK, IK_PAP, IK_WINDOW, IK_DOOR
+    IK_NONE, IK_WALLBUY, IK_PERK, IK_PAP, IK_WINDOW, IK_DOOR,
+    IK_REVIVE, IK_MBOX
 } InteractKind;
+
+#define REVIVE_TIME 4.0f
 
 typedef struct { InteractKind kind; int idx; float dist; } Interact;
 

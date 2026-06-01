@@ -159,6 +159,80 @@ int main(int argc, char **argv) {
         return errs > 0 ? 1 : 0;
     }
 
+    // CLI: `--screenshot-viewmodels` renders each weapon's first-person
+    // viewmodel against a neutral background and saves a PNG per weapon
+    // to viewmodel_<NAME>.png in the CWD. Used to verify viewmodel scale
+    // / yaw / connectivity without running the full game.
+    if (argc >= 2 && strcmp(argv[1], "--screenshot-viewmodels") == 0) {
+        SetTraceLogLevel(LOG_WARNING);
+        SetConfigFlags(FLAG_MSAA_4X_HINT);
+        InitWindow(1280, 720, "Viewmodel screenshot");
+        Weapons_Load();
+        Assets_Load();
+        Assets_ApplyWorldShader();
+
+        // Need a minimal level so Render_World3D doesn't barf on the
+        // walls/floor draw paths. Level_Build initializes the hardcoded
+        // fallback which is sufficient as a backdrop.
+        Level_Build();
+
+        localPlayerIdx = 0;
+        for (int i = 0; i < NET_MAX_PLAYERS; i++) memset(&players[i], 0, sizeof players[i]);
+        players[0].active = true;
+        players[0].alive = true;
+        players[0].pos = (Vector3){ 0, PLAYER_EYE, 0 };
+        players[0].yaw = 0.0f;
+        players[0].pitch = 0.0f;
+        players[0].currentSlot = 0;
+
+        Camera cam = {
+            .position   = players[0].pos,
+            .target     = Vector3Add(players[0].pos, Player_LookDir(0, 0)),
+            .up         = (Vector3){ 0, 1, 0 },
+            .fovy       = 75.0f,
+            .projection = CAMERA_PERSPECTIVE,
+        };
+
+        for (int wi = 0; wi < W_COUNT; wi++) {
+            if (!weaponModelLoaded[wi]) {
+                fprintf(stderr, "skip %s — model not loaded\n",
+                        WEAPONS[wi].idName ? WEAPONS[wi].idName : "?");
+                continue;
+            }
+            players[0].inventory[0].weaponIdx = wi;
+            players[0].inventory[0].owned = true;
+            players[0].inventory[0].ammo = WEAPONS[wi].magSize;
+            players[0].inventory[0].reserve = WEAPONS[wi].reserveMax;
+
+            // Render_World3D activates the world shader and draws the
+            // viewmodel inside it — so we get lit materials instead of
+            // a black silhouette. The empty level just draws a sky + floor
+            // backdrop which makes scale easier to gauge anyway.
+            BeginDrawing();
+            ClearBackground((Color){ 60, 65, 75, 255 });
+            Render_World3D(cam);
+            DrawText(WEAPONS[wi].idName ? WEAPONS[wi].idName : "?",
+                     20, 20, 36, (Color){240,240,240,255});
+            DrawText(WEAPONS[wi].name ? WEAPONS[wi].name : "?",
+                     20, 64, 24, (Color){200,200,200,255});
+            char dims[64];
+            snprintf(dims, sizeof dims, "model_scale=%.1f  yaw=%.0f deg",
+                     weaponTune[wi].scale, weaponTune[wi].yawDeg);
+            DrawText(dims, 20, 96, 18, (Color){180,180,200,255});
+            EndDrawing();
+
+            char fname[128];
+            snprintf(fname, sizeof fname, "viewmodel_%s.png",
+                     WEAPONS[wi].idName ? WEAPONS[wi].idName : "x");
+            TakeScreenshot(fname);
+            fprintf(stderr, "wrote %s\n", fname);
+        }
+        Assets_Unload();
+        Weapons_Unload();
+        CloseWindow();
+        return 0;
+    }
+
     SetConfigFlags(FLAG_MSAA_4X_HINT | FLAG_VSYNC_HINT | FLAG_WINDOW_RESIZABLE);
     InitWindow(WINDOW_W_DEFAULT, WINDOW_H_DEFAULT, "Claude Zombies");
     SetTargetFPS(60);

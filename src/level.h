@@ -7,6 +7,7 @@ extern Box         obstacles[MAX_OBSTACLES];
 extern int         obstacleCount;
 extern Box         interiorWalls[MAX_INTERIOR_WALLS];
 extern int         interiorWallCount;
+extern bool        interiorWallNoClip[MAX_INTERIOR_WALLS];
 extern Door        doors[MAX_DOORS];
 extern int         doorCount;
 extern WallBuy     wallBuys[8];

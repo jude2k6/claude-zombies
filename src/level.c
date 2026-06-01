@@ -11,6 +11,10 @@ Box         obstacles[MAX_OBSTACLES];
 int         obstacleCount = 0;
 Box         interiorWalls[MAX_INTERIOR_WALLS];
 int         interiorWallCount = 0;
+// Per-wall flag: header/lintel segments above door openings are drawn and
+// block bullets (the 3D segment test is Y-aware) but must NOT block XZ
+// movement, or the doorway is walled off whether the door is open or shut.
+bool        interiorWallNoClip[MAX_INTERIOR_WALLS];
 Door        doors[MAX_DOORS];
 int         doorCount = 0;
 WallBuy     wallBuys[8];
@@ -94,7 +98,7 @@ static void UnstickXZ(Vector3 *p, float radius) {
         for (int i = 0; i < obstacleCount; i++)
             if (PushOutOfBoxXZ(p, radius, obstacles[i])) moved = true;
         for (int i = 0; i < interiorWallCount; i++)
-            if (PushOutOfBoxXZ(p, radius, interiorWalls[i])) moved = true;
+            if (!interiorWallNoClip[i] && PushOutOfBoxXZ(p, radius, interiorWalls[i])) moved = true;
         for (int i = 0; i < doorCount; i++)
             if (!doors[i].opened && PushOutOfBoxXZ(p, radius, doors[i].box)) moved = true;
         for (int i = 0; i < mapPropCount; i++)
@@ -124,7 +128,7 @@ Vector3 Level_ResolveXZ(Vector3 from, Vector3 to, float radius, bool clampArena)
     for (int i = 0; i < obstacleCount; i++)
         if (Level_CircleHitsBoxXZ(stepX, radius, obstacles[i])) { stepX.x = origin.x; break; }
     for (int i = 0; i < interiorWallCount; i++)
-        if (Level_CircleHitsBoxXZ(stepX, radius, interiorWalls[i])) { stepX.x = origin.x; break; }
+        if (!interiorWallNoClip[i] && Level_CircleHitsBoxXZ(stepX, radius, interiorWalls[i])) { stepX.x = origin.x; break; }
     for (int i = 0; i < doorCount; i++)
         if (!doors[i].opened && Level_CircleHitsBoxXZ(stepX, radius, doors[i].box)) { stepX.x = origin.x; break; }
     for (int i = 0; i < mapPropCount; i++)
@@ -134,7 +138,7 @@ Vector3 Level_ResolveXZ(Vector3 from, Vector3 to, float radius, bool clampArena)
     for (int i = 0; i < obstacleCount; i++)
         if (Level_CircleHitsBoxXZ(stepZ, radius, obstacles[i])) { stepZ.z = origin.z; break; }
     for (int i = 0; i < interiorWallCount; i++)
-        if (Level_CircleHitsBoxXZ(stepZ, radius, interiorWalls[i])) { stepZ.z = origin.z; break; }
+        if (!interiorWallNoClip[i] && Level_CircleHitsBoxXZ(stepZ, radius, interiorWalls[i])) { stepZ.z = origin.z; break; }
     for (int i = 0; i < doorCount; i++)
         if (!doors[i].opened && Level_CircleHitsBoxXZ(stepZ, radius, doors[i].box)) { stepZ.z = origin.z; break; }
     for (int i = 0; i < mapPropCount; i++)
@@ -165,7 +169,7 @@ bool Level_PathClearXZ(Vector3 from, Vector3 dir, float radius, float dist) {
         for (int i = 0; i < obstacleCount; i++)
             if (Level_CircleHitsBoxXZ(p, radius, obstacles[i])) return false;
         for (int i = 0; i < interiorWallCount; i++)
-            if (Level_CircleHitsBoxXZ(p, radius, interiorWalls[i])) return false;
+            if (!interiorWallNoClip[i] && Level_CircleHitsBoxXZ(p, radius, interiorWalls[i])) return false;
         for (int i = 0; i < doorCount; i++)
             if (!doors[i].opened && Level_CircleHitsBoxXZ(p, radius, doors[i].box)) return false;
         for (int i = 0; i < mapPropCount; i++)
@@ -200,6 +204,7 @@ static int PerkNameToIdx(const char *s) {
 static void ClearLevel(void) {
     obstacleCount = 0;
     interiorWallCount = 0;
+    memset(interiorWallNoClip, 0, sizeof interiorWallNoClip);
     doorCount = 0;
     wallBuyCount = 0;
     windowCount = 0;
@@ -502,6 +507,7 @@ static int ParseMapFile(const char *path, bool validateOnly) {
                     if (!EmitWallSegment(x1, z1, dl, z1, lineNo, &errors, errs)) continue;
                     if (!EmitWallSegment(dr, z1, x2, z1, lineNo, &errors, errs)) continue;
                     if (interiorWallCount < MAX_INTERIOR_WALLS) {
+                        interiorWallNoClip[interiorWallCount] = true;
                         interiorWalls[interiorWallCount++] = (Box){
                             { center, headerY, z1 },
                             { width,  headerSY, WALL_THICK },
@@ -522,6 +528,7 @@ static int ParseMapFile(const char *path, bool validateOnly) {
                     if (!EmitWallSegment(x1, z1, x1, dl, lineNo, &errors, errs)) continue;
                     if (!EmitWallSegment(x1, dr, x1, z2, lineNo, &errors, errs)) continue;
                     if (interiorWallCount < MAX_INTERIOR_WALLS) {
+                        interiorWallNoClip[interiorWallCount] = true;
                         interiorWalls[interiorWallCount++] = (Box){
                             { x1,         headerY,  center },
                             { WALL_THICK, headerSY, width  },

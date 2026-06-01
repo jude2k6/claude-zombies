@@ -4,49 +4,51 @@
 
 NAME Factory
 
+ATMOSPHERE
+    fog       28 30 35  15 70    # slightly brighter, industrial haze
+    sky_tint  255 245 220
+END
+
 SPAWN  0 0
 SPAWN  3 0
 SPAWN -3 0
 SPAWN  0 3
 
-# Crates and machinery
-OBSTACLE   6 1.0   6    3 2 3
-OBSTACLE  -6 1.5   6    3 3 3
-OBSTACLE  14 1.0  -4    2 2 6
-OBSTACLE -14 1.0  -4    2 2 6
-OBSTACLE   0 1.5 -10    8 3 2
-OBSTACLE  22 1.0  18    4 2 4
-OBSTACLE -22 1.0  18    4 2 4
-OBSTACLE  -8 0.5  28    16 1 2
+# --- Floor clutter ---------------------------------------------------
+OBSTACLE   6   6   3 3
+OBSTACLE  -6   6   3 3 3
+OBSTACLE  14  -4   2 6
+OBSTACLE -14  -4   2 6
+OBSTACLE   0 -10   8 2 3
+OBSTACLE  22  18   4 4
+OBSTACLE -22  18   4 4
+OBSTACLE  -8  28  16 2 1
 
-# East/west interior walls forming the central corridor
-WALL  -14.0 2.5  14   12 5 1
-WALL   14.0 2.5  14   12 5 1
+ROOM east_room
+    # East/west walls split the map at z=14 with $1000 doorways.
+    WALL  16 14   40 14  DOOR 22 2 1000 AS east_door
 
-# Two doors into the back rooms
-DOOR  -22.0 2.5  14    4 5 1  1000
-DOOR   22.0 2.5  14    4 5 1  1000
+    WALLBUY  39.45  6  -x  SMG
+    PERK     20 24  SPEED
+    PAP      28 22
+END
 
-# Wall buys spread around the perimeter
-WALLBUY  10.0  39.45    0 -1   SHOTGUN
-WALLBUY  39.45   6.0   -1  0   SMG
-WALLBUY -10.0 -39.45    0  1   RIFLE
-WALLBUY -39.45  -6.0    1  0   RAYGUN
+ROOM west_room
+    WALL -40 14  -16 14  DOOR -22 2 1000 AS west_door
 
-# Windows
-WINDOW  -10.0  40.0   0 -1   -1
-WINDOW   40.0  -8.0  -1  0   -1
-WINDOW    8.0 -40.0   0  1   -1
-WINDOW  -40.0  16.0   1  0    1
+    WALLBUY -39.45 -6  +x  RAYGUN
+    PERK    -20 24  JUG
+    MBOX    -28 22
+END
 
-# Perks
-PERK  -20.0  24.0   JUG
-PERK   20.0  24.0   SPEED
-PERK    0.0 -22.0   DTAP
-PERK   24.0  -22.0  STAMIN
+# --- Open arena perimeter --------------------------------------------
+WALLBUY  10    39.45  -z  SHOTGUN
+WALLBUY -10   -39.45  +z  RIFLE
 
-# Pack-a-Punch (east back room)
-PAP   28 22
+WINDOW  -10  40   -z
+WINDOW   40   -8  -x
+WINDOW    8  -40  +z
+WINDOW  -40   16  +x LOCKED_BY west_door
 
-# Mystery Box (west back room)
-MBOX -28 22
+PERK   0  -22 DTAP
+PERK  24  -22 STAMIN

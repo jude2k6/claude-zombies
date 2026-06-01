@@ -3,6 +3,7 @@
 #include "perks.h"
 #include "entities.h"
 #include "pad.h"
+#include "settings.h"
 #include "raymath.h"
 #include <string.h>
 #include <math.h>
@@ -63,6 +64,7 @@ void Player_GiveStartingPistol(Player *p) {
     p->downed = false;
     p->bleedTimer = 0.0f;
     p->stamina = 100.0f;
+    p->sprintBlend = 0.0f;
     p->reviverIdx = -1;
     p->reviveAsTarget = 0.0f;
 }
@@ -121,13 +123,20 @@ void Player_ApplyLocalMove(Player *p, float dt) {
 
     float speed = Perk_EffMoveSpeed(p);
     float padX = Pad_StickX(0), padY = Pad_StickY(0);  // forward = -Y
-    bool wantSprint = IsKeyDown(KEY_LEFT_SHIFT) || Pad_Down(PAD_L3);
+    bool wantSprint = IsKeyDown(KEY_LEFT_SHIFT) || Bind_Down(BA_SPRINT);
     bool kbdMove   = (IsKeyDown(KEY_W) || IsKeyDown(KEY_S) || IsKeyDown(KEY_A) || IsKeyDown(KEY_D));
     bool padMove   = (fabsf(padX) > 0.01f || fabsf(padY) > 0.01f);
     bool moving    = kbdMove || padMove;
     bool sprinting = wantSprint && moving && p->stamina > 1.0f && !p->adsHeld;
-    if (sprinting) speed *= 1.6f;
-    if (IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_C) || Pad_Down(PAD_B)) speed *= 0.55f; // crouch
+    // Smoothly ramp into / out of sprint. Faster decel than accel so the
+    // player snaps to walking the instant they let off, but takes a beat to
+    // wind up. Framerate-independent exp blend.
+    float sprintTarget = sprinting ? 1.0f : 0.0f;
+    float sprintRate   = sprinting ? 5.5f : 14.0f;
+    p->sprintBlend += (sprintTarget - p->sprintBlend) * (1.0f - expf(-sprintRate * dt));
+    if (p->sprintBlend < 0.001f) p->sprintBlend = 0.0f;
+    speed *= 1.0f + 0.6f * p->sprintBlend;
+    if (IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_C) || Bind_Down(BA_CROUCH)) speed *= 0.55f; // crouch
     if (p->adsHeld) speed *= ADS_MOVE_MUL;
 
     // Stamina drain/regen (local only)
@@ -153,7 +162,7 @@ void Player_ApplyLocalMove(Player *p, float dt) {
     }
 
     // Jump: triggered only on rising edge while grounded.
-    if (p->onGround && (IsKeyPressed(KEY_SPACE) || Pad_Pressed(PAD_A))) {
+    if (p->onGround && (IsKeyPressed(KEY_SPACE) || Bind_Pressed(BA_JUMP))) {
         p->velY = PLAYER_JUMP_VEL;
         p->onGround = false;
     }

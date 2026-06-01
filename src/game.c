@@ -5,6 +5,7 @@
 #include "entities.h"
 #include "interact.h"
 #include "level.h"
+#include "decals.h"
 
 int        roundNum = 0;
 GamePhase  gamePhase = GS_PRE_GAME;
@@ -48,34 +49,78 @@ void Game_StartRound(int r) {
 }
 
 void Game_Tick(float dt) {
-    // Per-player weapon timers + fire-held resolution
+    // Per-player weapon timers + fire-mode resolution
     for (int i = 0; i < NET_MAX_PLAYERS; i++) {
         Player *p = &players[i];
         if (!p->active) continue;
         for (int s = 0; s < INV_SLOTS; s++) {
-            if (!p->inventory[s].owned) continue;
-            if (p->inventory[s].fireTimer   > 0) p->inventory[s].fireTimer   -= dt;
-            if (p->inventory[s].reloadTimer > 0) {
-                p->inventory[s].reloadTimer -= dt;
-                if (p->inventory[s].reloadTimer <= 0) {
-                    p->inventory[s].reloadTimer = 0;
-                    Weapon_FinishReloadIfReady(p, &p->inventory[s]);
+            WeaponSlot *ws = &p->inventory[s];
+            if (!ws->owned) continue;
+            if (ws->fireTimer   > 0) ws->fireTimer   -= dt;
+            if (ws->burstTimer  > 0) ws->burstTimer  -= dt;
+            if (ws->reloadTimer > 0) {
+                ws->reloadTimer -= dt;
+                if (ws->reloadTimer <= 0) {
+                    ws->reloadTimer = 0;
+                    Weapon_FinishReloadIfReady(p, ws);
                 }
             }
         }
-        if (p->alive && p->fireHeld) {
+
+        if (p->alive) {
             WeaponSlot *cs = &p->inventory[p->currentSlot];
             const WeaponDef *cw = &WEAPONS[cs->weaponIdx];
-            if (cw->automatic || cs->fireTimer <= 0) {
-                if (cs->ammo <= 0 && cs->reserve > 0 && cs->reloadTimer <= 0) Weapon_StartReload(p);
-                else Weapon_Fire(p);
+
+            // Burst progression — runs even if the trigger was released after
+            // the burst started (canonical burst behavior).
+            if (cs->burstRemaining > 0 && cs->burstTimer <= 0 && cs->reloadTimer <= 0) {
+                if (cs->ammo > 0) {
+                    Weapon_Fire(p);
+                    cs->burstRemaining--;
+                    if (cs->burstRemaining > 0) {
+                        // Mid-burst — override the inter-shot fireTimer (set
+                        // by Weapon_Fire) so burstInterval gates next shot.
+                        cs->fireTimer  = 0.0f;
+                        cs->burstTimer = cw->burstInterval;
+                    }
+                    // Last shot leaves fireTimer at full cooldown (post-burst)
+                } else {
+                    cs->burstRemaining = 0;
+                }
+            }
+
+            bool firePressed = p->fireHeld && !p->prevFireHeld;
+
+            if (p->fireHeld && cs->burstRemaining == 0 && cs->reloadTimer <= 0) {
+                // Auto-reload empty mag if we have reserve
+                if (cs->ammo <= 0 && cs->reserve > 0 && cs->fireTimer <= 0) {
+                    Weapon_StartReload(p);
+                } else if (cs->fireTimer <= 0 && cs->ammo > 0) {
+                    switch (cw->fireMode) {
+                        case FM_AUTO:
+                            Weapon_Fire(p);
+                            break;
+                        case FM_SEMI:
+                            if (firePressed) Weapon_Fire(p);
+                            break;
+                        case FM_BURST:
+                            if (firePressed) {
+                                cs->burstRemaining = cw->burstCount;
+                                cs->burstTimer = 0.0f;  // first shot immediate next tick
+                            }
+                            break;
+                    }
+                }
             }
         }
+        p->prevFireHeld = p->fireHeld;
+
         if (p->damageFlash > 0) p->damageFlash -= dt * 1.5f;
         if (p->meleeTimer  > 0) p->meleeTimer  -= dt;
     }
 
     Bullets_Update(dt);
+    Decals_Update(dt);
     Enemies_Update(dt);
     Enemies_Separate();
     Enemies_UpdateSpawns(roundNum, dt);

@@ -54,6 +54,9 @@ add_executable(shooter
     src/pad.c
     src/fx.c
     src/audio.c
+    src/settings.c
+    src/assets.c
+    src/decals.c
 )
 target_include_directories(shooter PRIVATE
     ${raygui_SOURCE_DIR}/src

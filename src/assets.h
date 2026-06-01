@@ -1,0 +1,98 @@
+#ifndef SHOOTER_ASSETS_H
+#define SHOOTER_ASSETS_H
+
+#include "raylib.h"
+#include "types.h"
+
+// ---- weapon models -------------------------------------------------------
+// Weapon model storage + per-weapon tune are owned by weapons.{c,h} (loaded
+// alongside the .weapon spec under data/weapons/<name>/). Include weapons.h
+// to access weaponModels[] / weaponModelLoaded[] / weaponTune[].
+
+// ---- generic prop registry ----------------------------------------------
+// Every non-weapon model the renderer can use is registered here. The order
+// must match PROP_FILES[] in assets.c. Each render site calls
+// `propModelLoaded[id]` to choose between the model and a primitive
+// fallback, so it's safe to ship the binary with any subset of these
+// missing — see data/models/ASSETS.md for the spec of every entry.
+typedef enum {
+    PROP_ZOMBIE = 0,
+    PROP_MYSTERY_BOX,
+    PROP_BOARD,
+    PROP_SANDBAG_STACK,
+    PROP_DOOR,
+    PROP_DOOR_FRAME,
+    PROP_OBSTACLE_CRATE,
+    PROP_OBSTACLE_BARREL,
+    PROP_PERK_JUG,
+    PROP_PERK_SPEED,
+    PROP_PERK_DTAP,
+    PROP_PERK_STAMIN,
+    PROP_PAP,
+    PROP_WALLBUY_PANEL,
+    PROP_POWERUP_DROP,
+    PROP_PLAYER_M,
+    PROP_COUNT
+} PropId;
+
+extern Model propModels[PROP_COUNT];
+extern bool  propModelLoaded[PROP_COUNT];
+
+// ---- texture registry --------------------------------------------------
+// Walls and floors use textured surfaces instead of OBJ tiles. Renderer
+// looks up `textures[id]` and falls back to a flat-colour cube draw when
+// the texture isn't loaded — see data/models/ASSETS.md "Textures".
+typedef enum {
+    TEX_FLOOR = 0,    // arena floor
+    TEX_GROUND,       // outside-the-walls plane
+    TEX_WALL_EXT,     // exterior arena walls
+    TEX_WALL_INT,     // interior dividing walls
+    TEX_CEILING,      // reserved (no ceiling on current maps)
+    TEX_COUNT
+} TextureId;
+
+extern Texture2D textures[TEX_COUNT];
+extern bool      textureLoaded[TEX_COUNT];
+
+// Repeat distance — the texture tiles once every TILE_SIZE world metres.
+// At 4 m a 40 m floor still tiles 10× per axis, but the visible grid is
+// soft enough that the `tileVariation` shader overlay (see world.fs) hides
+// the remaining repetition.
+#define TILE_SIZE 4.0f
+
+// ---- shaders ------------------------------------------------------------
+// `worldShader` replaces raylib's default shader for the 3D pass so every
+// model and every rlgl immediate draw goes through one program that does
+// texture * tint * fog. `skyShader` paints the procedural night sky.
+// Both share data/shaders/*.{vs,fs}; falling back to the default shader
+// if the files don't load means missing-asset state still runs.
+extern Shader worldShader;
+extern bool   worldShaderLoaded;
+extern int    worldShader_fogColorLoc;
+extern int    worldShader_fogStartLoc;
+extern int    worldShader_fogEndLoc;
+extern int    worldShader_sunDirLoc;
+extern int    worldShader_sunColorLoc;
+extern int    worldShader_ambientColorLoc;
+extern int    worldShader_tileVariationLoc;
+
+extern Shader skyShader;
+extern bool   skyShaderLoaded;
+extern Model  skyModel;             // unit cube, materials[0].shader = skyShader
+
+// Tuning the renderer applies to worldShader every frame.
+extern float   fogStart;
+extern float   fogEnd;
+extern Color   fogColor;
+extern Vector3 sunDir;          // direction the moon's light travels (unit)
+extern Vector3 sunColor;        // RGB 0..1
+extern Vector3 ambientColor;    // RGB 0..1
+
+void Assets_Load(void);    // call after InitWindow
+void Assets_Unload(void);  // call before CloseWindow
+
+// Wire `worldShader` onto every loaded prop / weapon model and to rlgl's
+// default. Called after Assets_Load and after any later LoadModel.
+void Assets_ApplyWorldShader(void);
+
+#endif

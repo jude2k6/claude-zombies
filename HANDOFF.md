@@ -12,27 +12,191 @@ and **enet 1.3.18** (all via CMake `FetchContent`). Host-authoritative
 
 Repo: `git@github.com:jude2k6/claude-zombies.git` · branch: `main`.
 
-## Current state (2026-05-28)
+## Current state (2026-06-01)
 
-**There are uncommitted changes** for a batch of features the user
-asked for ("add 1 2 3 4 12 9"). Build is clean; smoke-tested. The
-commit + push step was never executed before context compaction.
+This session committed the big asset/rendering/map pass that had been
+sitting uncommitted, plus added: differentiated zombie AI, proactive
+obstacle avoidance, fire modes + recoil + damage dropoff for weapons,
+and a per-folder data-driven weapon system (`.weapon` files). All 5
+weapons were re-authored from scratch in Blender (replacing the
+Quaternius set). Build clean, smoke-tested.
 
-Run `git status` and `git diff` to see exactly what's pending. The
-batch covers:
+### Today's session (2026-06-01, evening pass)
 
-- Per-player stats (kills, headshots, melee, accuracy, revives) +
-  game-over stats table.
-- Stamina bar for sprint (local-only `Player.stamina`).
-- New `ZombieType`: Runner (R4+, fast/low HP), Crawler (R7+, no head,
-  can't be headshot), Boss (every 5th round, big HP).
-- Door waypoint pathfinding (`ZS_INSIDE` case in `Enemies_Update`).
-- Hold-`E` revive of downed teammates (new `IK_REVIVE`).
-- Mystery Box (`MBOX x z` in map, `$950`, 4s spin, 8s claim window).
-- **Network protocol bumped to v4** (`NET_PROTO_VERSION` in
-  `src/net.h`). Old clients won't connect — that's intentional.
+- **Zombie type AI** (`src/entities.c`):
+  - **Runner**: 0.55s lunge bursts at ~1.9× speed with ~3s cooldown, only
+    when 1.2–9 m away *and* `Level_PathClearXZ` to target. Retargets
+    ~2× faster than normal. Smaller bite (0.75×) but shorter touch CD.
+  - **Crawler**: serpentine weave (lateral sine around `dirGoal`, max
+    ~25° deflection). Longest retarget commit. Bites *hardest* (1.4×).
+  - **Boss**: no weave, slight slow (0.95×), 3× contact damage, +30%
+    bite cooldown, extra camera punch on hit.
+  - **Normal**: unchanged shuffle.
+  - Per-type contact damage + touch cooldown lives in the ZS_INSIDE
+    branch of `Enemies_Update`. New field `Enemy.specialTimer` holds
+    runner lunge cooldown/active state.
+- **Proactive obstacle avoidance** — new `Level_PathClearXZ(from, dir,
+  radius, dist)` in `level.{c,h}`. ZS_INSIDE movement now does a
+  ~0.4 s lookahead in `moveDir`. If blocked, fans out angles
+  (30°/60°/90°/125°, both sides, biased toward last successful side)
+  and picks the smallest deflection that's clear. Commits to the
+  chosen direction for 0.3 s via `escapeDir`/`escapeTimer` to avoid
+  jitter at obstacle edges. Old reactive "haven't moved → sidestep"
+  remains as fallback for wedged-in-corner cases.
+- **Weapon fire modes** (`src/types.h`, `weapons.c`, `game.c`) — new
+  `FireMode` enum: `FM_SEMI` / `FM_BURST` / `FM_AUTO`. Edge-detected
+  press via `Player.prevFireHeld` (semi-auto previously auto-spammed
+  on hold). Burst progression via `WeaponSlot.burstRemaining` +
+  `burstTimer` — burst completes even if trigger released.
+  `fireCooldown` is now the *post-burst* cooldown; `burstInterval`
+  gates within the burst.
+  Assignment: pistol/shotgun/raygun = semi, SMG = auto, rifle =
+  3-round burst (0.07s interval).
+- **Per-weapon recoil** — new `recoilPitch` + `recoilYaw` on
+  `WeaponDef`. `Weapon_Fire` kicks `p->pitch` (up) and ±`yaw` after
+  the shot fires (so first round still lands where aimed). ADS halves.
+  Pitch clamped to existing ±1.55 rad. Solo/host correct; MP clients
+  may flicker since local input writes pitch each frame — flag for
+  later if MP play happens.
+- **Damage dropoff** — new `dropoffStart` / `dropoffEnd` /
+  `dropoffMinMul` on `WeaponDef`. `Bullet` now carries `origin` +
+  `weaponIdx`. At hit, distance from origin scales damage linearly
+  between start/end. Headshot ×2 applies post-dropoff. Pistol/SMG
+  moderate, shotgun steep (25% at 18m), rifle near-flat, raygun flat.
+- **Per-folder weapons** — `WEAPONS[]` no longer `const`. Compiled
+  defaults serve as fallbacks; `Weapons_Load()` scans `data/weapons/`
+  recursively (raylib's `LoadDirectoryFilesEx`), parses each
+  `<name>.weapon` (line-based, `#` comments, mirrors `.map` style),
+  populates the slot via the `id` field (PISTOL/SMG/SHOTGUN/RIFLE/
+  RAYGUN), and loads the model relative to the `.weapon` file's
+  directory. Storage for `weaponModels[]` / `weaponModelLoaded[]` /
+  `weaponTune[]` moved from `assets.{c,h}` to `weapons.{c,h}`.
+  `Assets_Load` no longer touches weapons; `Assets_ApplyWorldShader`
+  still iterates `weaponModels[]` (includes `weapons.h`).
+  Boot order in `main.c`: `Weapons_Load()` → `Assets_Load()` →
+  `Assets_ApplyWorldShader()`.
+- **`.weapon` file format** — see any of `data/weapons/*/<name>.weapon`.
+  Every `WeaponDef` field exposable plus `model`, `model_scale`,
+  `model_yaw`, `model_offset`. Defaults preserved for missing keys.
+- **`WeaponCategory` enum** — `WC_PRIMARY` / `WC_SPECIAL` / `WC_MELEE`
+  / `WC_LETHAL` / `WC_TACTICAL`. Currently 4 guns are PRIMARY, raygun
+  is SPECIAL. Nothing reads `category` yet — it's foundation for the
+  next pass (dedicated grenade/tactical slots, melee weapon slots).
+- **5 new weapon models authored in Blender** under
+  `data/weapons/<name>/`:
+  - M1911 pistol — slide + frame + grip + sights + ejection port
+  - MP5 SMG — receiver + magwell + curved mag + collapsible stock
+  - Olympia shotgun — over/under double-barrel + wood stock & forend
+  - M14 rifle — long barrel + wood furniture + 20-round box mag
+  - Ray Gun — green metal body + glowing coils + brass + power cell
+  All multi-material, Principled-BSDF `Base Color`, exported with
+  `forward_axis='Z'` + `export_triangulated_mesh=True`. Long axis
+  authored along `-Y` in Blender → `-Z` in OBJ → `model_yaw=0`.
+- **Discovered & worked around raylib OBJ bug** — `LoadOBJ` SEGVs on
+  n-gons with **>20 vertices**. Cylinder caps with `vertices ≥ 24`
+  export as a single n-gon face and trigger a heap overflow in
+  tinyobj's face buffer. **Fix**: always export with
+  `export_triangulated_mesh=True`. Different from the
+  no-UV-texcoord-overflow bug already documented — that one corrupts
+  texcoords silently; this one crashes.
+- **Weapon scale baseline** — Quaternius models are authored at ~10
+  units long (1 unit ≈ 1 inch). My models are at ~1 unit ≈ 1 metre,
+  so `model_scale` had to be bumped by ~10× across the board
+  (pistol 12, smg/shotgun/rifle 10, raygun 11). When adding more
+  weapons, target ~0.5–1.5 m in Blender and use `model_scale` in the
+  10–15 range.
 
-Ask the user before committing/pushing — they may want to test first.
+Earlier-in-day work (also still uncommitted before this commit):
+
+- **Bullets** — muzzle-origin spawn (was crosshair), per-weapon
+  `bulletSpeed` / `bulletLife` / `tracerWidth` in `WEAPONS[]`, swept-slab
+  vs. AABB + swept-cylinder vs. enemy in `Bullets_Update`, billboard
+  tracers with speed-derived colour.
+- **Decals** — new `src/decals.{h,c}`, 96-slot ring buffer, `DECAL_BLOOD`
+  on enemy hits + `DECAL_IMPACT` on static geometry. `rlDisableDepthMask`
+  while drawing.
+- **Lit shader** — `world.{vs,fs}` v2 with directional light + ambient
+  via screen-space derived flat normals (`dFdx`/`dFdy` on
+  `fragWorldPos`), so it works for both authored OBJs and rlgl
+  immediate-mode quads without per-vertex normals. `sunDir` / `sunColor`
+  / `ambientColor` globals in `assets.{h,c}`.
+- **All Round-2 prop OBJs authored in Blender** — `door.obj`,
+  `door_frame.obj`, `obstacle_crate.obj`, `obstacle_barrel.obj`, 4 perk
+  machines, `pap_machine.obj`, `wallbuy_panel.obj`, `powerup_drop.obj`,
+  `player_m.obj`. All re-exported with base at Y=0 (floor convention).
+- **Perks re-shaped as proper vending machines** — was 1.04 × 0.84 ×
+  2.44 m (too tall, too thin); now 1.26 × 0.96 × 2.34 m with plinth,
+  cabinet, glowing top sign, recessed display, dispense tray + lip,
+  coin slot, side stripes. Per-perk colour theme baked in.
+- **Door geometry fit** — header wall segment above the door cutout so
+  the opening is 2.5 m tall (matching `DOOR_HEIGHT`), door + frame
+  share scale (`openingW / FRAME_OBJ_WIDTH`) so the door sits inside
+  the frame jamb. Plank-barricade-across-closed-door removed.
+- **Map door widths narrowed** from 4–6 m to 2 m across all three maps
+  (so the 1.8 m frame OBJ doesn't horizontally stretch).
+- **Zombie HP recolouring removed** — model's authored colours now
+  show regardless of damage; type stripes (runner yellow, boss magenta)
+  unchanged.
+
+Headline changes since the previous handoff:
+
+- **Asset pipeline** — new `data/models/zombie.obj`, `weapons/raygun.obj`,
+  `mystery_box.obj`, `board.obj`, `sandbag_stack.obj` (all bevelled,
+  multi-material, MTL `Kd` via Principled BSDF base colour). Old
+  "exploded zombie" geometry was caused by a `primitive_cube_add(size=1)
+  * scale*0.5` half-size bug; fixed.
+- **Prop / texture / shader registry** — `assets.{h,c}` now exposes
+  `PropId` + `propModels[]` + `propModelLoaded[]`, `TextureId` +
+  `textures[]`, and `worldShader` / `skyShader`. Single `Assets_Load`
+  walks `PROP_FILES[]` / `TEXTURE_FILES[]` / `data/shaders/*.{vs,fs}`,
+  reports each as `model: loaded …` / `texture: loaded …` / `shader:
+  loaded …` or its "not found, using fallback" counterpart. Renderer
+  is model-first everywhere; missing assets fall back to the previous
+  cube / sphere primitive draws (Round-2 OBJs and all 5 textures are
+  still unauthored, so a fresh checkout still renders cubes — but each
+  asset drops in on next launch).
+- **`render.c`** — `DrawTexturedBox` / `DrawTexturedFloor` use rlgl
+  immediate mode with UVs scaled by `size / TILE_SIZE` for seamless
+  tiling; `DrawProp` / `DrawPropEx` is the model-first helper used by
+  every site. `Render_World3D` opens with `DrawSkybox` + `BeginWorldShader`,
+  closes with `EndWorldShader` (which **must** pass
+  `rlGetShaderLocsDefault()`, not `NULL` — `NULL` was the menu-SEGV cause).
+- **`data/shaders/world.{vs,fs}`** — texture × tint × linear distance
+  fog. Uniforms `fogColor`, `fogStart`, `fogEnd`. Replaces raylib's
+  default shader on every loaded `Model.materials[].shader` (via
+  `Assets_ApplyWorldShader`) and on `rlgl`'s default during the world
+  pass.
+- **`data/shaders/sky.{vs,fs}`** — procedural night sky: horizon→zenith
+  gradient, faint warm horizon glow, hash-based stable star field. No
+  texture asset required.
+- **New map format** in `data/maps/*.map`. Compact `WALL x1 z1 x2 z2
+  [DOOR center width cost [AS name]]`, symbolic `+x/-x/+z/-z`
+  directions, `WINDOW … LOCKED_BY <door_name>`, `OBSTACLE x z sx sz
+  [h]` (no more y/sy boilerplate), `ROOM <name> … END` blocks,
+  `ATMOSPHERE { fog R G B start end; sky_tint R G B; music name } END`,
+  `PROP <name> x z [yaw d] [scale s]`. All three shipped maps already
+  converted.
+- **`./build/shooter --validate path/to/map.map`** — parses without
+  opening a window, prints line-numbered errors, exits 0 or 1. Hook it
+  into an editor save action.
+- **`MapProp` + per-prop collision** — `PROP` lines look up a name in
+  `PROP_DEFS[]` (in `level.c`) for the PropId + collision half-extent.
+  `Level_ResolveXZ`, `UnstickXZ`, and `Level_PointBlocked` all include
+  `mapProps[].collider`.
+- **Caps bumped**: `MAX_OBSTACLES 12→24`, `MAX_INTERIOR_WALLS 8→16`,
+  `MAX_DOORS 4→8`, new `MAX_MAP_PROPS=32`.
+- **Atmosphere globals** — `fogStart` / `fogEnd` / `fogColor` are
+  global in `assets.{h,c}`; `ClearLevel` resets them to defaults so
+  the ATMOSPHERE block of each map starts from baseline.
+
+`git status` will show edits to: `src/{assets,decals,entities,game,level,
+render,types,main,menu,hud,player,weapons}.{c,h}` (note `decals.{c,h}`
+are new), `CMakeLists.txt`, `data/maps/*.map`, and new files under
+`data/models/` + `data/shaders/`. `TODO.md` and `HANDOFF.md` are also
+updated.
+
+`NET_PROTO_VERSION` is **7** (`src/net.h`). Bump it whenever you change
+anything in `SerPlayer` / `SerEnemy` / `PktSnapshotHeader`.
 
 ## Build / run
 
@@ -40,83 +204,218 @@ Ask the user before committing/pushing — they may want to test first.
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
 ./build/shooter
+./build/shooter --validate data/maps/nacht.map  # editor save hook
 ```
 
-First Linux build needs X11 dev headers — see `README.md`. The build
-copies `data/` next to the executable, so maps load from
-`data/maps/default.map`. If that file isn't found the game falls
-back to a hardcoded layout in `Level_LoadHardcodedFallback`.
+First Linux build needs X11 dev headers — see `README.md`. The CMake
+target has a `POST_BUILD` step that copies `data/` next to the
+executable. **It only fires when the `shooter` target rebuilds** — if
+you only changed a `.map`, a texture, a shader, or a model with no code
+changes, the copy doesn't run; manually `cp -r data/ build/` or touch a
+source.
+
+`settings.cfg` lives next to the binary (i.e. inside `build/` when run
+from the build dir). On first run with no file, defaults are written.
 
 ## Architecture
 
-`src/main.c` is just the game loop (~250 lines). Everything else is
-one translation unit per responsibility, sharing `types.h`:
+`src/main.c` is just the game loop (~360 lines after the new
+`--validate` branch). Everything else is one translation unit per
+responsibility, sharing `types.h`:
 
 | File              | Owns                                                   |
 |-------------------|--------------------------------------------------------|
-| `types.h`         | All shared structs/enums/constants                     |
-| `level.{c,h}`     | Map parser, obstacles/walls/doors/windows, `Level_Reset` |
-| `player.{c,h}`    | `players[]`, look/move, sprint/crouch, stamina, push-out |
-| `weapons.{c,h}`   | `WEAPONS[]` table, fire/reload/melee                   |
-| `entities.{c,h}`  | `enemies[]`, `bullets[]`, `powerUps[]`, zombie AI + spawns |
+| `types.h`         | All shared structs/enums/constants (incl. `MapProp`, bumped `MAX_*`) |
+| `assets.{c,h}`    | `propModels[]`, `textures[]`, `worldShader`, `skyShader`, fog globals, `TILE_SIZE`. (Weapon storage moved out — see `weapons.{c,h}`.) |
+| `level.{c,h}`     | Map tokeniser + parser, `Level_Validate`, `obstacles/walls/doors/windows/mapProps`, `Level_Reset`, `UnstickXZ`, `Level_PathClearXZ` (AI lookahead), `PROP_DEFS[]` |
+| `player.{c,h}`    | `players[]`, look/move, sprint/crouch, stamina, sprintBlend, push-out |
+| `weapons.{c,h}`   | `WEAPONS[]` (mutable, populated by `Weapons_Load` from `.weapon` files), `weaponModels[]`, `weaponTune[]`, fire/reload/melee, fire-mode + recoil + dropoff |
+| `entities.{c,h}`  | `enemies[]`, `bullets[]`, `powerUps[]`, per-type zombie AI (lunge/weave/steamroll), proactive obstacle probing, damage→downed→dead transition |
 | `interact.{c,h}`  | Wall-buys, perks, PaP, doors, repairs, revive, Mystery Box |
 | `perks.{c,h}`     | Perk effects (jug/speed/dtap/stamin)                   |
-| `game.{c,h}`      | `Game_Tick` — orchestrates a server tick               |
+| `game.{c,h}`      | `Game_Tick` — orchestrates a server tick, round breaks, respawn-on-round-start |
 | `protocol.{c,h}`  | Serialization (`SerPlayer`, `SerEnemy`, `PktSnapshotHeader`) |
 | `net.{c,h}`       | enet wrapper, `Net_GetLocalIPs` for the host's join prompt |
-| `render.{c,h}`    | 3D world draw + sprites/labels                         |
-| `hud.{c,h}`       | 2D HUD overlay                                         |
-| `menu.{c,h}`      | Menu screens incl. game-over stats table               |
+| `render.{c,h}`    | 3D world draw (model-first with cube fallbacks), textured walls/floor via rlgl, fog/sky/lit shader swap, tracer billboards |
+| `decals.{c,h}`    | 96-slot ring buffer for blood + impact decals, drawn from `Render_World3D` |
+| `hud.{c,h}`       | 2D HUD overlay, round splash, downed/spectate overlays |
+| `menu.{c,h}`      | Menu screens incl. game-over stats table, controller bindings UI, map picker |
+| `pad.{c,h}`       | Raw gamepad axis/button readers                        |
+| `settings.{c,h}`  | `bindButton[]` runtime bindings, `Bind_Pressed/Down/PollAny`, `Settings_Load/Save` |
+| `audio.{c,h}`     | Procedural SFX, snapshot-delta event detection         |
+| `fx.{c,h}`        | Camera shake (no real particle system yet)             |
+
+Data layout under `data/`:
+
+```
+data/
+├── audio/                       # (nothing here yet; ATMOSPHERE music: parses but isn't loaded)
+├── maps/*.map                   # new format; --validate to check
+├── models/                      # generic props/decor (zombie, mystery box, etc.)
+│   ├── ASSETS.md                # spec for every prop + texture + shader
+│   ├── *.obj/*.mtl
+│   └── weapons/                 # legacy holdouts (revolver/sniper, not yet wired)
+├── weapons/                     # NEW — per-folder weapon defs + assets
+│   ├── pistol/{pistol.weapon,pistol.obj,pistol.mtl}
+│   ├── smg/...
+│   ├── shotgun/...
+│   ├── rifle/...
+│   └── raygun/...
+├── shaders/{world,sky}.{vs,fs}
+└── textures/*.png               # currently empty; specs in ASSETS.md
+```
 
 ## Conventions & gotchas
 
 - **Host-authoritative.** Clients send `PktInput`; host runs sim and
   broadcasts `PktSnapshot` at 20 Hz. Local-only fields (stamina,
-  godMode) live on `Player` but aren't serialized.
+  sprintBlend, godMode, noclipMode) live on/around `Player` but aren't
+  serialized.
 - **Bump `NET_PROTO_VERSION`** in `net.h` any time you change a
   serialized struct in `protocol.{c,h}`. The handshake rejects
   mismatched versions.
 - **Map file path resolution** tries several relative locations and
-  falls back to hardcoded geometry. Don't assume CWD.
-- **Door persistence bug** previously caused doors to stay open
-  across games. Fixed by `Level_Reset` being called from
-  `Menu_StartSoloGame` / `Menu_StartHostedGame`. Don't regress.
-- **Repair-progress bug** previously zeroed all windows each tick.
-  Fixed by tracking `winActive[]` and only zeroing inactive ones in
-  `Interact_UpdateRepairs`. Same pattern used for revives.
+  falls back to hardcoded geometry. Don't assume CWD. Same pattern for
+  models (`data/models/`, `../data/models/`, `./data/models/`),
+  textures, and shaders.
+- **rlgl shader swap** — `EndWorldShader` **must** pass
+  `rlGetShaderLocsDefault()` as the second arg to `rlSetShader`, not
+  `NULL`. Passing `NULL` leaves `currentShaderLocs` dangling and
+  `EndDrawing`'s render-batch flush SEGVs (it dereferences
+  `currentShaderLocs[RL_SHADER_LOC_MATRIX_MVP]`). This was the
+  menu-launch crash on 2026-06-01.
+- **Blender OBJ axis quirks** (documented in ASSETS.md but easy to
+  re-hit):
+  - Author with Blender Z up, model facing **-Y**. Export with
+    `forward_axis='Z'` (NOT `'NEGATIVE_Z'`, despite what the name
+    suggests) so Blender -Y maps to OBJ -Z. Blender +X gets mirrored
+    to OBJ -X; bake asymmetric details accordingly.
+  - `primitive_cube_add(size=1)` already gives a unit cube. Setting
+    `o.scale = (sx, sy, sz)` gives final size `sx × sy × sz` — do
+    **NOT** multiply by 0.5. (That was the "exploded zombie" bug.)
+  - For MTL `Kd` to carry, the material must `use_nodes = True` and
+    the colour set on `Principled BSDF → Base Color`. Plain
+    `material.diffuse_color` is viewport-only.
+- **raylib 5.5 OBJ loader has a no-UV bug** (ASan flags
+  `rmodels.c:4397` heap-buffer-overflow when an OBJ has no `vt`
+  lines). All our OBJs have no UVs and trip it; the read goes to
+  garbage memory but the resulting texcoords are unused (none of our
+  materials sample textures). Don't try to add UV maps to "fix" it —
+  the bug is on raylib's side. ASan can't be enabled until they patch
+  it; build without sanitizers.
+- **raylib 5.5 OBJ loader ALSO SEGVs on n-gons > 20 vertices**
+  (separate bug, discovered 2026-06-01 evening). Cylinder caps with
+  `vertices ≥ 24` export as one n-gon and overflow tinyobj's face
+  buffer. **Always export with `export_triangulated_mesh=True`** —
+  this fans caps into triangles and is safe regardless of cylinder
+  resolution.
+- **Weapon model sizing.** The Quaternius weapon OBJs we used to ship
+  are authored at ~10 units long (1 unit ≈ 1 inch). Anything authored
+  in metric metres (typical Blender default) needs `model_scale` in
+  the 10–15 range to display at the same on-screen size — that's why
+  the new weapons all have `model_scale ≈ 10–12` in their `.weapon`
+  files.
+- **Map engine limits** (current): `MAX_INTERIOR_WALLS=16`,
+  `MAX_DOORS=8`, `MAX_WINDOWS=4`, `MAX_OBSTACLES=24`, `MAX_MAP_PROPS=32`.
+  Windows must be on arena perimeter walls (engine renders gaps in
+  those for windows).
+- **Spawns must not overlap an OBSTACLE or PROP's XZ projection** —
+  collision is XZ-only, ignores box Y extent. `UnstickXZ` will rescue
+  the player but the spawn flash looks bad. Authoring discipline: keep
+  spawns clear.
+- **Settings persistence**: `Settings_Save` is called from a few paths
+  — on graceful exit, on closing the Settings screen, and after every
+  binding change. SIGTERM/SIGKILL won't save.
 - **rand()** — `interact.c` uses it for Mystery Box rolls; needs
   `#include <stdlib.h>`.
-- **rlgl** — if you use `rlPushMatrix`/`rlTranslatef`/`rlPopMatrix`,
+- **rlgl** — if you use `rlPushMatrix`/`rlTranslatef`/`rlSetShader`,
   include `rlgl.h` explicitly. raylib doesn't pull it in.
-- **Spectator mode** — when `!me->alive`, `main.c` runs a free-fly
-  camera (WASD + mouse, Space up, Shift down) instead of the player.
+- **Spectator mode** — when `!me->alive`, `main.c` runs a 3rd-person
+  spectate cam over a live teammate's shoulder. F / A / LMB / Jump
+  bind cycles to the next teammate. Auto-respawns at next round start.
+- **Round 1 skip** — was a real bug, fixed by initializing
+  `roundNum=0; gamePhase=GS_ROUND_BREAK` so `Game_Tick` rolls it into
+  `Game_StartRound(1)`. Don't regress.
+- **Pre-game commit policy**: ask the user before committing. They've
+  consistently wanted to test runs in person before shipping.
+
+## Controller bindings model
+
+Unchanged. `BindAction` enum in `settings.h` has 14 entries; UI is
+`Menu_DrawBindings`. See `settings.{h,c}` for the live mapping. Default
+mapping mirrors the old hardcoded one (RT fire, LT ADS, Y reload, X
+interact, RB melee, LB swap, A jump, B crouch, L3 sprint, Start pause,
+Back hold scoreboard, R3 noclip).
 
 ## Working style the user has shown
 
-- Likes terse commits with a concise subject + bulleted body. Recent
-  example: `dae71fb Bug fixes + sprint/crouch/melee/headshot/...`.
-- Skips planning docs — asked for a design doc once, then said
-  "forget about design doc delete it just refactor it".
-- Bundles multiple features in a single request ("add 1 2 3 4 12 9").
-  Implement them all in one batch; one commit is fine.
-- Doesn't proofread feature names; "melay" = melee, "baricade" =
-  barricade, etc. Just infer.
+- Likes terse commits with a concise subject + bulleted body.
+- Bundles multiple features in a single request ("fix it all", "add
+  1 2 3 4 12 9"). Implement all in one batch; one commit per natural
+  unit is fine.
+- Will reject feel-changes if they go too far. First Nacht map was
+  rejected with "no make it like the cod zombies map" — got specific
+  layout iteration the second time. Similar pattern with the zombie:
+  exploded → connected but undetailed → connected and detailed →
+  uncoloured → properly coloured.
+- Skips planning docs — when asked to spec, asks for a punch list
+  instead.
+- Replies with "fix it all" / "do those three" / "yes" — commits to
+  full scopes when given options.
+- Doesn't proofread; "explod" = exploded, "raygun" lower-case, "to do"
+  = TODO. Just infer.
+- Asks "what else needs to be added?" mid-stream — wants a survey,
+  not a sales pitch. Be honest about gaps; rank by impact.
 
-## Suggested next things (from `TODO.md`)
+## Suggested next things
 
-- Audio (procedural SFX via raylib)
-- Map selector UI (engine already supports multi-map loading)
-- Mule Kick (3rd weapon slot)
-- Pack-a-Punch Tier 2
-- Floating damage numbers
-- Settings persistence
-- Prone
+See `TODO.md` for the full live list. Impact-ordered short version:
+
+1. **Verify the new weapon viewmodels in-game.** Only the SMG + rifle
+   were rebuilt for connectivity this session; pistol/shotgun/raygun
+   may still have visible seams. Switch through all 5 in first-person
+   and tune `model_scale` / `model_offset` per `.weapon` file.
+2. **Per-type zombie tells** (visual + audio) — the new AI is
+   meaningful but unreadable. Distinct silhouette + groan per type,
+   plus a 0.2s growl wind-up before a runner lunge so the burst is
+   anticipated, not just "I died fast."
+3. **Reload + weapon-swap viewmodel animation** — currently instant
+   snap. Even a 200 ms slide/rotate is a huge feel upgrade.
+4. **Mystery box slow-roll** — currently snaps. Lerping through
+   `MBOX_ROLLING` over 4 s makes the iconic suspense moment work.
+5. **Particle system** — pooled additive-blend for muzzle flash,
+   casing eject, blood mist. Replaces the HUD-tint muzzle hack.
+6. **Post-FX render target** — bloom + vignette + hit-flash red +
+   low-HP heartbeat. Unlocks every subsequent "feel" upgrade.
+7. **Equipment slots (LB stuns, G frags)** — `WeaponCategory` enum
+   exists, nothing reads it yet. Need a `Throwable` entity (projectile
+   + gravity + AoE/effect), dedicated lethal + tactical slots,
+   bindings.
+8. **`LIGHTS x y z r g b range`** in `.map` + `sky_tint` plumbing.
+9. **Textures (5)** — `floor_concrete.png`, `ground_dirt.png`,
+   `wall_brick.png`, `wall_plaster.png`, `ceiling_wood.png`.
+10. **Frustum culling for props** — bounding-sphere test before each
+    `DrawProp`. Matters once more props ship.
+11. **`tests/map_parser_test.c`** + CI step running `--validate` on
+    every shipped map.
 
 ## If something breaks
 
 1. `cmake --build build -j 2>&1 | tail -40` — most issues are
    missing-include or implicit-decl warnings.
-2. Run `./build/shooter` and check stdout for the `map: loaded ...`
-   line — confirms the map file is being found.
-3. For multiplayer issues, check `NET_PROTO_VERSION` matches between
+2. `./build/shooter --validate data/maps/<name>.map` — if a map won't
+   load, this prints line-numbered errors and exits 1.
+3. Run `./build/shooter` and check stdout for the
+   `model: loaded …` / `texture: …` / `shader: …` /
+   `map: loaded '<name>' from … (W walls, D doors, …)` block — confirms
+   the asset pipeline + map parser are seeing what you expect.
+4. For multiplayer issues, check `NET_PROTO_VERSION` matches between
    host and client builds.
+5. For "stuck in geometry" reports, look for SPAWN points overlapping
+   OBSTACLE / PROP XZ projections in the relevant `.map`. `UnstickXZ`
+   will rescue but it's a smell.
+6. **For a menu-launch SEGV**: check `EndWorldShader` in `render.c` —
+   `rlSetShader(rlGetShaderIdDefault(), rlGetShaderLocsDefault())`,
+   not `NULL`.
+7. If bindings UI doesn't capture: confirm `Pad_Connected()`. Without
+   a pad, the screen shows the "(no controller detected)" hint.

@@ -22,6 +22,8 @@ out/
 *.lib
 *.pdb
 *.ilk
+# but keep Wavefront model files under data/
+!data/**/*.obj
 
 # CMake leftovers
 CMakeCache.txt
@@ -37,3 +39,9 @@ _deps/
 
 # local agent config
 .claude/
+
+# runtime-written
+settings.cfg
+
+# raw asset packs (commit only the converted files under data/)
+/Animated FPS Guns*

@@ -17,11 +17,12 @@
 #define ARENA_HALF         40.0f
 #define WALL_HEIGHT         5.0f
 #define WALL_THICK          1.0f
+#define DOOR_HEIGHT         2.5f   // height of door + matching wall opening
 #define PLAYER_EYE          1.7f
 #define PLAYER_RADIUS       0.4f
 #define BASE_MOVE_SPEED     7.0f
-#define PLAYER_GRAVITY     22.0f
-#define PLAYER_JUMP_VEL     7.5f
+#define PLAYER_GRAVITY     36.0f
+#define PLAYER_JUMP_VEL     7.0f
 #define ADS_FOV_MUL         0.65f
 #define ADS_MOVE_MUL        0.55f
 
@@ -32,13 +33,14 @@
 #define ENEMY_DAMAGE        8
 #define ENEMY_BOARD_ATK     2.4f
 
-#define MAX_BULLETS       128
-#define BULLET_SPEED       90.0f
-#define BULLET_LIFE         1.0f
+#define MAX_BULLETS       192
+#define BULLET_TAIL_MAX     2.0f   // tracer visual length cap (m)
+#define MAX_DECALS         96
 
-#define MAX_OBSTACLES      12
-#define MAX_INTERIOR_WALLS  8
-#define MAX_DOORS           4
+#define MAX_OBSTACLES      24
+#define MAX_INTERIOR_WALLS 32   // header walls above doors count too
+#define MAX_DOORS           8
+#define MAX_MAP_PROPS      32
 
 #define INV_SLOTS           2
 #define INTERACT_DIST       3.0f
@@ -70,20 +72,52 @@
 //  Weapons
 // ============================================================================
 
+typedef enum { FM_SEMI = 0, FM_BURST, FM_AUTO } FireMode;
+
+// High-level slot category. Drives HUD ordering, wallbuy filter,
+// equipment-slot rules (lethal/tactical occupy their own slots).
+typedef enum {
+    WC_PRIMARY = 0,   // pistol/smg/shotgun/rifle — fills inventory[]
+    WC_SPECIAL,       // wonder weapons / heavies — also inventory[]
+    WC_MELEE,         // knife/bowie — own slot (planned)
+    WC_LETHAL,        // frag/semtex — own slot (planned)
+    WC_TACTICAL,      // stun/flash — own slot (planned)
+} WeaponCategory;
+
 typedef struct {
+    // Stable string id (e.g. "PISTOL") that .weapon files use to claim
+    // a slot. Mirrors the WeaponId enum; left non-NULL once the loader
+    // has filled this entry. Used for diagnostics.
+    const char *idName;
     const char *name;
     const char *packedName;
+    WeaponCategory category;
     int    damage;
     int    magSize;
     int    reserveMax;
-    float  fireCooldown;
+    float  fireCooldown;   // post-shot (or post-burst) cooldown
     float  reloadTime;
     int    pellets;
     float  spreadDeg;
-    bool   automatic;
+    FireMode fireMode;
+    int    burstCount;     // shots per click for FM_BURST
+    float  burstInterval;  // delay between shots within a burst (s)
     int    buyPrice;
     int    ammoPrice;
     Color  tint;
+    float  bulletSpeed;    // m/s — sets tracer feel + travel time
+    float  bulletLife;     // seconds before despawn
+    float  tracerWidth;    // capsule radius for the visible tracer (m)
+    // Recoil — degrees added to pitch (up) and ±range on yaw per shot.
+    // ADS halves the effective kick.
+    float  recoilPitch;
+    float  recoilYaw;
+    // Damage dropoff (linear from dropoffStart to dropoffEnd meters,
+    // scaling damage from 1.0 down to dropoffMinMul). At or past end,
+    // damage is `damage * dropoffMinMul`.
+    float  dropoffStart;
+    float  dropoffEnd;
+    float  dropoffMinMul;
 } WeaponDef;
 
 enum { W_PISTOL = 0, W_SMG, W_SHOTGUN, W_RIFLE, W_RAYGUN, W_COUNT };
@@ -96,6 +130,9 @@ typedef struct {
     float reloadTimer;
     bool  owned;
     bool  packed;
+    // Burst state (FM_BURST only). Local — not serialized.
+    int   burstRemaining;
+    float burstTimer;
 } WeaponSlot;
 
 // ============================================================================
@@ -127,6 +164,7 @@ typedef struct {
     bool       hasPerk[PERK_COUNT];
 
     bool       fireHeld;
+    bool       prevFireHeld;   // edge-detect for FM_SEMI / FM_BURST
     bool       interactHeld;
     bool       adsHeld;
 
@@ -147,6 +185,7 @@ typedef struct {
 
     // Locally-tracked (not in snapshot)
     float      stamina;       // 0..100
+    float      sprintBlend;   // 0 = walk, 1 = full sprint (eased)
 
     // Target for hold-action (revive)
     float      reviveAsTarget;  // progress while another player revives THIS one
@@ -186,11 +225,16 @@ typedef struct {
     float        escapeTimer;
     Vector3      escapeDir;
     uint8_t      stuckBias;
+    // Per-type AI scratch. Runner: lunge timer (>0 = lunge active,
+    // <-cooldown = ready). Crawler/Boss: unused for now.
+    float        specialTimer;
 } Enemy;
 
 typedef struct {
     Vector3 pos;
     Vector3 vel;
+    Vector3 origin;       // spawn position for damage-dropoff distance
+    int     weaponIdx;    // for per-weapon dropoff curve at hit
     int     damage;
     float   life;
     bool    alive;
@@ -216,7 +260,19 @@ typedef struct {
     Box  box;
     int  cost;
     bool opened;
+    char name[24];   // empty if unnamed; used by WINDOW LOCKED_BY
 } Door;
+
+// Authored props placed via map file (PROP lines).  Distinct from
+// OBSTACLE: props get rendered as models and use a per-prop collider
+// looked up by name in PROP_DEFS[].
+typedef struct {
+    int     propId;     // PropId from assets.h
+    Vector3 pos;
+    float   yawDeg;
+    float   scale;
+    Box     collider;   // XZ collision box centred on pos
+} MapProp;
 
 typedef struct {
     Vector3 pos;
@@ -264,7 +320,7 @@ typedef enum {
 } GamePhase;
 
 typedef enum {
-    UI_MENU, UI_SETTINGS, UI_JOIN_INPUT, UI_CONNECTING,
+    UI_MENU, UI_SETTINGS, UI_BINDINGS, UI_JOIN_INPUT, UI_CONNECTING,
     UI_SOLO_LOBBY, UI_MP_MENU,
     UI_HOST_LOBBY, UI_CLIENT_LOBBY, UI_PLAY, UI_PAUSE,
 } UiState;

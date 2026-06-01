@@ -1,0 +1,32 @@
+# MP5 — full-auto SMG. Pray-and-spray at close range.
+
+id              SMG
+name            MP5
+packed_name     MP5-K+
+category        PRIMARY
+fire_mode       AUTO
+
+damage          9
+mag_size        30
+reserve_max     180
+fire_cooldown   0.07
+reload_time     1.8
+pellets         1
+spread_deg      1.5
+
+buy_price       1000
+ammo_price      600
+tint            255 210 120 255
+
+bullet_speed    280.0
+bullet_life     0.35
+tracer_width    0.022
+
+recoil_pitch    0.38
+recoil_yaw      0.35
+
+dropoff         18.0  40.0  0.45
+
+model           smg.obj
+model_scale     10.0
+model_yaw       0.0

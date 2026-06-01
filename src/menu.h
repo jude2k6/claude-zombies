@@ -40,6 +40,8 @@ void Menu_StartConnecting(void);
 
 void Menu_DrawMenu(int sw, int sh);
 void Menu_DrawSettings(int sw, int sh);
+void Menu_DrawBindings(int sw, int sh);
+bool Menu_BindingsCaptureActive(void);
 void Menu_DrawJoinInput(int sw, int sh);
 void Menu_DrawConnecting(int sw, int sh);
 void Menu_DrawSoloLobby(int sw, int sh);

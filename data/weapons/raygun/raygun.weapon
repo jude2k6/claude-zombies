@@ -1,0 +1,33 @@
+# Ray Gun — wonder weapon. Mystery-box only.
+
+id              RAYGUN
+name            Ray Gun
+packed_name     Porter's X2
+category        SPECIAL
+fire_mode       SEMI
+
+damage          95
+mag_size        20
+reserve_max     80
+fire_cooldown   0.22
+reload_time     2.6
+pellets         1
+spread_deg      0.0
+
+buy_price       10000
+ammo_price      4500
+tint            120 255 160 255
+
+bullet_speed    80.0
+bullet_life     1.10
+tracer_width    0.060
+
+recoil_pitch    0.85
+recoil_yaw      0.25
+
+# Energy weapon — barely drops over distance.
+dropoff         80.0  120.0  0.90
+
+model           raygun.obj
+model_scale     11.0
+model_yaw       0.0

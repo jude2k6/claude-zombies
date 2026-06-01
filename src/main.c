@@ -18,8 +18,11 @@
 #include "hud.h"
 #include "menu.h"
 #include "pad.h"
+#include "settings.h"
 #include "fx.h"
 #include "audio.h"
+#include "decals.h"
+#include "assets.h"
 
 #include <stdio.h>
 #include <stdint.h>
@@ -34,6 +37,13 @@ static float   specYaw   = 0.0f;
 static float   specPitch = 0.0f;
 static bool    specInit  = false;
 static int     specTarget = -1; // teammate idx the cam was last snapped to
+
+// First-person view bob — purely visual, advanced from the local player's
+// actual horizontal velocity each frame and smoothly faded in/out.
+static float   bobPhase     = 0.0f;
+static float   bobAmp       = 0.0f;
+static Vector3 bobPrevPos   = { 0 };
+static bool    bobPrevValid = false;
 
 static int Spectator_NextTeammate(int after) {
     for (int step = 1; step <= NET_MAX_PLAYERS; step++) {
@@ -90,20 +100,20 @@ static void HandleLocalActions(Player *me) {
     // Downed players can't act. They lay there until revived or bled out.
     bool canAct = me->alive && !me->downed;
     bool kbdSwap  = IsKeyPressed(KEY_Q) && canAct;
-    bool padSwap  = Pad_Pressed(PAD_LB) && canAct;
+    bool padSwap  = Bind_Pressed(BA_SWAP) && canAct;
     if (kbdSwap || padSwap) {
         int other = (me->currentSlot + 1) % INV_SLOTS;
         if (me->inventory[other].owned) me->currentSlot = other; // local predict
     }
-    if (canAct && (IsKeyPressed(KEY_ONE) || Pad_Pressed(PAD_DP_LEFT)))  { if (me->inventory[0].owned) me->currentSlot = 0; }
-    if (canAct && (IsKeyPressed(KEY_TWO) || Pad_Pressed(PAD_DP_RIGHT))) { if (me->inventory[1].owned) me->currentSlot = 1; }
+    if (canAct && (IsKeyPressed(KEY_ONE) || Bind_Pressed(BA_SLOT1)))  { if (me->inventory[0].owned) me->currentSlot = 0; }
+    if (canAct && (IsKeyPressed(KEY_TWO) || Bind_Pressed(BA_SLOT2))) { if (me->inventory[1].owned) me->currentSlot = 1; }
 
-    bool reloadEdge   = (IsKeyPressed(KEY_R) || Pad_Pressed(PAD_Y)) && canAct;
+    bool reloadEdge   = (IsKeyPressed(KEY_R) || Bind_Pressed(BA_RELOAD)) && canAct;
     bool swapEdge     = (kbdSwap || padSwap);
-    bool slot1Edge    = canAct && (IsKeyPressed(KEY_ONE) || Pad_Pressed(PAD_DP_LEFT));
-    bool slot2Edge    = canAct && (IsKeyPressed(KEY_TWO) || Pad_Pressed(PAD_DP_RIGHT));
-    bool interactEdge = canAct && (IsKeyPressed(KEY_F) || Pad_Pressed(PAD_X));
-    bool meleeEdge    = canAct && (IsKeyPressed(KEY_V) || Pad_Pressed(PAD_RB));
+    bool slot1Edge    = canAct && (IsKeyPressed(KEY_ONE) || Bind_Pressed(BA_SLOT1));
+    bool slot2Edge    = canAct && (IsKeyPressed(KEY_TWO) || Bind_Pressed(BA_SLOT2));
+    bool interactEdge = canAct && (IsKeyPressed(KEY_F) || Bind_Pressed(BA_INTERACT));
+    bool meleeEdge    = canAct && (IsKeyPressed(KEY_V) || Bind_Pressed(BA_MELEE));
 
     int swapTarget = -1;
     if (swapEdge) {
@@ -139,7 +149,16 @@ static void HandleLocalActions(Player *me) {
     }
 }
 
-int main(void) {
+int main(int argc, char **argv) {
+    // CLI: `--validate path/to/map.map` runs the parser without opening
+    // a window and exits 0 (clean) or 1 (errors). Useful from editor
+    // save hooks.
+    if (argc >= 3 && strcmp(argv[1], "--validate") == 0) {
+        SetTraceLogLevel(LOG_ERROR);
+        int errs = Level_Validate(argv[2]);
+        return errs > 0 ? 1 : 0;
+    }
+
     SetConfigFlags(FLAG_MSAA_4X_HINT | FLAG_VSYNC_HINT | FLAG_WINDOW_RESIZABLE);
     InitWindow(WINDOW_W_DEFAULT, WINDOW_H_DEFAULT, "Claude Zombies");
     SetTargetFPS(60);
@@ -148,6 +167,11 @@ int main(void) {
     GuiSetStyle(DEFAULT, TEXT_SIZE, 16);
 
     Audio_Init();
+    Weapons_Load();   // must run before Assets_Load — Assets_ApplyWorldShader iterates weaponModels[]
+    Assets_Load();
+    Settings_Load();
+    Decals_Init();
+    if (fullscreen && !IsWindowFullscreen()) Menu_ToggleFullscreenSafe();
     Level_Build();
     Menu_ScanMaps();
     for (int i = 0; i < NET_MAX_PLAYERS; i++) memset(&players[i], 0, sizeof players[i]);
@@ -171,10 +195,18 @@ int main(void) {
             prevUi = uiState;
         }
 
-        bool pauseEdge = IsKeyPressed(KEY_ESCAPE) || Pad_Pressed(PAD_START);
+        // Suppress pad pause-edge in the bindings screen so the user can rebind
+        // START itself without bouncing back to Settings.
+        bool padPause = (uiState != UI_BINDINGS) && Bind_Pressed(BA_PAUSE);
+        bool escEdge  = IsKeyPressed(KEY_ESCAPE);
+        // In the bindings UI, ESC is consumed by an in-progress capture (to
+        // cancel) before it can pop the screen.
+        if (uiState == UI_BINDINGS && Menu_BindingsCaptureActive()) escEdge = false;
+        bool pauseEdge = escEdge || padPause;
         if (pauseEdge) {
             if      (uiState == UI_PLAY)        uiState = UI_PAUSE;
             else if (uiState == UI_PAUSE)       uiState = UI_PLAY;
+            else if (uiState == UI_BINDINGS)    uiState = UI_SETTINGS;
             else if (uiState == UI_SETTINGS)    uiState = UI_MENU;
             else if (uiState == UI_JOIN_INPUT)  uiState = UI_MENU;
             else if (uiState == UI_SOLO_LOBBY)  uiState = UI_MENU;
@@ -182,7 +214,9 @@ int main(void) {
         }
         if (IsKeyPressed(KEY_F11)) Menu_ToggleFullscreenSafe();
         if (IsKeyPressed(KEY_F3))  godMode = !godMode;
-        if (IsKeyPressed(KEY_F4))  { noclipMode = !noclipMode; specInit = false; }
+        bool noclipToggle = IsKeyPressed(KEY_F4);
+        if (uiState == UI_PLAY && Bind_Pressed(BA_NOCLIP)) noclipToggle = true;
+        if (noclipToggle) { noclipMode = !noclipMode; specInit = false; }
 
         if (netMode != NET_SOLO) PollNetwork();
 
@@ -214,7 +248,7 @@ int main(void) {
                 }
                 // Press F / A to cycle to next teammate while spectating dead.
                 if (!me->alive && !noclipMode &&
-                    (IsKeyPressed(KEY_F) || IsMouseButtonPressed(MOUSE_BUTTON_LEFT) || Pad_Pressed(PAD_A))) {
+                    (IsKeyPressed(KEY_F) || IsMouseButtonPressed(MOUSE_BUTTON_LEFT) || Bind_Pressed(BA_JUMP))) {
                     int next = Spectator_NextTeammate(specTarget >= 0 ? specTarget : localPlayerIdx);
                     if (next >= 0) Spectator_SnapTo(next);
                 }
@@ -244,10 +278,10 @@ int main(void) {
                 if (noclipMode && me->alive) { me->yaw = specYaw; me->pitch = specPitch; }
             }
             bool actable = me->alive && !me->downed && !noclipMode;
-            me->fireHeld     = (IsMouseButtonDown(MOUSE_BUTTON_LEFT)  || Pad_TriggerR()) && actable;
-            // E (keyboard) or holding X (gamepad) drives revive/repair.
-            me->interactHeld = (IsKeyDown(KEY_E) || Pad_Down(PAD_X))   && actable;
-            me->adsHeld      = (IsMouseButtonDown(MOUSE_BUTTON_RIGHT) || Pad_TriggerL()) && actable;
+            me->fireHeld     = (IsMouseButtonDown(MOUSE_BUTTON_LEFT)  || Bind_Down(BA_FIRE)) && actable;
+            // E (keyboard) or holding the interact bind (gamepad) drives revive/repair.
+            me->interactHeld = (IsKeyDown(KEY_E) || Bind_Down(BA_INTERACT))   && actable;
+            me->adsHeld      = (IsMouseButtonDown(MOUSE_BUTTON_RIGHT) || Bind_Down(BA_ADS)) && actable;
 
             HandleLocalActions(me);
 
@@ -283,6 +317,33 @@ int main(void) {
         float eyeY = me->pos.y;
         if (meDowned) eyeY = me->pos.y - 1.1f; // prone
         else if (me->alive && !noclipMode && uiState == UI_PLAY && (IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_C))) eyeY -= 0.6f;
+
+        // Walk bob - vertical bobs twice per stride (each footstep), lateral
+        // sways once per stride. Amplitude tracks actual horizontal velocity so
+        // sprinting bobs more, ADS bobs less, and the bob settles to zero when
+        // standing still. Only applies in first-person; spectator/noclip skip.
+        float bobOffX = 0.0f, bobOffY = 0.0f;
+        if (uiState == UI_PLAY && me->alive && !me->downed && !noclipMode) {
+            float dx = bobPrevValid ? (me->pos.x - bobPrevPos.x) : 0.0f;
+            float dz = bobPrevValid ? (me->pos.z - bobPrevPos.z) : 0.0f;
+            float vh = sqrtf(dx*dx + dz*dz) / fmaxf(dt, 1e-4f);
+            float target = (me->onGround && vh > 0.5f) ? fminf(vh / BASE_MOVE_SPEED, 1.7f) : 0.0f;
+            if (me->adsHeld) target *= 0.35f;
+            // Smooth blend (~0.12s to settle).
+            bobAmp += (target - bobAmp) * (1.0f - expf(-8.0f * dt));
+            if (bobAmp < 0.001f) bobAmp = 0.0f;
+            float cadence = 6.5f + 3.0f * me->sprintBlend;
+            bobPhase += cadence * dt;
+            bobOffX = sinf(bobPhase)        * 0.035f * bobAmp;
+            bobOffY = sinf(bobPhase * 2.0f) * 0.045f * bobAmp;
+        } else {
+            // Decay quickly when not in normal play so the cam doesn't keep
+            // bobbing during spectate/pause.
+            bobAmp += (0.0f - bobAmp) * (1.0f - expf(-12.0f * dt));
+        }
+        bobPrevPos = me->pos;
+        bobPrevValid = (uiState == UI_PLAY);
+
         float yawJ = 0, pitchJ = 0;
         Vector3 shakeOff = Fx_CameraOffset(&yawJ, &pitchJ);
         if (useFlyCam && specInit) {
@@ -290,7 +351,14 @@ int main(void) {
             Vector3 dir = Player_LookDir(specYaw, specPitch);
             camera.target = Vector3Add(camera.position, dir);
         } else {
-            camera.position = (Vector3){ me->pos.x + shakeOff.x, eyeY + shakeOff.y, me->pos.z + shakeOff.z };
+            // Lateral bob is in screen-right of the look direction so it sways
+            // independent of where you're facing.
+            Vector3 right = { cosf(me->yaw), 0, sinf(me->yaw) };
+            camera.position = (Vector3){
+                me->pos.x + shakeOff.x + right.x * bobOffX,
+                eyeY      + shakeOff.y + bobOffY,
+                me->pos.z + shakeOff.z + right.z * bobOffX,
+            };
             Vector3 dir = Player_LookDir(me->yaw + yawJ, me->pitch + pitchJ);
             camera.target = Vector3Add(camera.position, dir);
         }
@@ -307,6 +375,8 @@ int main(void) {
             Menu_DrawMenu(sw, sh);
         } else if (uiState == UI_SETTINGS) {
             Menu_DrawSettings(sw, sh);
+        } else if (uiState == UI_BINDINGS) {
+            Menu_DrawBindings(sw, sh);
         } else if (uiState == UI_JOIN_INPUT) {
             Menu_DrawJoinInput(sw, sh);
         } else if (uiState == UI_CONNECTING) {
@@ -328,8 +398,12 @@ int main(void) {
         }
 
         EndDrawing();
+        Settings_TickTriggerEdges();
     }
 
+    Settings_Save();
+    Assets_Unload();
+    Weapons_Unload();
     Audio_Shutdown();
     Net_Shutdown();
     CloseWindow();

@@ -1,0 +1,33 @@
+# Olympia — double-barrel shotgun. 6 pellets, hard close-range falloff.
+
+id              SHOTGUN
+name            Olympia
+packed_name     Hades
+category        PRIMARY
+fire_mode       SEMI
+
+damage          22
+mag_size        2
+reserve_max     24
+fire_cooldown   0.55
+reload_time     2.0
+pellets         6
+spread_deg      6.0
+
+buy_price       500
+ammo_price      300
+tint            255 180 80 255
+
+bullet_speed    240.0
+bullet_life     0.18
+tracer_width    0.020
+
+recoil_pitch    2.40
+recoil_yaw      0.55
+
+# Shotgun falls off hard — past 18m it's ~25% damage per pellet.
+dropoff         5.0  18.0  0.25
+
+model           shotgun.obj
+model_scale     10.0
+model_yaw       0.0

@@ -2,8 +2,34 @@
 #define SHOOTER_WEAPONS_H
 
 #include "types.h"
+#include "raylib.h"
 
-extern const WeaponDef WEAPONS[W_COUNT];
+// WEAPONS[] is mutable so .weapon files can populate / override entries at
+// startup via Weapons_Load. Compiled-in defaults serve as fallbacks for any
+// slot whose file is missing or malformed.
+extern WeaponDef WEAPONS[W_COUNT];
+
+// ---- weapon models + viewmodel tuning (was in assets.{c,h}) -------------
+// Now owned by the weapons module since they're authored alongside the
+// .weapon spec under data/weapons/<name>/.
+extern Model weaponModels[W_COUNT];
+extern bool  weaponModelLoaded[W_COUNT];
+
+typedef struct WeaponModelTune {
+    float scale;       // multiplier on top of base draw scale
+    float yawDeg;      // extra Y rotation in degrees
+    Vector3 offset;    // local-space offset before rotation
+} WeaponModelTune;
+
+extern WeaponModelTune weaponTune[W_COUNT];
+
+// ---- loader -------------------------------------------------------------
+// Scans data/weapons/ for *.weapon files, parses each, populates WEAPONS[]
+// + weaponTune[] and loads the model into weaponModels[]. Call BEFORE
+// Assets_Load (Assets_ApplyWorldShader iterates weaponModels[]).
+// Safe to call after InitWindow only — uses LoadModel from raylib.
+void  Weapons_Load(void);
+void  Weapons_Unload(void);
 
 // Effective stats (factor in perks and Pack-a-Punch)
 int   Weapon_EffDamage(Player *p, WeaponSlot *s);

@@ -7,74 +7,89 @@
 
 NAME Nacht der Untoten
 
-# --- Spawns (inside the SW bunker) ---
-SPAWN  -32 -32
-SPAWN  -30 -32
-SPAWN  -32 -30
-SPAWN  -34 -30
+ATMOSPHERE
+    fog       10 12 22  10 55     # near-black blue, soaks in over ~45 m
+    sky_tint  255 255 255          # default neutral sky
+    music     nacht_loop
+END
 
-# --- SW SPAWN BUNKER (x: -40..-25, z: -40..-25) ---
-# North wall (along z=-25) with a $1000 stairs door at x=-32
-WALL  -37.5 2.5 -25     5 5 1
-WALL  -27.0 2.5 -25     4 5 1
-DOOR  -32.0 2.5 -25     6 5 1   1000
+ROOM bunker
+    # --- SW SPAWN BUNKER (x: -40..-25, z: -40..-25) ---
 
-# East wall (along x=-25) with a $1000 alley door at z=-32
-WALL  -25.0 2.5 -37.5   1 5 5
-WALL  -25.0 2.5 -27.0   1 5 4
-DOOR  -25.0 2.5 -32.0   1 5 6   1000
+    SPAWN -32 -32
+    SPAWN -30 -32
+    SPAWN -32 -30
+    SPAWN -34 -30
 
-# Spawn-bunker cover (debris piled in the corners)
-OBSTACLE -33 1.0 -28    3 2 3
-OBSTACLE -28 0.5 -33    4 1 3
-OBSTACLE -38 1.5 -33    3 3 3
+    # North wall (z=-25) with a $1000 stairs door at x=-32, 2 m wide
+    WALL -40 -25  -25 -25  DOOR -32 2 1000  AS north_door
 
-# --- HELP / MAIN HALL (everything between the bunker and the back room) ---
-OBSTACLE -10 1.0 -18    3 2 3
-OBSTACLE  10 1.0 -18    3 2 3
-OBSTACLE   0 1.0  -8    4 2 2
-OBSTACLE -22 1.0  -5    3 2 3
-OBSTACLE  22 1.0  -5    3 2 3
-OBSTACLE   0 1.0  10    6 2 3
+    # East wall (x=-25) with a $1000 alley door at z=-32, 2 m wide
+    WALL -25 -40  -25 -25  DOOR -32 2 1000  AS east_door
 
-# --- BACK ROOM (NE corner, x: 15..40, z: 15..40) holding the PaP ---
-# South wall (along z=15) closed full width
-WALL   27.5 2.5  15    23 5 1
-# West wall (along x=15) with the $1500 entry door at z=25
-WALL   15.0 2.5  18.5   1 5 7
-WALL   15.0 2.5  34.0   1 5 12
-DOOR   15.0 2.5  25.0   1 5 6   1500
+    # Spawn-bunker cover (debris piled in the corners)
+    OBSTACLE -33 -28  3 3
+    OBSTACLE -27 -34  3 2 1
+    OBSTACLE -38 -33  3 3 3
 
-OBSTACLE  25 1.0 25     3 2 3
-OBSTACLE  32 1.0 22     3 2 3
-OBSTACLE  22 0.5 35     6 1 3
+    # All four boarded windows are clustered around the spawn bunker,
+    # gated by the door that leads to that side.
+    WINDOW -35 -40  +z LOCKED_BY north_door
+    WINDOW -28 -40  +z LOCKED_BY north_door
+    WINDOW -40 -35  +x LOCKED_BY east_door
+    WINDOW -40 -28  +x LOCKED_BY east_door
 
-# --- Windows: all four crammed around the spawn bunker ---
-WINDOW -35.0 -40.0    0  1   -1
-WINDOW -28.0 -40.0    0  1   -1
-WINDOW -40.0 -35.0    1  0   -1
-WINDOW -40.0 -28.0    1  0   -1
+    # M1A1-style rifle right next to spawn on the south arena wall
+    WALLBUY -32 -39.45  +z  RIFLE
 
-# --- Wall buys ---
-# M1A1-style rifle right next to spawn on the south arena wall
-WALLBUY -32.0 -39.45   0  1   RIFLE
-# SMG further along, in the hall outside the bunker
-WALLBUY -39.45 -10.0   1  0   SMG
-# Shotgun on the east arena wall mid-map
-WALLBUY  39.45 -10.0  -1  0   SHOTGUN
-# Second rifle on the north arena wall, just outside the back-room door
-WALLBUY -10.0  39.45   0 -1   RIFLE
-# Ray gun gated in the back room
-WALLBUY  30.0  39.45   0 -1   RAYGUN
+    PERK -32 -28 SPEED
+END
 
-# --- Perks (one in spawn, rest spread through the hall + back room) ---
-PERK -32.0 -28.0   SPEED
-PERK -15.0  -8.0   JUG
-PERK   8.0   0.0   DTAP
-PERK  30.0  30.0   STAMIN
+ROOM main_hall
+    # Everything between the bunker and the back room.
 
-# --- Mystery box: out in the main hall, classic Nacht "first random box" spot ---
-MBOX  0  12
+    OBSTACLE -10 -18  3 3
+    OBSTACLE  10 -18  3 3
+    OBSTACLE   0  -8  4 2
+    OBSTACLE -22  -5  3 3
+    OBSTACLE  22  -5  3 3
+    OBSTACLE   0  10  6 3
 
-# --- Pack-a-Punch: tucked into the far NE corner of the back room ---
-PAP  35  35
+    # SMG on the west arena wall, just outside the bunker
+    WALLBUY -39.45 -10  +x  SMG
+    # Shotgun on the east arena wall mid-map
+    WALLBUY  39.45 -10  -x  SHOTGUN
+    # Second rifle on the north arena wall, just outside the back-room door
+    WALLBUY -10    39.45  -z  RIFLE
+
+    PERK -15  -8 JUG
+    PERK   8   0 DTAP
+
+    # Classic Nacht "first random box" spot, out in the main hall
+    MBOX 0 12
+
+    # A line of sandbags forming cover in the centre of the hall
+    PROP sandbag_stack -4 4 yaw 0
+    PROP sandbag_stack  0 4 yaw 0
+    PROP sandbag_stack  4 4 yaw 0
+END
+
+ROOM back_room
+    # --- BACK ROOM (NE corner, x: 15..40, z: 15..40) holding the PaP ---
+
+    # South wall (z=15), full width
+    WALL 16 15  40 15
+    # West wall (x=15) with the $1500 entry door at z=25, 2 m wide
+    WALL 15 15  15 40  DOOR 25 2 1500  AS backroom_door
+
+    OBSTACLE 25 25  3 3
+    OBSTACLE 32 22  3 3
+    OBSTACLE 22 35  6 3 1
+
+    # Ray gun gated in the back room
+    WALLBUY 30 39.45  -z  RAYGUN
+
+    PERK 30 30 STAMIN
+
+    PAP  35 35
+END

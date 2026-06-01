@@ -23,7 +23,8 @@ void  Enemies_ClearAll(void);
 // Bullets
 extern Bullet bullets[MAX_BULLETS];
 
-void  Bullets_Spawn(Vector3 origin, Vector3 dir, int damage, int ownerPlayer);
+void  Bullets_Spawn(Vector3 origin, Vector3 dir, float speed, float life,
+                    int damage, int weaponIdx, int ownerPlayer);
 void  Bullets_Update(float dt);
 void  Bullets_ClearAll(void);
 

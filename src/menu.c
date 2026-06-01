@@ -5,6 +5,8 @@
 #include "protocol.h"
 #include "entities.h"
 #include "level.h"
+#include "pad.h"
+#include "settings.h"
 #include "raygui.h"
 #include <stdlib.h>
 #include <string.h>
@@ -230,13 +232,100 @@ void Menu_DrawSettings(int sw, int sh) {
 
     y += lh + 30;
     GuiSetStyle(DEFAULT, TEXT_SIZE, 22);
-    if (GuiButton((Rectangle){sw/2 - 130, y, 260, 50}, "BACK")) uiState = UI_MENU;
+    if (GuiButton((Rectangle){sw/2 - 270, y, 260, 50}, "CONTROLLER BINDINGS")) uiState = UI_BINDINGS;
+    if (GuiButton((Rectangle){sw/2 +  10, y, 260, 50}, "BACK")) { Settings_Save(); uiState = UI_MENU; }
     GuiSetStyle(DEFAULT, TEXT_SIZE, 16);
 
     DrawText("WASD move, mouse look, LMB shoot, R reload,",
              sw/2 - 280, sh - 100, 18, GRAY);
-    DrawText("Q swap, F buy / use, hold E repair, ESC pause, F3 god mode",
+    DrawText("Q swap, F buy / use, hold E repair, ESC pause, F3 god mode, F4 noclip",
              sw/2 - 280, sh - 76, 18, GRAY);
+}
+
+// State for the bindings screen: which action is being captured (-1 = none).
+static int bindingCaptureFor = -1;
+
+bool Menu_BindingsCaptureActive(void) { return bindingCaptureFor >= 0; }
+
+void Menu_DrawBindings(int sw, int sh) {
+    DrawRectangle(0, 0, sw, sh, (Color){15, 18, 25, 255});
+    const char *title = "CONTROLLER  BINDINGS";
+    int ts = 44;
+    int tw = MeasureText(title, ts);
+    DrawText(title, sw/2 - tw/2, 40, ts, RAYWHITE);
+
+    const char *sub = Pad_Connected()
+        ? "Click an action and press a controller button to rebind."
+        : "(no controller detected - plug one in to rebind)";
+    int sbw = MeasureText(sub, 18);
+    DrawText(sub, sw/2 - sbw/2, 92, 18, (Color){200,200,200,220});
+
+    int rows = BA_COUNT;
+    int colW = 380;
+    int rowH = 36;
+    int x = sw/2 - colW/2;
+    int y = 130;
+
+    if (bindingCaptureFor >= 0) {
+        int got = Bind_PollAny();
+        if (got != BIND_NONE) {
+            bindButton[bindingCaptureFor] = got;
+            bindingCaptureFor = -1;
+            Settings_Save();
+        } else if (IsKeyPressed(KEY_ESCAPE)) {
+            // ESC cancels capture without rebinding.
+            bindingCaptureFor = -1;
+        }
+    }
+
+    for (int i = 0; i < rows; i++) {
+        int ry = y + i * rowH;
+        DrawRectangle(x, ry, colW, rowH - 4, (Color){25,30,40,255});
+        DrawText(Bind_ActionName((BindAction)i), x + 14, ry + 8, 18, RAYWHITE);
+
+        char btnLabel[48];
+        if (bindingCaptureFor == i) snprintf(btnLabel, sizeof btnLabel, "press a button...");
+        else snprintf(btnLabel, sizeof btnLabel, "%s", Bind_ButtonLabel(bindButton[i]));
+
+        Rectangle btnRc = { x + colW - 180, ry + 2, 160, rowH - 8 };
+        if (GuiButton(btnRc, btnLabel)) {
+            bindingCaptureFor = (bindingCaptureFor == i) ? -1 : i;
+        }
+    }
+
+    int by = y + rows * rowH + 20;
+    GuiSetStyle(DEFAULT, TEXT_SIZE, 20);
+    if (GuiButton((Rectangle){sw/2 - 280, by, 180, 44}, "RESET DEFAULTS")) {
+        bindButton[BA_FIRE]     = BIND_TRIG_R;
+        bindButton[BA_ADS]      = BIND_TRIG_L;
+        bindButton[BA_RELOAD]   = PAD_Y;
+        bindButton[BA_INTERACT] = PAD_X;
+        bindButton[BA_MELEE]    = PAD_RB;
+        bindButton[BA_SWAP]     = PAD_LB;
+        bindButton[BA_SLOT1]    = PAD_DP_LEFT;
+        bindButton[BA_SLOT2]    = PAD_DP_RIGHT;
+        bindButton[BA_JUMP]     = PAD_A;
+        bindButton[BA_CROUCH]   = PAD_B;
+        bindButton[BA_SPRINT]   = PAD_L3;
+        bindButton[BA_PAUSE]    = PAD_START;
+        bindButton[BA_SCORE]    = PAD_BACK;
+        bindButton[BA_NOCLIP]   = PAD_R3;
+        bindingCaptureFor = -1;
+        Settings_Save();
+    }
+    if (GuiButton((Rectangle){sw/2 -  90, by, 180, 44}, "CLEAR")) {
+        if (bindingCaptureFor >= 0) {
+            bindButton[bindingCaptureFor] = BIND_NONE;
+            bindingCaptureFor = -1;
+            Settings_Save();
+        }
+    }
+    if (GuiButton((Rectangle){sw/2 + 100, by, 180, 44}, "BACK")) {
+        bindingCaptureFor = -1;
+        Settings_Save();
+        uiState = UI_SETTINGS;
+    }
+    GuiSetStyle(DEFAULT, TEXT_SIZE, 16);
 }
 
 void Menu_DrawJoinInput(int sw, int sh) {

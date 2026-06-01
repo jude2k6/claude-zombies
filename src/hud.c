@@ -7,6 +7,7 @@
 #include "game.h"
 #include "entities.h"
 #include "pad.h"
+#include "settings.h"
 #include "fx.h"
 #include "raygui.h"
 #include "raymath.h"
@@ -543,5 +544,5 @@ void Hud_Draw(int sw, int sh, Player *me, Interact ix) {
 
     HudDrawBonusToast(sw, sh);
     HudDrawRoundSplash(sw, sh);
-    if (IsKeyDown(KEY_TAB) || Pad_Down(PAD_BACK)) HudDrawScoreboard(sw, sh);
+    if (IsKeyDown(KEY_TAB) || Bind_Down(BA_SCORE)) HudDrawScoreboard(sw, sh);
 }

@@ -3,6 +3,7 @@
 #include "player.h"
 #include "weapons.h"
 #include "fx.h"
+#include "decals.h"
 #include "raymath.h"
 #include <math.h>
 #include <stdlib.h>
@@ -86,6 +87,8 @@ void Enemies_TrySpawn(int round) {
                 .targetWindow = wi,
                 .targetPlayer = -1,
                 .hasWaypoint = false,
+                // Stagger runner first-lunge so they don't all dash on frame 1
+                .specialTimer = (t == ZT_RUNNER) ? -Level_RandRange(0.5f, 2.5f) : 0.0f,
             };
             enemiesAlive++;
             enemiesToSpawn--;
@@ -174,8 +177,13 @@ void Enemies_Update(float dt) {
             }
         }
         else {
+            // Retarget cadence varies by type: runners switch fast, crawlers
+            // commit, normals + bosses sit in the middle.
+            int retargetMod = 60;
+            if      (e->type == ZT_RUNNER)  retargetMod = 25;
+            else if (e->type == ZT_CRAWLER) retargetMod = 100;
             if (e->targetPlayer < 0 || !players[e->targetPlayer].active || !players[e->targetPlayer].alive
-                || (rand() % 60) == 0) {
+                || (rand() % retargetMod) == 0) {
                 e->targetPlayer = Player_NearestAlive(e->pos);
             }
             if (e->targetPlayer < 0) continue;
@@ -225,29 +233,98 @@ void Enemies_Update(float dt) {
             float d = Vector3Length(to);
             Vector3 dirGoal = (d > 0.01f) ? Vector3Scale(to, 1.0f / d) : (Vector3){0,0,0};
 
+            // Per-type movement modulation
+            e->specialTimer -= dt;
+            float speedMul = 1.0f;
+            Vector3 moveDir = dirGoal;
+
+            switch (e->type) {
+                case ZT_RUNNER: {
+                    // Periodic 0.55s lunge bursts with ~3s cooldown when
+                    // close-ish and the path is clear.
+                    bool lunging = (e->specialTimer > 0);
+                    if (!lunging && e->specialTimer < -2.5f && d > 1.2f && d < 9.0f &&
+                        Level_PathClearXZ(e->pos, dirGoal, ENEMY_RADIUS, 3.0f)) {
+                        e->specialTimer = 0.55f;
+                        lunging = true;
+                    }
+                    if (lunging) speedMul = 1.9f;
+                    break;
+                }
+                case ZT_CRAWLER: {
+                    // Serpentine weave — lateral sine around dirGoal makes
+                    // them harder to track at range.
+                    Vector3 perp = (Vector3){ -dirGoal.z, 0, dirGoal.x };
+                    float wave = sinf(e->bobPhase * 1.6f) * 0.45f;
+                    Vector3 w = Vector3Add(dirGoal, Vector3Scale(perp, wave));
+                    float wl = Vector3Length(w);
+                    if (wl > 1e-4f) moveDir = Vector3Scale(w, 1.0f / wl);
+                    speedMul = 1.05f;
+                    break;
+                }
+                case ZT_BOSS:
+                    // Bosses grind straight forward; no weave, slight slow,
+                    // but hit much harder on contact.
+                    speedMul = 0.95f;
+                    break;
+                default: break;
+            }
+
+            // Proactive obstacle avoidance: if the immediate path is blocked
+            // by anything solid, fan out angles and pick the smallest
+            // deflection that gives us a clear lookahead. Commits to the
+            // chosen direction briefly to avoid jitter at obstacle edges.
+            // Skip while a commit is already in flight.
+            if (e->escapeTimer <= 0 && d > 0.6f) {
+                float lookahead = e->speed * speedMul * 0.45f;
+                if (lookahead < 0.6f) lookahead = 0.6f;
+                if (!Level_PathClearXZ(e->pos, moveDir, ENEMY_RADIUS + 0.05f, lookahead)) {
+                    static const float baseAngles[] = { 30.0f, 60.0f, 90.0f, 125.0f };
+                    int sign = e->stuckBias ? +1 : -1;
+                    bool found = false;
+                    for (int k = 0; k < 4 && !found; k++) {
+                        for (int s = 0; s < 2 && !found; s++) {
+                            float ang = baseAngles[k] * (s == 0 ? sign : -sign);
+                            float rad = ang * DEG2RAD;
+                            float c = cosf(rad), si = sinf(rad);
+                            Vector3 cand = {
+                                dirGoal.x * c - dirGoal.z * si, 0.0f,
+                                dirGoal.x * si + dirGoal.z * c
+                            };
+                            if (Level_PathClearXZ(e->pos, cand, ENEMY_RADIUS + 0.05f, lookahead)) {
+                                e->escapeDir = cand;
+                                e->escapeTimer = 0.30f;
+                                found = true;
+                            }
+                        }
+                    }
+                    if (!found) e->stuckBias = !e->stuckBias;
+                }
+            }
+
             Vector3 oldPos = e->pos;
             if (d > 0.01f) {
-                Vector3 moveDir = dirGoal;
+                Vector3 useDir = moveDir;
                 if (e->escapeTimer > 0) {
-                    moveDir = e->escapeDir;
+                    useDir = e->escapeDir;
                     e->escapeTimer -= dt;
                 }
-                Vector3 want = Vector3Add(e->pos, Vector3Scale(moveDir, e->speed * dt));
+                Vector3 want = Vector3Add(e->pos, Vector3Scale(useDir, e->speed * speedMul * dt));
                 e->pos = Level_ResolveXZ(e->pos, want, ENEMY_RADIUS, true);
             }
 
-            // Stuck detection: if we wanted to move but barely did, commit to
-            // a perpendicular sidestep for a beat. Alternate sides so we
-            // probe both ways around an obstacle/wall.
+            // Reactive fallback: even after the probe + commit, if we barely
+            // moved this frame, sidestep perpendicular for a beat. Catches
+            // wedged-in-corner cases the probe couldn't resolve.
             float mdx = e->pos.x - oldPos.x;
             float mdz = e->pos.z - oldPos.z;
-            float thresh = e->speed * dt * 0.3f;
+            float thresh = e->speed * speedMul * dt * 0.3f;
             if ((mdx*mdx + mdz*mdz) < (thresh*thresh) && d > 0.5f && e->escapeTimer <= 0) {
                 e->escapeDir = e->stuckBias
                     ? (Vector3){ -dirGoal.z, 0,  dirGoal.x }
                     : (Vector3){  dirGoal.z, 0, -dirGoal.x };
                 e->escapeTimer = 0.35f;
-                e->stuckBias = e->stuckBias ? 0 : 1;
+                e->stuckBias = !e->stuckBias;
             }
 
             Vector2 pXZ = { tp->pos.x, tp->pos.z };
@@ -256,8 +333,18 @@ void Enemies_Update(float dt) {
                 bool cheatProtected = godMode && (int)(tp - players) == localPlayerIdx;
                 // Downed players are incapacitated — only the bleed timer kills them.
                 if (tp->downed) cheatProtected = true;
+                float ccd = ENEMY_TOUCH_COOLDOWN;
+                if      (e->type == ZT_RUNNER) ccd *= 0.80f;
+                else if (e->type == ZT_BOSS)   ccd *= 1.30f;
                 if (!cheatProtected) {
-                    tp->hp -= ENEMY_DAMAGE;
+                    int dmg = ENEMY_DAMAGE;
+                    switch (e->type) {
+                        case ZT_RUNNER:  dmg = (int)(ENEMY_DAMAGE * 0.75f); break;
+                        case ZT_CRAWLER: dmg = (int)(ENEMY_DAMAGE * 1.40f); break;
+                        case ZT_BOSS:    dmg = ENEMY_DAMAGE * 3;            break;
+                        default: break;
+                    }
+                    tp->hp -= dmg;
                     tp->damageFlash = 0.5f;
                     if (tp->hp <= 0) {
                         tp->hp = 0;
@@ -277,11 +364,12 @@ void Enemies_Update(float dt) {
                         }
                     }
                     if ((int)(tp - players) == localPlayerIdx) {
-                        Fx_PunchAndRumble(tp->hp <= 0 ? 0.65f : 0.30f,
-                                          0.55f, 0.55f, 0.15f);
+                        float kickAmt = tp->hp <= 0 ? 0.65f
+                                      : (e->type == ZT_BOSS ? 0.50f : 0.30f);
+                        Fx_PunchAndRumble(kickAmt, 0.55f, 0.55f, 0.15f);
                     }
                 }
-                e->touchTimer = ENEMY_TOUCH_COOLDOWN;
+                e->touchTimer = ccd;
             }
         }
     }
@@ -293,13 +381,16 @@ void Bullets_ClearAll(void) {
     for (int i = 0; i < MAX_BULLETS; i++) bullets[i].alive = false;
 }
 
-void Bullets_Spawn(Vector3 origin, Vector3 dir, int damage, int ownerPlayer) {
+void Bullets_Spawn(Vector3 origin, Vector3 dir, float speed, float life,
+                   int damage, int weaponIdx, int ownerPlayer) {
     for (int i = 0; i < MAX_BULLETS; i++) {
         if (!bullets[i].alive) {
-            bullets[i].pos    = Vector3Add(origin, Vector3Scale(dir, 0.4f));
-            bullets[i].vel    = Vector3Scale(dir, BULLET_SPEED);
+            bullets[i].pos    = origin;
+            bullets[i].origin = origin;
+            bullets[i].vel    = Vector3Scale(dir, speed);
             bullets[i].damage = damage;
-            bullets[i].life   = BULLET_LIFE;
+            bullets[i].weaponIdx = weaponIdx;
+            bullets[i].life   = life;
             bullets[i].alive  = true;
             bullets[i].ownerPlayer = ownerPlayer;
             return;
@@ -307,62 +398,234 @@ void Bullets_Spawn(Vector3 origin, Vector3 dir, int damage, int ownerPlayer) {
     }
 }
 
+// Swept segment vs axis-aligned box (slab method). Returns true if the
+// segment a→b crosses the box and writes the entry time t in [0,1], the
+// hit point, and the outward face normal.
+static bool SegmentBoxHit(Vector3 a, Vector3 b, Box box,
+                          float *outT, Vector3 *outHit, Vector3 *outNormal) {
+    Vector3 d = Vector3Subtract(b, a);
+    float halfX = box.size.x * 0.5f;
+    float halfY = box.size.y * 0.5f;
+    float halfZ = box.size.z * 0.5f;
+    float bounds[3][2] = {
+        { box.center.x - halfX, box.center.x + halfX },
+        { box.center.y - halfY, box.center.y + halfY },
+        { box.center.z - halfZ, box.center.z + halfZ },
+    };
+    float pa[3] = { a.x, a.y, a.z };
+    float pd[3] = { d.x, d.y, d.z };
+    float tNear = 0.0f, tFar = 1.0f;
+    int axis = -1;
+    for (int k = 0; k < 3; k++) {
+        if (fabsf(pd[k]) < 1e-6f) {
+            if (pa[k] < bounds[k][0] || pa[k] > bounds[k][1]) return false;
+            continue;
+        }
+        float inv = 1.0f / pd[k];
+        float t1 = (bounds[k][0] - pa[k]) * inv;
+        float t2 = (bounds[k][1] - pa[k]) * inv;
+        if (t1 > t2) { float t = t1; t1 = t2; t2 = t; }
+        if (t1 > tNear) { tNear = t1; axis = k; }
+        if (t2 < tFar)  tFar = t2;
+        if (tNear > tFar) return false;
+    }
+    if (axis < 0 || tNear < 0 || tNear > 1) return false;
+    *outT   = tNear;
+    *outHit = Vector3Add(a, Vector3Scale(d, tNear));
+    Vector3 n = { 0, 0, 0 };
+    if (axis == 0) n.x = (pd[0] > 0) ? -1.0f : 1.0f;
+    if (axis == 1) n.y = (pd[1] > 0) ? -1.0f : 1.0f;
+    if (axis == 2) n.z = (pd[2] > 0) ? -1.0f : 1.0f;
+    *outNormal = n;
+    return true;
+}
+
+// Swept segment vs vertical cylinder (body) + sphere on top (head). On hit
+// returns the t in [0,1] of the entry, plus whether the head zone was hit.
+static bool SegmentEnemyHit(Vector3 a, Vector3 b, const Enemy *e,
+                            float *outT, bool *outHead, Vector3 *outHitPos) {
+    const float bodyR = ENEMY_RADIUS + 0.15f;
+    const float headR = 0.40f;
+    const float bodyYmin = e->pos.y - ENEMY_HEIGHT * 0.5f;
+    const float bodyYmax = e->pos.y + ENEMY_HEIGHT * 0.5f;
+    const float headY    = e->pos.y + ENEMY_HEIGHT * 0.5f + 0.30f;
+
+    Vector3 d = Vector3Subtract(b, a);
+    float bestT = 2.0f;
+    bool  bestHead = false;
+
+    // Body cylinder (XZ disk extruded along Y)
+    {
+        float fx = a.x - e->pos.x, fz = a.z - e->pos.z;
+        float A = d.x*d.x + d.z*d.z;
+        float B = 2.0f * (fx*d.x + fz*d.z);
+        float C = fx*fx + fz*fz - bodyR*bodyR;
+        if (A > 1e-8f) {
+            float disc = B*B - 4*A*C;
+            if (disc >= 0) {
+                float sq = sqrtf(disc);
+                float t0 = (-B - sq) / (2*A);
+                float t1 = (-B + sq) / (2*A);
+                float t = (t0 >= 0) ? t0 : t1;
+                if (t >= 0 && t <= 1) {
+                    float hy = a.y + d.y * t;
+                    if (hy >= bodyYmin && hy <= bodyYmax && t < bestT) {
+                        bestT = t; bestHead = false;
+                    }
+                }
+            }
+        } else if (C <= 0) {
+            // Segment is purely vertical and inside the cylinder XZ
+            if (a.y <= bodyYmax && a.y >= bodyYmin) { bestT = 0; bestHead = false; }
+        }
+    }
+
+    // Head sphere
+    {
+        Vector3 f = { a.x - e->pos.x, a.y - headY, a.z - e->pos.z };
+        float A = d.x*d.x + d.y*d.y + d.z*d.z;
+        float B = 2.0f * (f.x*d.x + f.y*d.y + f.z*d.z);
+        float C = f.x*f.x + f.y*f.y + f.z*f.z - headR*headR;
+        if (A > 1e-8f) {
+            float disc = B*B - 4*A*C;
+            if (disc >= 0) {
+                float sq = sqrtf(disc);
+                float t0 = (-B - sq) / (2*A);
+                float t1 = (-B + sq) / (2*A);
+                float t = (t0 >= 0) ? t0 : t1;
+                if (t >= 0 && t <= 1 && t < bestT) {
+                    bestT = t; bestHead = true;
+                }
+            }
+        }
+    }
+
+    if (bestT > 1.0f) return false;
+    *outT = bestT;
+    *outHead = bestHead;
+    *outHitPos = Vector3Add(a, Vector3Scale(d, bestT));
+    return true;
+}
+
 void Bullets_Update(float dt) {
     for (int i = 0; i < MAX_BULLETS; i++) {
         if (!bullets[i].alive) continue;
         bullets[i].life -= dt;
         if (bullets[i].life <= 0) { bullets[i].alive = false; continue; }
-        bullets[i].pos = Vector3Add(bullets[i].pos, Vector3Scale(bullets[i].vel, dt));
 
-        for (int j = 0; j < obstacleCount; j++) {
-            if (CheckCollisionBoxSphere(Level_BoxToBB(obstacles[j]), bullets[i].pos, 0.1f)) {
-                bullets[i].alive = false; break;
-            }
-        }
-        if (!bullets[i].alive) continue;
+        Vector3 a = bullets[i].pos;
+        Vector3 b = Vector3Add(a, Vector3Scale(bullets[i].vel, dt));
 
-        float ax = fabsf(bullets[i].pos.x), az = fabsf(bullets[i].pos.z);
-        if (ax > ARENA_HALF + 4.0f || az > ARENA_HALF + 4.0f) { bullets[i].alive = false; continue; }
+        float    bestT = 2.0f;
+        bool     hitIsEnemy = false;
+        int      enemyIdx   = -1;
+        bool     headHit    = false;
+        Vector3  hitPos     = b;
+        Vector3  hitNormal  = { 0, 1, 0 };
 
+        // Enemies (target the bullet, take priority on tie)
         for (int e = 0; e < MAX_ENEMIES; e++) {
             if (!enemies[e].alive) continue;
-            float dx = bullets[i].pos.x - enemies[e].pos.x;
-            float dz = bullets[i].pos.z - enemies[e].pos.z;
-            float dy = bullets[i].pos.y - enemies[e].pos.y;
-            // Hit envelope: body cylinder of radius r, plus a slightly wider
-            // head sphere on top.
-            float r  = ENEMY_RADIUS + 0.15f;
-            bool bodyHit = (dx*dx + dz*dz < r*r) && fabsf(dy) < ENEMY_HEIGHT*0.6f;
-            float headDy = dy - (ENEMY_HEIGHT * 0.5f + 0.3f);
-            float headR  = 0.35f;
-            bool headHit = (dx*dx + dz*dz < headR*headR) && fabsf(headDy) < headR;
-            if (bodyHit || headHit) {
-                int dmg = bullets[i].damage * (headHit ? 2 : 1);
-                if (instaKillTimer > 0) dmg = 99999;
-                enemies[e].hp -= dmg;
-                bullets[i].alive = false;
-                int op = bullets[i].ownerPlayer;
-                int hitPts  = HIT_POINTS + (headHit ? 30 : 0);
-                int killPts = KILL_POINTS + (headHit ? 50 : 0);
-                if (doublePointsTimer > 0) { hitPts *= 2; killPts *= 2; }
-                if (op >= 0 && op < NET_MAX_PLAYERS && players[op].active) {
-                    players[op].points += hitPts;
-                    players[op].shotsHit++;
-                    if (headHit) players[op].headshots++;
-                    if (enemies[e].hp <= 0) {
-                        enemies[e].alive = false;
-                        enemiesAlive--;
-                        players[op].points += killPts;
-                        players[op].kills++;
-                        PowerUps_TryDrop(enemies[e].pos);
-                    }
-                } else if (enemies[e].hp <= 0) {
-                    enemies[e].alive = false;
-                    enemiesAlive--;
-                    PowerUps_TryDrop(enemies[e].pos);
-                }
-                break;
+            float t; bool head; Vector3 hp;
+            if (!SegmentEnemyHit(a, b, &enemies[e], &t, &head, &hp)) continue;
+            if (t < bestT) {
+                bestT = t; hitIsEnemy = true; enemyIdx = e; headHit = head;
+                hitPos = hp;
             }
+        }
+
+        // Static geometry: obstacles, interior walls, closed doors
+        for (int j = 0; j < obstacleCount; j++) {
+            float t; Vector3 hp, hn;
+            if (SegmentBoxHit(a, b, obstacles[j], &t, &hp, &hn) && t < bestT) {
+                bestT = t; hitIsEnemy = false; hitPos = hp; hitNormal = hn;
+            }
+        }
+        for (int j = 0; j < interiorWallCount; j++) {
+            float t; Vector3 hp, hn;
+            if (SegmentBoxHit(a, b, interiorWalls[j], &t, &hp, &hn) && t < bestT) {
+                bestT = t; hitIsEnemy = false; hitPos = hp; hitNormal = hn;
+            }
+        }
+        for (int j = 0; j < doorCount; j++) {
+            if (doors[j].opened) continue;
+            float t; Vector3 hp, hn;
+            if (SegmentBoxHit(a, b, doors[j].box, &t, &hp, &hn) && t < bestT) {
+                bestT = t; hitIsEnemy = false; hitPos = hp; hitNormal = hn;
+            }
+        }
+
+        // Floor (y = 0 plane)
+        if (a.y > 0.0f && b.y <= 0.0f) {
+            float t = a.y / (a.y - b.y);
+            if (t < bestT) {
+                bestT = t; hitIsEnemy = false;
+                hitPos = Vector3Add(a, Vector3Scale(Vector3Subtract(b, a), t));
+                hitPos.y = 0.0f;
+                hitNormal = (Vector3){ 0, 1, 0 };
+            }
+        }
+
+        if (bestT > 1.0f) {
+            // No hit this step — advance and life-out on arena escape.
+            bullets[i].pos = b;
+            float ax = fabsf(b.x), az = fabsf(b.z);
+            if (ax > ARENA_HALF + 4.0f || az > ARENA_HALF + 4.0f)
+                bullets[i].alive = false;
+            continue;
+        }
+
+        bullets[i].pos   = hitPos;
+        bullets[i].alive = false;
+
+        if (hitIsEnemy) {
+            Enemy *en = &enemies[enemyIdx];
+            // Damage dropoff: linear from dropoffStart..dropoffEnd, clamped
+            // to dropoffMinMul. Distance is hit point vs spawn origin.
+            float dropMul = 1.0f;
+            int wi = bullets[i].weaponIdx;
+            if (wi >= 0 && wi < W_COUNT) {
+                const WeaponDef *wd = &WEAPONS[wi];
+                if (wd->dropoffEnd > wd->dropoffStart) {
+                    float dist = Vector3Distance(hitPos, bullets[i].origin);
+                    if (dist > wd->dropoffStart) {
+                        float t = (dist - wd->dropoffStart) / (wd->dropoffEnd - wd->dropoffStart);
+                        if (t > 1.0f) t = 1.0f;
+                        dropMul = 1.0f - t * (1.0f - wd->dropoffMinMul);
+                    }
+                }
+            }
+            int dmg = (int)(bullets[i].damage * dropMul) * (headHit ? 2 : 1);
+            if (dmg < 1) dmg = 1;
+            if (instaKillTimer > 0) dmg = 99999;
+            en->hp -= dmg;
+            int op = bullets[i].ownerPlayer;
+            int hitPts  = HIT_POINTS + (headHit ? 30 : 0);
+            int killPts = KILL_POINTS + (headHit ? 50 : 0);
+            if (doublePointsTimer > 0) { hitPts *= 2; killPts *= 2; }
+            if (op >= 0 && op < NET_MAX_PLAYERS && players[op].active) {
+                players[op].points += hitPts;
+                players[op].shotsHit++;
+                if (headHit) players[op].headshots++;
+                if (en->hp <= 0) {
+                    en->alive = false;
+                    enemiesAlive--;
+                    players[op].points += killPts;
+                    players[op].kills++;
+                    PowerUps_TryDrop(en->pos);
+                }
+            } else if (en->hp <= 0) {
+                en->alive = false;
+                enemiesAlive--;
+                PowerUps_TryDrop(en->pos);
+            }
+            // Blood faces back toward the shooter
+            Vector3 vn = Vector3Normalize(Vector3Negate(bullets[i].vel));
+            float sz = 0.18f + (rand() % 100) / 100.0f * 0.10f;
+            Decals_Spawn(DECAL_BLOOD, hitPos, vn, sz);
+        } else {
+            float sz = 0.10f + (rand() % 100) / 100.0f * 0.05f;
+            Decals_Spawn(DECAL_IMPACT, hitPos, hitNormal, sz);
         }
     }
 }

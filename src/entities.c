@@ -240,15 +240,23 @@ void Enemies_Update(float dt) {
 
             switch (e->type) {
                 case ZT_RUNNER: {
-                    // Periodic 0.55s lunge bursts with ~3s cooldown when
-                    // close-ish and the path is clear.
-                    bool lunging = (e->specialTimer > 0);
-                    if (!lunging && e->specialTimer < -2.5f && d > 1.2f && d < 9.0f &&
+                    // Two-phase lunge: 0.20s wind-up tell (no speed boost,
+                    // visual cue rendered in DrawZombie), then 0.55s
+                    // actual lunge at ~1.9x speed. ~3s cooldown after.
+                    // specialTimer encoding while active:
+                    //   (0.55, 0.75]  -> winding up
+                    //   (0,    0.55]  -> lunging
+                    //   <= 0          -> cooldown counting down to -2.5
+                    bool active = (e->specialTimer > 0);
+                    if (!active && e->specialTimer < -2.5f && d > 1.2f && d < 9.0f &&
                         Level_PathClearXZ(e->pos, dirGoal, ENEMY_RADIUS, 3.0f)) {
-                        e->specialTimer = 0.55f;
-                        lunging = true;
+                        e->specialTimer = 0.75f;  // wind-up first
+                        active = true;
                     }
-                    if (lunging) speedMul = 1.9f;
+                    if (active && e->specialTimer <= 0.55f) {
+                        // Past wind-up — kick the speed boost in
+                        speedMul = 1.9f;
+                    }
                     break;
                 }
                 case ZT_CRAWLER: {

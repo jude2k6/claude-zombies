@@ -7,26 +7,26 @@ shader / system additions.
 ## Next up (highest impact-per-effort)
 
 ### Weapons polish (architecture is in)
-- [ ] **Verify the 5 new viewmodels in first-person.** This session
-      replaced all Quaternius models with new ones authored via Blender
-      MCP, but only the SMG + rifle were rebuilt with proper magazine /
-      receiver connectivity. Pistol / shotgun / raygun may still have
-      visible seams. `model_scale` was bumped to 10–12 across the board
-      (my models are in metric metres; Quaternius were in inches).
-      Tune `model_scale` / `model_offset` in `data/weapons/<name>/<name>.weapon`
-      until each gun looks right at the viewmodel anchor.
-- [ ] **Reload + weapon-swap viewmodel animation** — currently instant
-      snap. Even a 200 ms slide/rotate would be a feel upgrade.
+- [x] **Verify the 5 new viewmodels in first-person** — done via
+      `--screenshot-viewmodels` CLI mode. Sizes look right; pistol
+      bumped to `model_scale 15`. Tune individual `model_scale` /
+      `model_offset` in `data/weapons/<name>/<name>.weapon` if needed.
+- [x] **Reload + weapon-swap viewmodel animation** — `render.c`
+      now does a parabolic dip + 31° muzzle-down tilt during reload,
+      and a 0.22s "raise from below" swap-in animation when the
+      displayed weapon changes.
 - [ ] **Headshot freeze-frame** + screen flash on kill.
 
 ### Zombie polish (AI is in)
-- [ ] **Per-type tells (visual + audio).** Differentiated AI is
-      meaningful but unreadable right now:
-  - Crawler has no stripe currently (runner = yellow, boss = magenta).
-  - Runner lunge has no wind-up — needs a brief growl + red eye-glow
-    so the burst is readable, not just "I died fast."
-  - Distinct groan per type via raylib's positional audio attenuation
-    (covered below in audio).
+- [x] **Runner lunge wind-up tell** — runner now spends 0.2s in a
+      visible "winding up" state before the speed burst kicks in:
+      red body tint + pulsing glowing-red eye spheres at head height,
+      orientation-tracked. The lunge is now anticipated, not "I died
+      fast." (Crawler tell is its squished no-head silhouette;
+      boss tell is the magenta stripe + 1.7×1.5 scale.)
+- [ ] **Per-type audio tells** — distinct groan / hiss / roar per
+      zombie type via raylib's positional audio attenuation. Covered
+      below in audio section.
 
 ### Rendering
 - [ ] **Particle system** — pooled additive-blend particles for muzzle
@@ -90,8 +90,10 @@ shader / system additions.
       boxes.
 - [ ] **Map thumbnails** — `data/maps/<name>.png` rendered next to the
       name in the map picker.
-- [ ] **Mystery box slow-roll** — currently cycles instantly; should
-      lerp through `MBOX_ROLLING` over the 4 s timer.
+- [x] **Mystery box slow-roll** — `Interact_UpdateMBox` now uses a
+      decelerating flip rate (f(u) = 12u - 1.375u²) so the box spins
+      fast early and slows to ~1 Hz as time runs out, then locks to
+      the final weapon for the last 0.5 s so the box visibly "lands".
 - [ ] **Per-type zombie OBJs** (`zombie_runner.obj`, `_crawler.obj`,
       `_boss.obj`) with stripe baked into geometry. Currently a
       `DrawCube` overlay on top of the shared `zombie.obj`.

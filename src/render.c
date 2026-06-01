@@ -404,6 +404,13 @@ static void DrawEnemy(Enemy *e) {
     Vector3 body = { e->pos.x, e->pos.y + bob, e->pos.z };
     Color hpTint = WHITE;
 
+    // Runner pre-lunge tell: specialTimer in (0.55, 0.75] is the 0.2s
+    // wind-up window before the speed burst kicks in. Render an angry
+    // red tint + glowing eye spheres so the lunge is anticipated.
+    bool runnerWindup = (e->type == ZT_RUNNER &&
+                         e->specialTimer > 0.55f && e->specialTimer <= 0.75f);
+    if (runnerWindup) hpTint = (Color){255, 90, 70, 255};
+
     // Per-type silhouette scale. Runner is leaner & shorter, crawler is
     // squished low to the ground (no head), boss is hulking and accented.
     float w = ENEMY_RADIUS * 2.0f, h = ENEMY_HEIGHT;
@@ -454,6 +461,19 @@ static void DrawEnemy(Enemy *e) {
             // Type stripe ring around the chest, drawn as a thin cube band.
             DrawCube((Vector3){body.x, body.y, body.z},
                      w * 1.02f, h * 0.10f, w * 1.02f, stripe);
+        }
+        if (runnerWindup) {
+            // Glowing red eyes at head height — pulse over the 0.2s window.
+            float headY = body.y + h * 0.5f + 0.20f;
+            float fwdDx = sinf(yawDeg * DEG2RAD);
+            float fwdDz = -cosf(yawDeg * DEG2RAD);
+            float perpX = -fwdDz, perpZ = fwdDx;
+            float pulse = 0.6f + 0.4f * sinf((0.75f - e->specialTimer) * 30.0f);
+            unsigned char r = (unsigned char)(255.0f * pulse);
+            Color eye = (Color){ r, 30, 30, 255 };
+            float eyeR = 0.045f;
+            DrawSphere((Vector3){ body.x + fwdDx*0.18f + perpX*0.08f, headY, body.z + fwdDz*0.18f + perpZ*0.08f }, eyeR, eye);
+            DrawSphere((Vector3){ body.x + fwdDx*0.18f - perpX*0.08f, headY, body.z + fwdDz*0.18f - perpZ*0.08f }, eyeR, eye);
         }
         return;
     }
@@ -711,15 +731,53 @@ static void DrawFirstPersonViewmodel(Camera camera) {
     if (wi < 0 || wi >= W_COUNT) return;
     if (!weaponModelLoaded[wi]) return;
 
+    // ---- viewmodel anim state (local to the player's render) ----
+    // Swap: when the displayed weapon changes (currentSlot flip OR a
+    // weapon swap into the same slot), start a 0.22s "raise from below"
+    // animation. State is render-local since the viewmodel is local-only.
+    static int   prev_slot = -1;
+    static int   prev_wi   = -1;
+    static float swap_t    = 0.0f;
+    int cur_slot = me->currentSlot;
+    if (cur_slot != prev_slot || wi != prev_wi) {
+        swap_t = 1.0f;
+        prev_slot = cur_slot;
+        prev_wi   = wi;
+    }
+    if (swap_t > 0.0f) {
+        swap_t -= GetFrameTime() / 0.22f;
+        if (swap_t < 0.0f) swap_t = 0.0f;
+    }
+    // Reload: parabolic dip + lateral tilt over the weapon's reload time.
+    float reload_dip = 0.0f;
+    {
+        WeaponSlot *cs = &me->inventory[cur_slot];
+        const WeaponDef *cw = &WEAPONS[cs->weaponIdx];
+        if (cs->reloadTimer > 0.0f && cw->reloadTime > 0.0f) {
+            float t = 1.0f - cs->reloadTimer / cw->reloadTime;  // 0 -> 1
+            if (t < 0.0f) t = 0.0f;
+            if (t > 1.0f) t = 1.0f;
+            reload_dip = sinf(t * PI);   // 0 -> 1 -> 0
+        }
+    }
+    // Swap raise: gun starts 0.32m below + 0.12m back, eases in
+    float swap_down = swap_t * 0.32f;
+    float swap_back = swap_t * 0.12f;
+    // Reload dip: drops 0.18m, pushes 0.10m forward (away from screen)
+    float reload_down = reload_dip * 0.18f;
+    float reload_fwd  = reload_dip * 0.10f;
+    // Tilt the gun (right-axis rotation) during reload — muzzle drops
+    float tilt = reload_dip * 0.55f;  // radians (~31 deg peak)
+
     Vector3 fwd   = Vector3Normalize(Vector3Subtract(camera.target, camera.position));
     Vector3 right = Vector3Normalize(Vector3CrossProduct(fwd, camera.up));
     Vector3 up    = Vector3CrossProduct(right, fwd);
 
     float s = 0.025f * weaponTune[wi].scale;
     Vector3 anchor = camera.position;
-    anchor = Vector3Add(anchor, Vector3Scale(fwd,    0.55f));
+    anchor = Vector3Add(anchor, Vector3Scale(fwd,    0.55f - swap_back + reload_fwd));
     anchor = Vector3Add(anchor, Vector3Scale(right,  0.35f));
-    anchor = Vector3Add(anchor, Vector3Scale(up,    -0.28f));
+    anchor = Vector3Add(anchor, Vector3Scale(up,    -0.28f - reload_down - swap_down));
     anchor = Vector3Add(anchor, Vector3Scale(right,  weaponTune[wi].offset.x));
     anchor = Vector3Add(anchor, Vector3Scale(up,     weaponTune[wi].offset.y));
     anchor = Vector3Add(anchor, Vector3Scale(fwd,    weaponTune[wi].offset.z));
@@ -732,6 +790,25 @@ static void DrawFirstPersonViewmodel(Camera camera) {
     Vector3 colX = { cy*right.x + sy*fwd.x, cy*right.y + sy*fwd.y, cy*right.z + sy*fwd.z };
     Vector3 colY = up;
     Vector3 colZ = { sy*right.x - cy*fwd.x, sy*right.y - cy*fwd.y, sy*right.z - cy*fwd.z };
+
+    // Pitch tilt around the model's right axis (colX) for the reload dip:
+    // rotates colY -> colY*cos(tilt) + colZ*sin(tilt) and colZ similarly.
+    // Positive `tilt` drops the muzzle (model -Z) downward.
+    if (tilt > 0.0f) {
+        float ct = cosf(tilt), st = sinf(tilt);
+        Vector3 newY = {
+            colY.x * ct + colZ.x * st,
+            colY.y * ct + colZ.y * st,
+            colY.z * ct + colZ.z * st,
+        };
+        Vector3 newZ = {
+            colZ.x * ct - colY.x * st,
+            colZ.y * ct - colY.y * st,
+            colZ.z * ct - colY.z * st,
+        };
+        colY = newY;
+        colZ = newZ;
+    }
 
     Matrix tx;
     tx.m0 = colX.x * s; tx.m4 = colY.x * s; tx.m8  = colZ.x * s; tx.m12 = anchor.x;

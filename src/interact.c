@@ -143,9 +143,20 @@ void Interact_UpdateMBox(float dt) {
     mbox.bob += dt * 3.0f;
     if (mbox.state == MBOX_ROLLING) {
         mbox.timer -= dt;
-        // Cycle the visible weapon at ~10 Hz
-        mbox.showingWeapon = ((int)(mbox.timer * 12.0f)) % W_COUNT;
-        if (mbox.showingWeapon < 0) mbox.showingWeapon += W_COUNT;
+        // Slot-machine deceleration: rate(t) drops from ~12 Hz at the
+        // start to ~1 Hz near the end. Integrated flip count is
+        // f(u) = 12u - (11/8)u² where u = elapsed time. In the final
+        // half-second we lock to the actual finalWeapon so the box
+        // visibly "lands" on its pick before swapping to WAITING.
+        if (mbox.timer < 0.5f) {
+            mbox.showingWeapon = mbox.finalWeapon;
+        } else {
+            float u = MBOX_ROLL_TIME - mbox.timer;
+            float flips = 12.0f * u - (11.0f / 8.0f) * u * u;
+            int idx = ((int)flips) % W_COUNT;
+            if (idx < 0) idx += W_COUNT;
+            mbox.showingWeapon = idx;
+        }
         if (mbox.timer <= 0) {
             mbox.state = MBOX_WAITING;
             mbox.timer = MBOX_WAIT_TIME;

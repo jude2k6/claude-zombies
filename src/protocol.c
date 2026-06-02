@@ -33,6 +33,8 @@ typedef struct {
     uint8_t downed;
     float   bleedTimer;
     uint8_t highestRound;
+    uint8_t lethals;
+    uint8_t tacticals;
 } SerPlayer;
 
 typedef struct {
@@ -42,7 +44,16 @@ typedef struct {
     uint8_t  type;
     uint8_t  targetWindow;
     float    bobPhase;
+    float    stunTimer;
 } SerEnemy;
+
+typedef struct {
+    float    px, py, pz;
+    float    vx, vy, vz;
+    float    fuse;
+    uint8_t  kind;
+    uint8_t  ownerPlayer;
+} SerThrowable;
 
 typedef struct {
     float    px, py, pz;
@@ -76,6 +87,7 @@ typedef struct {
     uint16_t numEnemies;
     uint16_t numBullets;
     uint16_t numPowerUps;
+    uint16_t numThrowables;
     SerPlayer players[NET_MAX_PLAYERS];
 } PktSnapshotHeader;
 
@@ -119,6 +131,8 @@ static void SerializePlayer(SerPlayer *dst, Player *src) {
     dst->downed       = src->downed ? 1 : 0;
     dst->bleedTimer   = src->bleedTimer;
     dst->highestRound = (uint8_t)(src->highestRound > 255 ? 255 : src->highestRound);
+    dst->lethals      = (uint8_t)(src->lethals   > 255 ? 255 : (src->lethals   < 0 ? 0 : src->lethals));
+    dst->tacticals    = (uint8_t)(src->tacticals > 255 ? 255 : (src->tacticals < 0 ? 0 : src->tacticals));
 }
 
 static void DeserializePlayer(Player *dst, SerPlayer *src, bool isLocal) {
@@ -156,6 +170,8 @@ static void DeserializePlayer(Player *dst, SerPlayer *src, bool isLocal) {
     dst->downed       = src->downed != 0;
     dst->bleedTimer   = src->bleedTimer;
     dst->highestRound = src->highestRound;
+    dst->lethals      = src->lethals;
+    dst->tacticals    = src->tacticals;
     if (!wasActive && src->active && isLocal)
         dst->pos = (Vector3){ src->px, src->py, src->pz };
 }
@@ -201,6 +217,7 @@ void Protocol_HostBroadcastSnapshot(void) {
             .state = (uint8_t)enemies[i].state, .type = (uint8_t)enemies[i].type,
             .targetWindow = (uint8_t)enemies[i].targetWindow,
             .bobPhase = enemies[i].bobPhase,
+            .stunTimer = enemies[i].stunTimer,
         };
         memcpy(snapshotBuf + off, &se, sizeof se);
         off += sizeof se; ne++;
@@ -234,6 +251,21 @@ void Protocol_HostBroadcastSnapshot(void) {
         off += sizeof sp; np++;
     }
     hdr->numPowerUps = np;
+
+    uint16_t nt = 0;
+    for (int i = 0; i < MAX_THROWABLES && off + sizeof(SerThrowable) <= sizeof snapshotBuf; i++) {
+        if (!throwables[i].alive) continue;
+        SerThrowable st = {
+            .px = throwables[i].pos.x, .py = throwables[i].pos.y, .pz = throwables[i].pos.z,
+            .vx = throwables[i].vel.x, .vy = throwables[i].vel.y, .vz = throwables[i].vel.z,
+            .fuse = throwables[i].fuse,
+            .kind = (uint8_t)throwables[i].kind,
+            .ownerPlayer = (uint8_t)throwables[i].ownerPlayer,
+        };
+        memcpy(snapshotBuf + off, &st, sizeof st);
+        off += sizeof st; nt++;
+    }
+    hdr->numThrowables = nt;
 
     Net_Broadcast(snapshotBuf, off, false);
 }
@@ -276,6 +308,7 @@ void Protocol_ClientApplySnapshot(uint8_t *data, size_t len) {
         enemies[i].type  = (ZombieType)se.type;
         enemies[i].targetWindow = se.targetWindow;
         enemies[i].bobPhase = se.bobPhase;
+        enemies[i].stunTimer = se.stunTimer;
         enemies[i].alive = true;
     }
     for (int i = 0; i < MAX_BULLETS; i++) bullets[i].alive = false;
@@ -298,6 +331,17 @@ void Protocol_ClientApplySnapshot(uint8_t *data, size_t len) {
         powerUps[i].bob = sp.bob;
         powerUps[i].lifetime = sp.lifetime;
         powerUps[i].active = true;
+    }
+    for (int i = 0; i < MAX_THROWABLES; i++) throwables[i].alive = false;
+    for (int i = 0; i < hdr->numThrowables && off + sizeof(SerThrowable) <= len && i < MAX_THROWABLES; i++) {
+        SerThrowable st;
+        memcpy(&st, data + off, sizeof st); off += sizeof st;
+        throwables[i].pos  = (Vector3){ st.px, st.py, st.pz };
+        throwables[i].vel  = (Vector3){ st.vx, st.vy, st.vz };
+        throwables[i].fuse = st.fuse;
+        throwables[i].kind = (ThrowableKind)st.kind;
+        throwables[i].ownerPlayer = st.ownerPlayer;
+        throwables[i].alive = true;
     }
 }
 
@@ -359,6 +403,8 @@ void Protocol_HostHandlePacket(int peerIdx, uint8_t *data, size_t len) {
         else if (a->action == ACT_SWAP_SLOT)  Weapon_SwapSlot(p, a->arg);
         else if (a->action == ACT_INTERACT_F) Interact_Do(p);
         else if (a->action == ACT_MELEE)      Weapon_Melee(p);
+        else if (a->action == ACT_THROW_LETHAL)   Throwables_Throw(p, TH_FRAG);
+        else if (a->action == ACT_THROW_TACTICAL) Throwables_Throw(p, TH_STUN);
     }
 }
 

@@ -24,6 +24,8 @@ int bindButton[BA_COUNT] = {
     [BA_PAUSE]    = PAD_START,
     [BA_SCORE]    = PAD_BACK,
     [BA_NOCLIP]   = PAD_R3,
+    [BA_THROW_LETHAL]   = PAD_DP_UP,
+    [BA_THROW_TACTICAL] = PAD_DP_DOWN,
 };
 
 const char *Bind_ActionName(BindAction a) {
@@ -42,6 +44,8 @@ const char *Bind_ActionName(BindAction a) {
         case BA_PAUSE:    return "Pause";
         case BA_SCORE:    return "Scoreboard";
         case BA_NOCLIP:   return "Noclip Toggle";
+        case BA_THROW_LETHAL:   return "Throw Lethal";
+        case BA_THROW_TACTICAL: return "Throw Tactical";
         default:          return "?";
     }
 }
@@ -143,6 +147,8 @@ static const char *ActionKey(BindAction a) {
         case BA_PAUSE:    return "bind.pause";
         case BA_SCORE:    return "bind.score";
         case BA_NOCLIP:   return "bind.noclip";
+        case BA_THROW_LETHAL:   return "bind.lethal";
+        case BA_THROW_TACTICAL: return "bind.tactical";
         default:          return "bind.unknown";
     }
 }

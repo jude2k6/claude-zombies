@@ -126,6 +126,7 @@ void Menu_StartSoloGame(void) {
     PowerUps_ClearAll();
     Enemies_ClearAll();
     Bullets_ClearAll();
+    Throwables_ClearAll();
     // Start in the round-break: GS_ROUND_BREAK with roundNum=0 rolls into
     // Game_StartRound(1) cleanly. Avoids the round-1 skip the prior code had.
     roundNum = 0;
@@ -155,6 +156,7 @@ void Menu_StartHostedGame(void) {
     PowerUps_ClearAll();
     Enemies_ClearAll();
     Bullets_ClearAll();
+    Throwables_ClearAll();
     roundNum = 0;
     gamePhase = GS_ROUND_BREAK;
     roundBreakTimer = 3.0f;
@@ -310,6 +312,8 @@ void Menu_DrawBindings(int sw, int sh) {
         bindButton[BA_PAUSE]    = PAD_START;
         bindButton[BA_SCORE]    = PAD_BACK;
         bindButton[BA_NOCLIP]   = PAD_R3;
+        bindButton[BA_THROW_LETHAL]   = PAD_DP_UP;
+        bindButton[BA_THROW_TACTICAL] = PAD_DP_DOWN;
         bindingCaptureFor = -1;
         Settings_Save();
     }

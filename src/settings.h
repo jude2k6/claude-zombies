@@ -27,6 +27,8 @@ typedef enum {
     BA_PAUSE,
     BA_SCORE,
     BA_NOCLIP,
+    BA_THROW_LETHAL,
+    BA_THROW_TACTICAL,
     BA_COUNT
 } BindAction;
 

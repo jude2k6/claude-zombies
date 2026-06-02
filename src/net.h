@@ -7,7 +7,7 @@
 
 #define NET_MAX_PLAYERS   4
 #define NET_PORT_DEFAULT  7777
-#define NET_PROTO_VERSION 7
+#define NET_PROTO_VERSION 8
 
 typedef enum {
     NET_SOLO = 0,

@@ -67,6 +67,8 @@ void Player_GiveStartingPistol(Player *p) {
     p->sprintBlend = 0.0f;
     p->reviverIdx = -1;
     p->reviveAsTarget = 0.0f;
+    p->lethals   = STARTING_LETHALS;
+    p->tacticals = STARTING_TACTICALS;
 }
 
 void Player_ResetForGame(int idx, const char *name) {

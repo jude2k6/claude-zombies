@@ -37,8 +37,10 @@ compile_commands.json
 # fetched deps (if anyone configures outside build/)
 _deps/
 
-# local agent config
-.claude/
+# local agent config — ignore everything under .claude EXCEPT project skills,
+# which are versioned with the repo.
+.claude/*
+!.claude/skills/
 
 # runtime-written
 settings.cfg

@@ -518,6 +518,21 @@ data/
     purely by render-side proximity. Wiring a real death window (keep the
     corpse ~1.3s while the clip plays) + a sim attack flag is the natural
     follow-up; the clips already exist.
+- **Knee direction (2026-06-02).** Both `player.glb` and `zombie.glb` originally
+  shipped with **backwards knees** — the `shin` bone was flexed with a POSITIVE
+  local-X rotation, which swings the foot forward (knee juts back). Correct is
+  NEGATIVE shin-X (foot tucks backward+up, toward the back of the thigh).
+  Verify empirically per rig (rotate `shin.L ±55°`, render a side view) — the
+  sign depends on bone roll. Fixed in both: player walk/run/death/downed/revive
+  re-keyed with `-shin`; the zombie `walk`/`death` shin keys were sign-flipped
+  (quaternion→euler→negate X→quaternion) and the `death` clip had to be fully
+  **re-authored** because its old "collapse" was built on the wrong-way knee
+  fold (flipping alone made the corpse stand up). The `blender-game-asset` skill
+  now has an "anatomically/mechanically correct" non-negotiable + a
+  joint-direction calibration step. (Also caught a stray ~2 m `Icosphere` in the
+  Blender scene during the zombie re-export — NOT part of `zombie.glb`; delete
+  any such artifact before exporting since `use_selection=False` bakes the whole
+  scene.)
 - **Rigged player third-person model (`player.glb`, 2026-06-02).** Built with
   the same skin-figure-body + rigid-detail-parts technique as the zombie, on the
   shared 17-bone humanoid skeleton (so the family's bone names/hierarchy match).

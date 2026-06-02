@@ -32,7 +32,16 @@ This skill is the **how**; those docs are the **what**. If they conflict, the do
    mandatory and must PASS).
 3. **Complexity matches the spec.** Game assets, not placeholders — hit the
    tri budget and detail level in `ASSETS.md`. As complex as the asset needs.
-4. **Validate in-engine** with `--anim-test` before declaring done.
+4. **Anatomically / mechanically correct.** Every joint must bend the way the
+   real thing does — **knees flex backward** (calf swings toward the back of
+   the thigh, NOT forward), **elbows** the matching way for arms, ankles,
+   jaws, and any mechanical hinge in its real direction. A backwards knee is a
+   hard defect, not a style choice. **You cannot eyeball the rotation sign — it
+   depends on each bone's local axes/roll.** Calibrate it (see "Joint-direction
+   calibration" below) before authoring any clip, and confirm the bent joints
+   in the rendered frames. This applies to *all* models; if you touch an
+   existing rig (even just re-exporting), re-verify its joints too.
+5. **Validate in-engine** with `--anim-test` before declaring done.
 
 ## Workflow
 
@@ -95,6 +104,25 @@ WARN (review, usually fix): non-manifold edges, tri count far from the
 Never export an asset that has not passed this audit.
 
 ### 5. Animate (if the asset needs clips)
+
+**FIRST — joint-direction calibration (do this before keying any clip).**
+A bone's local axes/roll decide which way a positive rotation bends it, and it
+is NOT guessable — author a backwards knee and you'll ship one. So calibrate
+each flexing joint empirically:
+- Clear the pose. Apply a single test rotation (e.g. `shin.L` `+55°` about local
+  X), render a **side view**, then the opposite sign (`-55°`), render again.
+  Note which way `+Y` (the model's forward) points in your camera.
+- Read off the anatomically correct sign: a **knee** is correct when flexing
+  swings the foot/calf **backward (toward −Y) and up** (toward the back of the
+  thigh) — never forward. Do the same for elbows (forearm folds toward the
+  upper arm), ankles, jaw, and any mechanical hinge.
+- Author every clip with the calibrated signs, and **look at the bent joints in
+  the rendered frames** to confirm. If a collapse/sit/kneel pose was built on a
+  wrong-way fold, fixing the joint may change the whole pose — re-tune it (and
+  re-check floor contact / min-Z) rather than leaving the joint wrong.
+- Calibration is per-rig: a different model can have different bone roll. Don't
+  copy signs blind from another asset without a quick re-check.
+
 - Author the exact clip names listed for this asset in `data/ANIMATIONS.md`
   (e.g. zombie `walk`/`attack_a`/`death`; gun `idle`/`fire`/`reload`/
   `reload_empty`/`raise`). Match clip durations to the gameplay constants noted

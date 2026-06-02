@@ -93,22 +93,25 @@ void Anim_Update(const AnimModel *am, AnimState *st, float dt) {
     }
 }
 
+void Anim_Pose(AnimModel *am, AnimState *st) {
+    if (!am->loaded) return;
+    if (st->clip < 0 || st->clip >= am->animCount) return;
+    ModelAnimation a = am->anims[st->clip];
+    if (a.frameCount <= 0) return;
+    int frame = (int)(st->time * ANIM_FPS);
+    if (frame >= a.frameCount) frame = st->loop ? (frame % a.frameCount)
+                                                : (a.frameCount - 1);
+    if (frame < 0) frame = 0;
+    // GPU skinning: writes per-instance bone matrices into the mesh, which
+    // DrawMesh uploads to the boneMatrices uniform. Does NOT re-upload vertex
+    // buffers, so it's cheap per instance.
+    UpdateModelAnimationBones(am->model, a, frame);
+}
+
 void Anim_Draw(AnimModel *am, AnimState *st, Vector3 pos, float yawDeg,
                float scale, Color tint) {
     if (!am->loaded) return;
-    if (st->clip >= 0 && st->clip < am->animCount) {
-        ModelAnimation a = am->anims[st->clip];
-        if (a.frameCount > 0) {
-            int frame = (int)(st->time * ANIM_FPS);
-            if (frame >= a.frameCount) frame = st->loop ? (frame % a.frameCount)
-                                                        : (a.frameCount - 1);
-            if (frame < 0) frame = 0;
-            // GPU skinning: writes per-instance bone matrices into the mesh,
-            // which DrawMesh uploads to the boneMatrices uniform. Does NOT
-            // re-upload vertex buffers, so it's cheap per instance.
-            UpdateModelAnimationBones(am->model, a, frame);
-        }
-    }
+    Anim_Pose(am, st);
     DrawModelEx(am->model, pos, (Vector3){ 0, 1, 0 }, yawDeg,
                 (Vector3){ scale, scale, scale }, tint);
 }

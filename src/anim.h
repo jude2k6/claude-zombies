@@ -71,4 +71,10 @@ void Anim_Update(const AnimModel *am, AnimState *st, float dt);
 void Anim_Draw(AnimModel *am, AnimState *st, Vector3 pos, float yawDeg,
                float scale, Color tint);
 
+// Pose the shared model to this instance's current frame WITHOUT drawing.
+// Use when the caller needs a custom world transform (e.g. a camera-space
+// first-person viewmodel): call Anim_Pose, set `am->model.transform`, then
+// DrawModel(am->model, ...).
+void Anim_Pose(AnimModel *am, AnimState *st);
+
 #endif // SHOOTER_ANIM_H

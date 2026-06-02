@@ -16,8 +16,28 @@ Repo: `git@github.com:jude2k6/claude-zombies.git` · branch: `main`.
 
 Latest pass (2026-06-02) — all committed to `main`, not pushed:
 
+- **M1911 viewmodel wired into first person — shows in-game.**
+  `render.c:DrawPistolViewmodelGLB` loads the shared `pistolVM` AnimModel
+  (skinned shader from `Assets_Load`; `Render_LoadPistolVM` in `main.c` boot +
+  the `--screenshot-viewmodels` mode), runs a render-local `AnimState`, and
+  picks a clip each frame from the local player's weapon state: `raise` on a
+  weapon swap (slot/weapon change), `reload`/`reload_empty` on the reload
+  rising edge (empty latched from `ammo==0`, playback scaled
+  `clipDur/reloadTimer` so it fits Speed Cola too), `fire` on the fire rising
+  edge, `sprint` when `sprintBlend>0.6`, else `idle`. It's drawn in camera
+  space with a hand-built matrix — the glb is +Y forward so the columns are
+  `X→right, Y→camFwd, Z→camUp` (NOT the OBJ path's −Z mapping) — under a flat
+  sun/high-ambient override on `worldSkinnedShader` (restored after), same
+  anti-colour-swing trick the OBJ path uses. Only `W_PISTOL` takes this path;
+  the other four guns stay on the OBJ + procedural viewmodel. Framing knobs
+  (`VM_SCALE`, `PITCH`/`YAW` cant, anchor offsets) are constants at the top of
+  the function. **Gotcha:** the model's forearms were authored long and had to
+  be shortened to stubs — long forearms reach back to/behind the camera and
+  the perspective divide wraps them to the top of the screen. **Added
+  `Anim_Pose`** (anim.{c,h}) = the posing half of `Anim_Draw` without the
+  draw, so the viewmodel can draw with its own transform.
 - **M1911 viewmodel authored: `data/weapons/pistol/pistol_vm.glb`** (rigged,
-  animated, NOT yet wired). Arms + gun, 9 bones (`root`/`frame`/`slide`/`mag`/
+  animated). Arms + gun, 9 bones (`root`/`frame`/`slide`/`mag`/
   `hammer` + `hand.{L,R}`/`forearm.{L,R}`), 20 rigid box parts each bound 100%
   to one bone (slide/mag/hammer are separate movable islands per the rig-first
   mandate), audit PASS, ~880 tris. All 8 common viewmodel clips: `idle`,

@@ -29,10 +29,13 @@ connectivity auditor). Remaining work is authoring + per-entity wiring:
         blowback + recoil + hammer), `reload` 1.34s (mag swap, no rack),
         `reload_empty` 1.62s (slide locked back → release), `raise`/`lower`,
         `sprint`, `inspect`. Validated via `--anim-test`.
-  - [ ] **Wire the vm.glb path into `render.c`** — load the AnimModel, map
-        player state (fireTimer/reloadTimer/sprint/swap/empty-mag) to clip +
-        playback, draw in camera space replacing the procedural dip/tilt.
-        Hybrid: other 4 guns keep the OBJ path until they get their own vm.glb.
+  - [x] **Wired the vm.glb path into `render.c`** — `DrawPistolViewmodelGLB`
+        loads the shared `pistolVM` AnimModel (skinned shader), maps player
+        state to clips (raise on swap, fire on shot, reload/reload_empty by
+        mag-empty latch, sprint, idle), and draws it in camera space (model
+        +Y→fwd / +Z→up / +X→right) under flat lighting. Other 4 guns keep the
+        OBJ + procedural path. Shows in-game; verified via
+        `--screenshot-viewmodels`.
   - [ ] Roll the vm clip set across SMG / shotgun / rifle / raygun.
 - [ ] **Player third-person model** — `idle`/`walk`/`run`/`revive`/`downed`/
       `death` for co-op visibility.

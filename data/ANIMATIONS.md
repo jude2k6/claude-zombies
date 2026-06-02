@@ -10,6 +10,39 @@ consistent set of named clips, and the engine just looks them up by name.
 
 ---
 
+## Rigging-first: rebuild every model for animation
+
+**The whole asset set is being re-authored rig-first.** Do NOT model a static
+mesh and try to rig it afterward — that is what forced the zombie rebuild
+(feet-together, arms-down, no joint geometry = nothing deforms cleanly). Every
+new model is built *from the start* to deform:
+
+- **Build in a neutral rig pose, not a display pose.** Characters in
+  **T- or A-pose** (limbs out, away from the body); weapons with the
+  **action/slide/charging handle modelled as a separate, movable piece** in
+  its rest position.
+- **Put geometry where it bends.** Add edge loops at every joint that flexes —
+  shoulders, elbows, wrists, hips, knees, jaw on characters; the slide rails,
+  hinge, trigger, charging handle, magazine on guns. A single cuboid limb
+  cannot bend; give each moving part its own loops.
+- **Plan the skeleton before the mesh is final.** Decide bone names + hierarchy
+  up front (they're the engine API — see naming below) and model so each bone
+  has clean geometry to drive. Shared skeleton across a family (all zombie
+  types; all weapon viewmodels via shared arms).
+- **Separate the moving parts.** Anything that translates/rotates as a unit
+  (gun slide, bolt, charging handle, magazine, hinge, box lid, perk dispenser
+  flap) is its own mesh island bound rigidly to its own bone — so it can be
+  keyed independently. Rigid-part skinning is fine and on-style for the blocky
+  look; smooth weight-painting only where things actually flex (limbs, jaw).
+- **Origin + axes per `ASSETS.md`** still apply (feet/grip origin, -Z forward),
+  and the static look/palette rules there still hold — rig-first changes
+  *topology and pose*, not the art direction.
+- **Exception:** genuinely inert props (crates, barrels, sandbags, boards) and
+  the FX/code-driven items in the last table can stay static OBJ. Everything
+  that could plausibly move is built rig-first.
+
+---
+
 ## How the pipeline consumes these (read before authoring)
 
 - **Format: glTF `.glb`.** OBJ cannot hold a skeleton. Animated assets are
@@ -71,22 +104,40 @@ clips are authored once.
 | clip            | once/loop | ~dur | notes |
 |-----------------|-----------|------|-------|
 | `idle`          | loop      | 2–4s | subtle breathing sway; the default pose |
-| `fire`          | once      | ≤ fireCooldown | must finish within the cooldown; auto guns loop it |
-| `reload`        | once      | = reloadTime | from a partially-full mag |
-| `reload_empty`  | once      | ≥ reloadTime | empty-mag variant (slide/bolt release); optional but classic |
+| `fire`          | once/loop | ≤ fireCooldown | **includes the action cycling** (blowback — see below). Must finish within the cooldown; auto guns loop it |
+| `reload`        | once      | = reloadTime | tactical reload — round still in chamber, so **no** charging-handle/slide rack |
+| `reload_empty`  | once      | ≥ reloadTime | **mandatory**, not optional. Fired-dry reload: the bolt/slide is locked back or must be cycled, so this ends with the **charging handle pulled back / slide released** to chamber the first round. Longer than `reload`. |
 | `raise`         | once      | 0.22s | swap-in / round-start; replaces the procedural raise |
 | `lower`         | once      | 0.18s | swap-out |
 | `sprint`        | loop      | 1–2s | gun lowered/tilted while sprinting |
 | `inspect`       | once      | 2–4s | flavor; optional |
 
+> **Two reloads per gun are required**, not one. The engine picks `reload`
+> when the mag still had rounds, and `reload_empty` (with the cocking action)
+> when it was fired completely dry — exactly like CoD. Author both.
+
+### Blowback / action cycling
+Where it's mechanically real, the moving action must **reciprocate on every
+shot** — the `fire` clip cycles the slide/bolt back and forward (eject + chamber).
+This is keyed on a **separate `slide`/`bolt` bone**, so it reads even when the
+fire clip is short or looping. Drive it from the action, not a static jolt.
+
+| gun | action | per-shot blowback in `fire`? |
+|-----|--------|------------------------------|
+| **M1911** | pistol slide | **yes** — slide kicks fully back and forward each shot; locks back on last round (feeds into `reload_empty`) |
+| **MP5** | reciprocating bolt (closed) | **yes** — bolt/charging handle blurs back-and-forth while the auto `fire` loops |
+| **M14** | semi-auto bolt | **yes** — bolt carrier cycles each shot |
+| **Olympia** | break-action, no auto-cycle | **no** — nothing reciprocates; only the break-open happens during reload. Keep recoil to muzzle climb + barrel shudder |
+| **Ray Gun** | energy, no mechanical action | **no** — no blowback; sell the shot with coil pulse / recoil kick instead |
+
 ### Per-weapon specifics
-| weapon | model id | reload style | fire notes | special |
-|--------|----------|--------------|------------|---------|
-| **M1911** pistol | `PISTOL` | mag out / mag in / slide if empty | semi; light slide kick | `Mustang` (PaP) is cosmetic — same rig |
-| **MP5** SMG | `SMG` | curved mag swap, charging handle | **auto** → `fire` loops cleanly, no per-shot settle | — |
-| **Olympia** shotgun | `SHOTGUN` | **break-action**: `reload` = hinge open → eject 2 shells → insert 2 → snap closed. Single shared reload (always reloads both) | semi, heavy break-barrel kick | only 2 shells; no partial reload needed |
-| **M14** rifle | `RIFLE` | en-bloc/mag swap; `reload_empty` does bolt release | **semi** (now, not burst); crisp single kick | — |
-| **Ray Gun** | `RAYGUN` | **energy cell** swap, not a mag — `reload` = pop spent cell, slot fresh one, coils spin up | semi; muzzle coils glow on `fire` (drive emissive via material/tint, geometry can pulse) | wonder weapon — give `idle` a faint coil idle motion |
+| weapon | model id | charging handle / action | empty reload (`reload_empty`) | special |
+|--------|----------|--------------------------|-------------------------------|---------|
+| **M1911** pistol | `PISTOL` | slide, locks back when empty | mag out → mag in → **slide release** drops the slide to chamber | `Mustang` (PaP) cosmetic, same rig |
+| **MP5** SMG | `SMG` | left-side charging handle | curved mag swap → **yank charging handle back** and release | — |
+| **Olympia** shotgun | `SHOTGUN` | break-action (no charging handle) | `reload`/`reload_empty` are the same: hinge open → eject 2 shells → insert 2 → snap closed | only 2 shells; no partial reload |
+| **M14** rifle | `RIFLE` | op-rod / charging handle, bolt locks back empty | mag swap → **pull op-rod handle / hit bolt release** to chamber | **semi** now (not burst) |
+| **Ray Gun** | `RAYGUN` | energy cell, no charging handle | pop spent cell → slot fresh cell → coils spin up (no racking) | wonder weapon; faint coil idle motion |
 
 ### World/third-person weapon clips (optional, later)
 | clip | once/loop | notes |

@@ -13,11 +13,14 @@ per-model fudge factors.
   default export (`Forward: -Z, Up: Y`) matches this — keep it.
 - **Origin convention:** model origin sits at the model's **feet/grip**,
   not its centre. Reasons below.
-- **This doc = static meshes only** (movement/bob applied in code via
-  transforms). **Rigged + animated assets** (glTF `.glb`: zombies, weapon
-  viewmodels, machines) are specified in [`../ANIMATIONS.md`](../ANIMATIONS.md),
-  which lists the animation clips each weapon and entity needs. Use that for
-  anything that needs a skeleton.
+- **Rigging-first.** The asset set is being re-authored so models are built
+  *for animation from the start* — neutral rig pose (T/A-pose characters; guns
+  with slide/bolt/charging-handle/mag as separate movable parts), edge loops at
+  every joint that bends, planned skeleton. Don't model static then try to rig.
+  The scale/axis/origin/palette rules in THIS doc still apply; rig-first changes
+  topology and pose, not the art direction. Full rig + per-asset animation clip
+  lists are in [`../ANIMATIONS.md`](../ANIMATIONS.md) — start there for anything
+  that needs a skeleton. Only genuinely inert props stay static OBJ.
 
 ## Aesthetic
 

@@ -7,10 +7,10 @@ packed_name     Mustang
 category        PRIMARY
 fire_mode       SEMI
 
-damage          12
-mag_size        12
-reserve_max     120
-fire_cooldown   0.20
+damage          40
+mag_size        8
+reserve_max     80
+fire_cooldown   0.18
 reload_time     1.3
 pellets         1
 spread_deg      0.0

@@ -1,23 +1,22 @@
-# M14 — 3-round burst rifle. Long sight lines, near-flat falloff.
+# M14 — high-damage semi-auto rifle. Long sight lines, near-flat falloff.
+# As fast as you can pull the trigger; two body shots early rounds.
 
 id              RIFLE
 name            M14
 packed_name     Mnesia
 category        PRIMARY
-fire_mode       BURST
-burst_count     3
-burst_interval  0.07
+fire_mode       SEMI
 
-damage          34
-mag_size        12
-reserve_max     96
-fire_cooldown   0.42
+damage          100
+mag_size        8
+reserve_max     120
+fire_cooldown   0.13
 reload_time     1.5
 pellets         1
 spread_deg      0.4
 
-buy_price       1200
-ammo_price      600
+buy_price       500
+ammo_price      250
 tint            255 230 160 255
 
 bullet_speed    420.0

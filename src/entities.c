@@ -15,11 +15,21 @@ float spawnTimer = 0.0f;
 
 Bullet bullets[MAX_BULLETS];
 
+Throwable throwables[MAX_THROWABLES];
+
 PowerUp powerUps[MAX_POWERUPS] = {0};
 float   doublePointsTimer = 0.0f;
 float   instaKillTimer    = 0.0f;
 
-int Enemies_RoundHP(int r)        { return 30 + r * 22; }
+// Canonical CoD zombies health curve: linear +100/round through round 9,
+// then a compounding +10% each round from round 10 on.
+int Enemies_RoundHP(int r) {
+    if (r < 1) r = 1;
+    if (r <= 9) return 150 + (r - 1) * 100;   // R1=150 … R9=950
+    float hp = 950.0f;
+    for (int i = 10; i <= r; i++) hp *= 1.1f;
+    return (int)hp;
+}
 float Enemies_RoundSpeed(int r)   { float s = 1.6f + r * 0.10f; return s > 4.5f ? 4.5f : s; }
 int Enemies_RoundSpawnCount(int r){
     int base = 6 + r * 2;
@@ -146,6 +156,7 @@ void Enemies_Update(float dt) {
         Enemy *e = &enemies[i];
         e->bobPhase += dt * 4.0f;
         if (e->touchTimer > 0) e->touchTimer -= dt;
+        if (e->stunTimer  > 0) e->stunTimer  -= dt;
 
         if (e->state == ZS_OUTSIDE) {
             Window3D *w = &windows[e->targetWindow];
@@ -310,6 +321,10 @@ void Enemies_Update(float dt) {
                 }
             }
 
+            // Stun grenades freeze the enemy in place and stop bites. Apply
+            // after per-type speed mods so it overrides everything.
+            if (e->stunTimer > 0) speedMul *= 0.20f;
+
             Vector3 oldPos = e->pos;
             if (d > 0.01f) {
                 Vector3 useDir = moveDir;
@@ -337,7 +352,7 @@ void Enemies_Update(float dt) {
 
             Vector2 pXZ = { tp->pos.x, tp->pos.z };
             Vector2 eXZ = { e->pos.x, e->pos.z };
-            if (Vector2Distance(pXZ, eXZ) < PLAYER_RADIUS + ENEMY_RADIUS + 0.1f && e->touchTimer <= 0) {
+            if (Vector2Distance(pXZ, eXZ) < PLAYER_RADIUS + ENEMY_RADIUS + 0.1f && e->touchTimer <= 0 && e->stunTimer <= 0) {
                 bool cheatProtected = godMode && (int)(tp - players) == localPlayerIdx;
                 // Downed players are incapacitated — only the bleed timer kills them.
                 if (tp->downed) cheatProtected = true;
@@ -347,13 +362,14 @@ void Enemies_Update(float dt) {
                 if (!cheatProtected) {
                     int dmg = ENEMY_DAMAGE;
                     switch (e->type) {
-                        case ZT_RUNNER:  dmg = (int)(ENEMY_DAMAGE * 0.75f); break;
-                        case ZT_CRAWLER: dmg = (int)(ENEMY_DAMAGE * 1.40f); break;
-                        case ZT_BOSS:    dmg = ENEMY_DAMAGE * 3;            break;
+                        case ZT_RUNNER:  dmg = (int)(ENEMY_DAMAGE * 0.80f); break;  // 40
+                        case ZT_CRAWLER: dmg = ENEMY_DAMAGE;                break;  // 50
+                        case ZT_BOSS:    dmg = ENEMY_DAMAGE * 2;            break;  // 100
                         default: break;
                     }
                     tp->hp -= dmg;
                     tp->damageFlash = 0.5f;
+                    tp->regenTimer = 0.0f;
                     if (tp->hp <= 0) {
                         tp->hp = 0;
                         // Drop into downed state if a teammate can possibly
@@ -586,6 +602,23 @@ void Bullets_Update(float dt) {
         bullets[i].pos   = hitPos;
         bullets[i].alive = false;
 
+        // Splash AoE on impact (raygun-style). Applies regardless of
+        // whether the bullet hit a zombie or static geometry; never
+        // damages the directly-hit enemy (already handled below).
+        int splashOwner = bullets[i].ownerPlayer;
+        int splashWi    = bullets[i].weaponIdx;
+        bool doSplash = false;
+        float splashR  = 0.0f;
+        int   splashDmg = 0;
+        if (splashWi >= 0 && splashWi < W_COUNT) {
+            const WeaponDef *swd = &WEAPONS[splashWi];
+            if (swd->splashRadius > 0.001f && swd->splashDamage > 0) {
+                doSplash  = true;
+                splashR   = swd->splashRadius;
+                splashDmg = swd->splashDamage;
+            }
+        }
+
         if (hitIsEnemy) {
             Enemy *en = &enemies[enemyIdx];
             // Damage dropoff: linear from dropoffStart..dropoffEnd, clamped
@@ -608,8 +641,11 @@ void Bullets_Update(float dt) {
             if (instaKillTimer > 0) dmg = 99999;
             en->hp -= dmg;
             int op = bullets[i].ownerPlayer;
-            int hitPts  = HIT_POINTS + (headHit ? 30 : 0);
-            int killPts = KILL_POINTS + (headHit ? 50 : 0);
+            // CoD scoring: 10 per hitmarker, 60 for a body kill (10+50),
+            // 100 for a headshot kill (10+90). Non-killing headshots still
+            // only score the base 10.
+            int hitPts  = HIT_POINTS;
+            int killPts = KILL_POINTS + (headHit ? 40 : 0);
             if (doublePointsTimer > 0) { hitPts *= 2; killPts *= 2; }
             if (op >= 0 && op < NET_MAX_PLAYERS && players[op].active) {
                 players[op].points += hitPts;
@@ -635,6 +671,194 @@ void Bullets_Update(float dt) {
             float sz = 0.10f + (rand() % 100) / 100.0f * 0.05f;
             Decals_Spawn(DECAL_IMPACT, hitPos, hitNormal, sz);
         }
+
+        if (doSplash) {
+            int hitKillPts = KILL_POINTS;
+            int hitHitPts  = HIT_POINTS;
+            if (doublePointsTimer > 0) { hitKillPts *= 2; hitHitPts *= 2; }
+            for (int e = 0; e < MAX_ENEMIES; e++) {
+                if (!enemies[e].alive) continue;
+                if (hitIsEnemy && e == enemyIdx) continue;  // direct-hit already took damage
+                float dxs = enemies[e].pos.x - hitPos.x;
+                float dys = enemies[e].pos.y - hitPos.y;
+                float dzs = enemies[e].pos.z - hitPos.z;
+                float dd  = sqrtf(dxs*dxs + dys*dys + dzs*dzs);
+                if (dd > splashR) continue;
+                float mul = 1.0f - (dd / splashR);
+                int dmg = (int)(splashDmg * mul);
+                if (dmg < 1) continue;
+                if (instaKillTimer > 0) dmg = 99999;
+                enemies[e].hp -= dmg;
+                if (splashOwner >= 0 && splashOwner < NET_MAX_PLAYERS && players[splashOwner].active) {
+                    players[splashOwner].points += hitHitPts;
+                }
+                if (enemies[e].hp <= 0) {
+                    enemies[e].alive = false;
+                    enemiesAlive--;
+                    if (splashOwner >= 0 && splashOwner < NET_MAX_PLAYERS && players[splashOwner].active) {
+                        players[splashOwner].points += hitKillPts;
+                        players[splashOwner].kills++;
+                    }
+                    PowerUps_TryDrop(enemies[e].pos);
+                }
+                // Blood mist on each splashed enemy
+                Vector3 vn2 = (Vector3){ -dxs/(dd+1e-4f), -dys/(dd+1e-4f), -dzs/(dd+1e-4f) };
+                Decals_Spawn(DECAL_BLOOD, enemies[e].pos, vn2, 0.18f);
+            }
+        }
+    }
+}
+
+// ============================================================================
+//  Throwables (frag / stun grenades)
+// ============================================================================
+
+void Throwables_ClearAll(void) {
+    for (int i = 0; i < MAX_THROWABLES; i++) throwables[i].alive = false;
+}
+
+void Throwables_Throw(Player *p, ThrowableKind kind) {
+    if (!p || !p->alive || p->downed) return;
+    if (kind == TH_FRAG && p->lethals   <= 0) return;
+    if (kind == TH_STUN && p->tacticals <= 0) return;
+
+    Vector3 look = Player_LookDir(p->yaw, p->pitch);
+    Vector3 right = Vector3Normalize(Vector3CrossProduct(look, (Vector3){0,1,0}));
+    Vector3 origin = p->pos;
+    origin = Vector3Add(origin, Vector3Scale(look,  0.45f));
+    origin = Vector3Add(origin, Vector3Scale(right, 0.20f));
+    origin.y -= 0.15f;
+
+    Vector3 vel = Vector3Scale(look, THROW_SPEED);
+    vel.y += THROW_UPKICK;
+
+    for (int i = 0; i < MAX_THROWABLES; i++) {
+        if (!throwables[i].alive) {
+            throwables[i] = (Throwable){
+                .alive       = true,
+                .kind        = kind,
+                .pos         = origin,
+                .vel         = vel,
+                .fuse        = FRAG_FUSE,
+                .ownerPlayer = (int)(p - players),
+                .spinPhase   = 0.0f,
+            };
+            if (kind == TH_FRAG) p->lethals--;
+            else                 p->tacticals--;
+            return;
+        }
+    }
+}
+
+void Throwables_Detonate(Throwable *t) {
+    if (!t->alive) return;
+    if (t->kind == TH_FRAG) {
+        int killPts = KILL_POINTS;
+        int hitPts  = HIT_POINTS;
+        if (doublePointsTimer > 0) { killPts *= 2; hitPts *= 2; }
+        int op = t->ownerPlayer;
+        for (int e = 0; e < MAX_ENEMIES; e++) {
+            if (!enemies[e].alive) continue;
+            float dx = enemies[e].pos.x - t->pos.x;
+            float dy = enemies[e].pos.y - t->pos.y;
+            float dz = enemies[e].pos.z - t->pos.z;
+            float d  = sqrtf(dx*dx + dy*dy + dz*dz);
+            if (d > FRAG_RADIUS) continue;
+            float mul = 1.0f - (d / FRAG_RADIUS);
+            int dmg = (int)(FRAG_DAMAGE * mul);
+            if (dmg < 1) continue;
+            if (instaKillTimer > 0) dmg = 99999;
+            enemies[e].hp -= dmg;
+            if (op >= 0 && op < NET_MAX_PLAYERS && players[op].active) {
+                players[op].points += hitPts;
+            }
+            if (enemies[e].hp <= 0) {
+                enemies[e].alive = false;
+                enemiesAlive--;
+                if (op >= 0 && op < NET_MAX_PLAYERS && players[op].active) {
+                    players[op].points += killPts;
+                    players[op].kills++;
+                }
+                PowerUps_TryDrop(enemies[e].pos);
+            }
+            Vector3 vn = (Vector3){ -dx/(d+1e-4f), -dy/(d+1e-4f), -dz/(d+1e-4f) };
+            Decals_Spawn(DECAL_BLOOD, enemies[e].pos, vn, 0.22f);
+        }
+        // Camera kick for any nearby local player
+        if (localPlayerIdx >= 0 && players[localPlayerIdx].active) {
+            float dx = players[localPlayerIdx].pos.x - t->pos.x;
+            float dy = players[localPlayerIdx].pos.y - t->pos.y;
+            float dz = players[localPlayerIdx].pos.z - t->pos.z;
+            float d  = sqrtf(dx*dx + dy*dy + dz*dz);
+            if (d < FRAG_RADIUS * 1.5f) {
+                float mul = 1.0f - (d / (FRAG_RADIUS * 1.5f));
+                Fx_PunchAndRumble(0.55f * mul, 0.7f * mul, 0.6f * mul, 0.20f);
+                // Frag damages the local player too (friendly fire by proximity).
+                if (d < FRAG_RADIUS && !godMode && !players[localPlayerIdx].downed) {
+                    int self = (int)(FRAG_DAMAGE * 0.40f * (1.0f - d / FRAG_RADIUS));
+                    if (self > 0) {
+                        players[localPlayerIdx].hp -= self;
+                        players[localPlayerIdx].damageFlash = 0.6f;
+                        players[localPlayerIdx].regenTimer = 0.0f;
+                        if (players[localPlayerIdx].hp < 0) players[localPlayerIdx].hp = 0;
+                    }
+                }
+            }
+        }
+    } else {
+        // Stun: freeze every zombie in range for STUN_DURATION
+        for (int e = 0; e < MAX_ENEMIES; e++) {
+            if (!enemies[e].alive) continue;
+            float dx = enemies[e].pos.x - t->pos.x;
+            float dy = enemies[e].pos.y - t->pos.y;
+            float dz = enemies[e].pos.z - t->pos.z;
+            float d  = sqrtf(dx*dx + dy*dy + dz*dz);
+            if (d > STUN_RADIUS) continue;
+            enemies[e].stunTimer = STUN_DURATION;
+        }
+        if (localPlayerIdx >= 0 && players[localPlayerIdx].active) {
+            float dx = players[localPlayerIdx].pos.x - t->pos.x;
+            float dz = players[localPlayerIdx].pos.z - t->pos.z;
+            if (dx*dx + dz*dz < STUN_RADIUS * STUN_RADIUS * 4.0f) {
+                Fx_PunchAndRumble(0.10f, 0.2f, 0.2f, 0.05f);
+            }
+        }
+    }
+    t->alive = false;
+}
+
+void Throwables_Update(float dt) {
+    for (int i = 0; i < MAX_THROWABLES; i++) {
+        Throwable *t = &throwables[i];
+        if (!t->alive) continue;
+
+        t->spinPhase += dt * 14.0f;
+
+        // Gravity
+        t->vel.y -= 18.0f * dt;
+        Vector3 newPos = Vector3Add(t->pos, Vector3Scale(t->vel, dt));
+
+        // XZ wall / obstacle bounce — Level_ResolveXZ clamps the position to
+        // an unblocked spot; if either axis got clamped, reverse + damp the
+        // corresponding velocity component.
+        Vector3 horiz = Level_ResolveXZ(t->pos, newPos, THROWABLE_RADIUS, true);
+        if (fabsf(horiz.x - newPos.x) > 1e-4f) { t->vel.x = -t->vel.x * 0.35f; newPos.x = horiz.x; }
+        if (fabsf(horiz.z - newPos.z) > 1e-4f) { t->vel.z = -t->vel.z * 0.35f; newPos.z = horiz.z; }
+
+        // Floor bounce — damp Y and bleed XZ to settle
+        if (newPos.y < THROWABLE_RADIUS) {
+            newPos.y = THROWABLE_RADIUS;
+            if (t->vel.y < 0) {
+                t->vel.y = -t->vel.y * 0.35f;
+                t->vel.x *= 0.70f;
+                t->vel.z *= 0.70f;
+                if (fabsf(t->vel.y) < 0.3f) t->vel.y = 0.0f;
+            }
+        }
+        t->pos = newPos;
+
+        t->fuse -= dt;
+        if (t->fuse <= 0) Throwables_Detonate(t);
     }
 }
 

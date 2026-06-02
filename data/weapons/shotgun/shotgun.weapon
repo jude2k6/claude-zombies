@@ -6,16 +6,16 @@ packed_name     Hades
 category        PRIMARY
 fire_mode       SEMI
 
-damage          22
+damage          60
 mag_size        2
-reserve_max     24
-fire_cooldown   0.55
+reserve_max     30
+fire_cooldown   0.45
 reload_time     2.0
 pellets         6
 spread_deg      6.0
 
 buy_price       500
-ammo_price      300
+ammo_price      250
 tint            255 180 80 255
 
 bullet_speed    240.0

@@ -359,6 +359,24 @@ data/
   buffer. **Always export with `export_triangulated_mesh=True`** —
   this fans caps into triangles and is safe regardless of cylinder
   resolution.
+- **CoD-style balance pass (2026-06-02).** Numbers are tuned to classic
+  Treyarch zombies, so don't "simplify" them back:
+  - **Zombie HP** (`entities.c::Enemies_RoundHP`): `150 + 100*(r-1)` through
+    round 9 (R1=150 … R9=950), then `*1.1` compounding each round from 10.
+  - **Player damage** (`types.h::ENEMY_DAMAGE=50`): ~2 hits down at 100 HP,
+    ~5 with Juggernog (250). Per-type mult in `entities.c`: runner ×0.8,
+    crawler ×1.0, boss ×2.0.
+  - **HP regen** (new): `REGEN_DELAY` 4 s damage-free, then `REGEN_RATE`
+    110 HP/s back to max. Driven by `Player.regenTimer` (local, not
+    serialized — reset at every damage site; regen runs host-side in
+    `Game_Tick`). Downed players don't regen.
+  - **Points** (`entities.c` bullet hit): 10 / hitmarker, 60 body kill,
+    100 headshot kill, 130 melee. Don't re-add a non-kill headshot bonus.
+  - **Weapon stats** live in the `.weapon` files (the compiled `WEAPONS[]`
+    defaults are only fallbacks — edit BOTH). Base damages: M1911 40,
+    MP5 35, Olympia 60/pellet, M14 100 (now SEMI, not burst), Ray Gun 1000
+    + 500 splash. **Pack-a-Punch** = damage ×2.5, mag ×2, reserve ×2
+    (`weapons.c::Weapon_Eff*`).
 - **Two independent weapon scales (2026-06-02).** The 5 weapon OBJs are
   authored at true real-world size (pistol 0.54 m … rifle 1.55 m long).
   `weaponTune.scale` (`model_scale` in `.weapon`) is **only** the

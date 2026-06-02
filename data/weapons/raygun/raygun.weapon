@@ -6,9 +6,9 @@ packed_name     Porter's X2
 category        SPECIAL
 fire_mode       SEMI
 
-damage          95
+damage          1000
 mag_size        20
-reserve_max     80
+reserve_max     160
 fire_cooldown   0.22
 reload_time     2.6
 pellets         1
@@ -27,6 +27,9 @@ recoil_yaw      0.25
 
 # Energy weapon — barely drops over distance.
 dropoff         80.0  120.0  0.90
+
+# Plasma burst on impact — chunks adjacent zombies with linear falloff.
+splash          3.5   500
 
 model           raygun.obj
 model_scale     11.0

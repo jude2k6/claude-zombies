@@ -30,12 +30,18 @@
 #define ENEMY_RADIUS        0.6f
 #define ENEMY_HEIGHT        1.7f
 #define ENEMY_TOUCH_COOLDOWN 0.7f
-#define ENEMY_DAMAGE        8
+#define ENEMY_DAMAGE        50     // CoD: ~2 hits down at 100 HP, ~5 with Juggernog (250)
 #define ENEMY_BOARD_ATK     2.4f
+
+// Health regeneration (CoD-style). After REGEN_DELAY seconds without taking
+// damage, an upright player regenerates REGEN_RATE HP/sec back to their max.
+#define REGEN_DELAY         4.0f
+#define REGEN_RATE          110.0f
 
 #define MAX_BULLETS       192
 #define BULLET_TAIL_MAX     2.0f   // tracer visual length cap (m)
 #define MAX_DECALS         96
+#define MAX_THROWABLES     16
 
 #define MAX_OBSTACLES      24
 #define MAX_INTERIOR_WALLS 32   // header walls above doors count too
@@ -67,6 +73,22 @@
 #define POWERUP_LIFETIME   30.0f
 #define POWERUP_PICKUP_R    1.4f
 #define POWERUP_DROP_CHANCE 0.06f
+
+// Equipment (lethals + tacticals). Counts live on Player; throwable
+// projectiles spawn into throwables[]. Frag = AoE damage, stun = AoE
+// zombie freeze (Enemy.stunTimer > 0 -> slow + can't bite).
+#define STARTING_LETHALS    2
+#define STARTING_TACTICALS  2
+#define MAX_LETHALS         4
+#define MAX_TACTICALS       4
+#define FRAG_FUSE           2.0f
+#define FRAG_RADIUS         5.0f
+#define FRAG_DAMAGE         260
+#define STUN_RADIUS         5.5f
+#define STUN_DURATION       4.5f
+#define THROW_SPEED        14.0f
+#define THROW_UPKICK        3.5f
+#define THROWABLE_RADIUS    0.10f
 
 // ============================================================================
 //  Weapons
@@ -118,6 +140,12 @@ typedef struct {
     float  dropoffStart;
     float  dropoffEnd;
     float  dropoffMinMul;
+    // Splash / AoE damage on bullet impact. splashRadius=0 disables.
+    // Damage falls off linearly to 0 at radius; never applied to the
+    // directly-hit enemy (they already took full damage). Headshot
+    // multiplier does NOT apply to splash.
+    float  splashRadius;
+    int    splashDamage;
 } WeaponDef;
 
 enum { W_PISTOL = 0, W_SMG, W_SHOTGUN, W_RIFLE, W_RAYGUN, W_COUNT };
@@ -197,6 +225,14 @@ typedef struct {
     bool       downed;
     float      bleedTimer;
     int        highestRound;  // peak round this player reached this match
+
+    // Equipment counts (single type each for now — frag + stun).
+    int        lethals;
+    int        tacticals;
+
+    // Seconds since this player last took damage; drives HP regen. Local to
+    // the authoritative sim (not serialized — clients see the resulting hp).
+    float      regenTimer;
 } Player;
 
 // ============================================================================
@@ -228,6 +264,11 @@ typedef struct {
     // Per-type AI scratch. Runner: lunge timer (>0 = lunge active,
     // <-cooldown = ready). Crawler/Boss: unused for now.
     float        specialTimer;
+    // Stun grenade effect: while >0, speed scales to 0.3x and bite is
+    // suppressed. Decrements each tick. Set by Throwables_Detonate
+    // (TH_STUN). Local-only — not serialized; clients infer from a
+    // visual hint instead.
+    float        stunTimer;
 } Enemy;
 
 typedef struct {
@@ -240,6 +281,19 @@ typedef struct {
     bool    alive;
     int     ownerPlayer;
 } Bullet;
+
+typedef enum { TH_FRAG = 0, TH_STUN } ThrowableKind;
+
+typedef struct {
+    bool          alive;
+    ThrowableKind kind;
+    Vector3       pos;
+    Vector3       vel;
+    float         fuse;         // seconds until detonation (frag); stun
+                                // detonates on first wall/floor contact
+    int           ownerPlayer;
+    float         spinPhase;    // visual tumble
+} Throwable;
 
 typedef struct {
     Vector3 center;

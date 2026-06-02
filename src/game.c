@@ -18,6 +18,7 @@ void Game_StartRound(int r) {
     spawnTimer = 1.0f;
     Enemies_ClearAll();
     Bullets_ClearAll();
+    Throwables_ClearAll();
     for (int i = 0; i < windowCount; i++) {
         windows[i].boards = MAX_BOARDS_PER_WIN;
         windows[i].repairProgress = 0;
@@ -117,9 +118,23 @@ void Game_Tick(float dt) {
 
         if (p->damageFlash > 0) p->damageFlash -= dt * 1.5f;
         if (p->meleeTimer  > 0) p->meleeTimer  -= dt;
+
+        // HP regeneration: heal back to max after REGEN_DELAY damage-free
+        // seconds. Downed players don't regen (only revive brings them back).
+        if (p->alive && !p->downed) {
+            p->regenTimer += dt;
+            if (p->regenTimer >= REGEN_DELAY) {
+                int maxhp = Perk_EffMaxHP(p);
+                if (p->hp < maxhp) {
+                    p->hp += (int)(REGEN_RATE * dt + 0.5f);
+                    if (p->hp > maxhp) p->hp = maxhp;
+                }
+            }
+        }
     }
 
     Bullets_Update(dt);
+    Throwables_Update(dt);
     Decals_Update(dt);
     Enemies_Update(dt);
     Enemies_Separate();

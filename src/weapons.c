@@ -16,8 +16,8 @@ WeaponDef WEAPONS[W_COUNT] = {
     [W_PISTOL] = {
         .idName="PISTOL", .name="M1911", .packedName="Mustang",
         .category=WC_PRIMARY,
-        .damage=12, .magSize=12, .reserveMax=120,
-        .fireCooldown=0.20f, .reloadTime=1.3f,
+        .damage=40, .magSize=8, .reserveMax=80,
+        .fireCooldown=0.18f, .reloadTime=1.3f,
         .pellets=1, .spreadDeg=0.0f,
         .fireMode=FM_SEMI,
         .buyPrice=0, .ammoPrice=100,
@@ -29,11 +29,11 @@ WeaponDef WEAPONS[W_COUNT] = {
     [W_SMG] = {
         .idName="SMG", .name="MP5", .packedName="MP5-K+",
         .category=WC_PRIMARY,
-        .damage=9, .magSize=30, .reserveMax=180,
-        .fireCooldown=0.07f, .reloadTime=1.8f,
+        .damage=35, .magSize=30, .reserveMax=240,
+        .fireCooldown=0.067f, .reloadTime=1.8f,
         .pellets=1, .spreadDeg=1.5f,
         .fireMode=FM_AUTO,
-        .buyPrice=1000, .ammoPrice=600,
+        .buyPrice=1000, .ammoPrice=500,
         .tint=(Color){255,210,120,255},
         .bulletSpeed=280.0f, .bulletLife=0.35f, .tracerWidth=0.022f,
         .recoilPitch=0.38f, .recoilYaw=0.35f,
@@ -42,11 +42,11 @@ WeaponDef WEAPONS[W_COUNT] = {
     [W_SHOTGUN] = {
         .idName="SHOTGUN", .name="Olympia", .packedName="Hades",
         .category=WC_PRIMARY,
-        .damage=22, .magSize=2, .reserveMax=24,
-        .fireCooldown=0.55f, .reloadTime=2.0f,
+        .damage=60, .magSize=2, .reserveMax=30,
+        .fireCooldown=0.45f, .reloadTime=2.0f,
         .pellets=6, .spreadDeg=6.0f,
         .fireMode=FM_SEMI,
-        .buyPrice=500, .ammoPrice=300,
+        .buyPrice=500, .ammoPrice=250,
         .tint=(Color){255,180,80,255},
         .bulletSpeed=240.0f, .bulletLife=0.18f, .tracerWidth=0.020f,
         .recoilPitch=2.40f, .recoilYaw=0.55f,
@@ -55,11 +55,11 @@ WeaponDef WEAPONS[W_COUNT] = {
     [W_RIFLE] = {
         .idName="RIFLE", .name="M14", .packedName="Mnesia",
         .category=WC_PRIMARY,
-        .damage=34, .magSize=12, .reserveMax=96,
-        .fireCooldown=0.42f, .reloadTime=1.5f,
+        .damage=100, .magSize=8, .reserveMax=120,
+        .fireCooldown=0.13f, .reloadTime=1.5f,
         .pellets=1, .spreadDeg=0.4f,
-        .fireMode=FM_BURST, .burstCount=3, .burstInterval=0.07f,
-        .buyPrice=1200, .ammoPrice=600,
+        .fireMode=FM_SEMI,
+        .buyPrice=500, .ammoPrice=250,
         .tint=(Color){255,230,160,255},
         .bulletSpeed=420.0f, .bulletLife=0.40f, .tracerWidth=0.028f,
         .recoilPitch=1.20f, .recoilYaw=0.20f,
@@ -68,7 +68,7 @@ WeaponDef WEAPONS[W_COUNT] = {
     [W_RAYGUN] = {
         .idName="RAYGUN", .name="Ray Gun", .packedName="Porter's X2",
         .category=WC_SPECIAL,
-        .damage=95, .magSize=20, .reserveMax=80,
+        .damage=1000, .magSize=20, .reserveMax=160,
         .fireCooldown=0.22f, .reloadTime=2.6f,
         .pellets=1, .spreadDeg=0.0f,
         .fireMode=FM_SEMI,
@@ -77,6 +77,7 @@ WeaponDef WEAPONS[W_COUNT] = {
         .bulletSpeed=80.0f, .bulletLife=1.10f, .tracerWidth=0.060f,
         .recoilPitch=0.85f, .recoilYaw=0.25f,
         .dropoffStart=80.0f, .dropoffEnd=120.0f, .dropoffMinMul=0.90f,
+        .splashRadius=3.5f, .splashDamage=500,
     },
 };
 
@@ -115,7 +116,7 @@ int Weapon_EffMagSize(WeaponSlot *s) {
 }
 int Weapon_EffReserveMax(WeaponSlot *s) {
     int r = WEAPONS[s->weaponIdx].reserveMax;
-    if (s->packed) r += 60;
+    if (s->packed) r *= 2;   // Pack-a-Punch doubles the reserve pool
     return r;
 }
 
@@ -298,6 +299,7 @@ void Weapon_Melee(Player *p) {
 //     recoil_pitch    0.55
 //     recoil_yaw      0.18
 //     dropoff         15.0 35.0 0.55       # start  end  minMul
+//     splash          3.0 70               # radius  peakDamage (linear falloff)
 //     model           pistol.obj           # path relative to the .weapon file
 //     model_scale     1.2
 //     model_yaw       90.0
@@ -454,6 +456,10 @@ static int Weapons_ParseFile(const char *path) {
             ParseFloatTok(toks[1], &d.dropoffStart);
             ParseFloatTok(toks[2], &d.dropoffEnd);
             ParseFloatTok(toks[3], &d.dropoffMinMul);
+        }
+        else if (strcmp(k, "splash") == 0 && n >= 3) {
+            ParseFloatTok(toks[1], &d.splashRadius);
+            ParseIntTok  (toks[2], &d.splashDamage);
         }
         else if (strcmp(k, "model") == 0 && n >= 2) {
             strncpy(modelFile, toks[1], sizeof modelFile - 1);

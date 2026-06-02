@@ -18,14 +18,131 @@ static const Color PLAYER_COLORS[NET_MAX_PLAYERS] = {
     {220, 80, 80, 255}, {80, 120, 220, 255}, {90, 200, 90, 255}, {220, 200, 80, 255},
 };
 
+// ---- shared HUD styling -------------------------------------------------
+#define HUD_GOLD  (Color){ 255, 206, 84,  255 }
+#define HUD_TEXT  (Color){ 236, 238, 245, 255 }
+#define HUD_DIM   (Color){ 152, 158, 172, 255 }
+
+// Text with a soft drop shadow so it stays legible over bright geometry.
+static void HudText(const char *s, int x, int y, int fs, Color c) {
+    DrawText(s, x + 1, y + 2, fs, (Color){ 0, 0, 0, 170 });
+    DrawText(s, x, y, fs, c);
+}
+// Right-aligned variant (x is the right edge).
+static void HudTextR(const char *s, int xr, int y, int fs, Color c) {
+    HudText(s, xr - MeasureText(s, fs), y, fs, c);
+}
+static Color WithAlpha(Color c, unsigned char a) { c.a = a; return c; }
+
+// Draw a small white-ish vector glyph identifying a perk, centred at (cx,cy)
+// and sized to radius r. Kept primitive so it reads at HUD scale.
+static void DrawPerkGlyph(int perkIdx, float cx, float cy, float r, Color col) {
+    switch (perkIdx) {
+        case PERK_JUG: {              // medical cross — survivability
+            float t = r * 0.24f, h = r * 0.62f;
+            DrawRectangle((int)(cx - t), (int)(cy - h), (int)(2*t), (int)(2*h), col);
+            DrawRectangle((int)(cx - h), (int)(cy - t), (int)(2*h), (int)(2*t), col);
+        } break;
+        case PERK_SPEED: {            // double fast-forward — reload speed
+            for (int k = 0; k < 2; k++) {
+                float ox = cx + (k ? 0.0f : -r*0.42f) + r*0.05f;
+                DrawTriangle((Vector2){ox - r*0.32f, cy - r*0.5f},
+                             (Vector2){ox - r*0.32f, cy + r*0.5f},
+                             (Vector2){ox + r*0.18f, cy}, col);
+            }
+        } break;
+        case PERK_DTAP: {             // two rounds — extra bullets
+            for (int k = 0; k < 2; k++) {
+                float bx = cx + (k ? r*0.30f : -r*0.30f);
+                DrawCircle((int)bx, (int)(cy - r*0.30f), r*0.20f, col);
+                DrawRectangle((int)(bx - r*0.20f), (int)(cy - r*0.30f), (int)(r*0.40f), (int)(r*0.62f), col);
+            }
+        } break;
+        case PERK_STAMIN: {           // double up-chevron — sprint/stamina
+            for (int k = 0; k < 2; k++) {
+                float oy = cy + r*0.28f + k * r*0.42f - r*0.42f;
+                DrawTriangle((Vector2){cx,          oy - r*0.30f},
+                             (Vector2){cx - r*0.5f, oy + r*0.18f},
+                             (Vector2){cx + r*0.5f, oy + r*0.18f}, col);
+            }
+        } break;
+        default: break;
+    }
+}
+
+// A circular perk badge: soft glow, dark disc, coloured ring, centred glyph.
+static void DrawPerkBadge(float cx, float cy, float r, int perkIdx) {
+    Color tint = PERKS[perkIdx].tint;
+    DrawCircle((int)cx, (int)(cy + 2), r + 1, (Color){ 0, 0, 0, 120 });        // shadow
+    DrawRing((Vector2){cx, cy}, r, r + 4, 0, 360, 40, WithAlpha(tint, 70));    // glow
+    DrawCircle((int)cx, (int)cy, r, (Color){ 18, 20, 26, 245 });              // disc
+    DrawRing((Vector2){cx, cy}, r - 3.5f, r, 0, 360, 40, tint);                // ring
+    DrawPerkGlyph(perkIdx, cx, cy, r * 0.72f, WithAlpha(tint, 255));
+}
+
+#define HUD_BADGE_R    19.0f
+#define HUD_BADGE_STEP 48          // r*2 + spacing; shared by perks + equipment
+
 static void DrawPerkIcons(int sh, Player *me) {
-    int sz = 36, gap = 6, x = 14, y = sh - sz - 14;
+    int cx = 28 + (int)HUD_BADGE_R, cy = sh - 30;
     for (int i = 0; i < PERK_COUNT; i++) {
         if (!me->hasPerk[i]) continue;
-        DrawRectangle(x, y, sz, sz, PERKS[i].tint);
-        DrawRectangleLines(x, y, sz, sz, BLACK);
-        DrawText(PERKS[i].name, x, y - 16, 12, RAYWHITE);
-        x += sz + gap;
+        DrawPerkBadge((float)cx, (float)cy, HUD_BADGE_R, i);
+        cx += HUD_BADGE_STEP;
+    }
+}
+
+// One throwable badge: dark disc + category ring, a glyph, key hint and count.
+// Greyed when the player holds none (so the slot is still discoverable).
+static void DrawEquipBadge(float cx, float cy, float r, int kind, int count, const char *key) {
+    bool any = count > 0;
+    Color tint = (kind == 0) ? (Color){ 150, 190, 90, 255 }    // frag — olive
+                             : (Color){ 110, 200, 240, 255 };  // stun — cyan
+    if (!any) tint = (Color){ 90, 94, 104, 255 };
+    Color glyph = any ? WithAlpha(tint, 255) : (Color){ 110, 114, 124, 255 };
+
+    DrawCircle((int)cx, (int)(cy + 2), r + 1, (Color){ 0, 0, 0, 120 });
+    DrawCircle((int)cx, (int)cy, r, (Color){ 18, 20, 26, 245 });
+    DrawRing((Vector2){cx, cy}, r - 3.5f, r, 0, 360, 36, tint);
+
+    if (kind == 0) {                  // frag — round body + spoon nub
+        DrawCircle((int)cx, (int)(cy + r*0.12f), r*0.42f, glyph);
+        DrawRectangle((int)(cx - r*0.10f), (int)(cy - r*0.55f), (int)(r*0.20f), (int)(r*0.42f), glyph);
+    } else {                          // stun — burst lines from a core
+        DrawCircle((int)cx, (int)cy, r*0.22f, glyph);
+        for (int a = 0; a < 8; a++) {
+            float ang = a * (PI / 4.0f);
+            DrawLineEx((Vector2){cx + cosf(ang)*r*0.30f, cy + sinf(ang)*r*0.30f},
+                       (Vector2){cx + cosf(ang)*r*0.62f, cy + sinf(ang)*r*0.62f}, 2.0f, glyph);
+        }
+    }
+    char b[8]; snprintf(b, sizeof b, "%d", count);
+    HudText(b, (int)(cx + r - 2), (int)(cy + r - 14), 18, any ? HUD_TEXT : HUD_DIM);
+    HudText(key, (int)(cx - r + 2), (int)(cy - r - 1), 13, any ? WithAlpha(tint,255) : HUD_DIM);
+}
+
+// Equipment continues the bottom-left "loadout" row, just past the owned
+// perks, so consumables and perks read as one group (and never collide with
+// the bottom-right ammo block).
+static void DrawEquipmentIcons(int sw, int sh, Player *me) {
+    (void)sw;
+    int owned = 0;
+    for (int i = 0; i < PERK_COUNT; i++) if (me->hasPerk[i]) owned++;
+    int cx = 28 + (int)HUD_BADGE_R + owned * HUD_BADGE_STEP;
+    int cy = sh - 30;
+    DrawEquipBadge((float)cx, (float)cy, HUD_BADGE_R, 0, me->lethals, "G");
+    cx += HUD_BADGE_STEP;
+    DrawEquipBadge((float)cx, (float)cy, HUD_BADGE_R, 1, me->tacticals, "H");
+}
+
+static const char *CategoryLabel(WeaponCategory c) {
+    switch (c) {
+        case WC_PRIMARY:  return "PRIMARY";
+        case WC_SPECIAL:  return "SPECIAL";
+        case WC_MELEE:    return "MELEE";
+        case WC_LETHAL:   return "LETHAL";
+        case WC_TACTICAL: return "TACTICAL";
+        default:          return "";
     }
 }
 
@@ -46,6 +163,14 @@ static float     hudBonusToastTimer = 0.0f;
 static int       hudBonusToastAmount = 0;
 static float     hudRoundSplashTimer = 0.0f;
 static int       hudRoundSplashRound = 0;
+
+// Dynamic-crosshair smoothing state. `hudCrossGap` is the current pixel
+// distance from screen center to each tick; lerps toward the target spread
+// each frame. `hudCrossKick` accumulates a per-shot bloom that decays
+// regardless of weapon — bigger weapons spike it harder.
+static float     hudCrossGap = 6.0f;
+static float     hudCrossKick = 0.0f;
+static int       hudCrossLastShots = -1;
 
 static void HudUpdateFeedback(Player *me, float dt) {
     if (hudLastShotsHit < 0) { hudLastShotsHit = me->shotsHit; hudLastHeadshots = me->headshots; }
@@ -91,6 +216,34 @@ static void HudUpdateFeedback(Player *me, float dt) {
     if (hudDmgDirTimer       > 0) hudDmgDirTimer       -= dt;
     if (hudBonusToastTimer   > 0) hudBonusToastTimer   -= dt;
     if (hudRoundSplashTimer  > 0) hudRoundSplashTimer  -= dt;
+
+    // Crosshair kick: edge-detect new shots and bump bloom; decay every
+    // frame so it eases back down between shots.
+    if (hudCrossLastShots < 0) hudCrossLastShots = me->shotsFired;
+    if (me->shotsFired > hudCrossLastShots) {
+        int delta = me->shotsFired - hudCrossLastShots;
+        WeaponSlot *s = &me->inventory[me->currentSlot];
+        const WeaponDef *cw = &WEAPONS[s->weaponIdx];
+        float kickPer = 5.0f + cw->spreadDeg * 1.6f + cw->recoilPitch * 4.0f;
+        hudCrossKick += kickPer * (float)delta;
+        if (hudCrossKick > 36.0f) hudCrossKick = 36.0f;
+    }
+    hudCrossLastShots = me->shotsFired;
+    hudCrossKick -= dt * 36.0f;
+    if (hudCrossKick < 0) hudCrossKick = 0;
+
+    // Target gap = base + weapon spread + sprint + movement bloom + kick,
+    // minus an ADS pull-in. Smooth toward target with a framerate-
+    // independent exponential blend.
+    WeaponSlot *cs = &me->inventory[me->currentSlot];
+    const WeaponDef *cwd = &WEAPONS[cs->weaponIdx];
+    float target = 6.0f;
+    target += cwd->spreadDeg * 0.9f;
+    target += me->sprintBlend * 14.0f;
+    target += hudCrossKick;
+    if (me->adsHeld) target = 1.0f;          // collapse to a dot while ADS
+    if (target < 1.0f) target = 1.0f;
+    hudCrossGap += (target - hudCrossGap) * (1.0f - expf(-dt * 18.0f));
 }
 
 static void HudDrawRoundSplash(int sw, int sh) {
@@ -129,15 +282,38 @@ static void HudDrawRoundSplash(int sw, int sh) {
 }
 
 static void HudDrawCrosshair(int cx, int cy, Player *me, Color cross) {
-    if (me->adsHeld) {
-        // Tighter dot crosshair while aiming.
-        DrawCircleLines(cx, cy, 3, cross);
-        DrawPixel(cx, cy, cross);
+    // ADS collapses the reticle to a small dot — the iron sights are the
+    // actual aiming reference now.
+    if (me->adsHeld && hudCrossGap < 2.5f) {
+        DrawCircleLines(cx, cy, 2, cross);
+        DrawRectangle(cx - 1, cy - 1, 2, 2, cross);
         return;
     }
-    DrawLine(cx - 10, cy, cx + 10, cy, cross);
-    DrawLine(cx, cy - 10, cx, cy + 10, cross);
-    DrawCircleLines(cx, cy, 2, cross);
+    int gap = (int)(hudCrossGap + 0.5f);
+    int len = 6;
+    int t   = 2;
+    Color outline = (Color){ 0, 0, 0, cross.a };
+
+    // Semi-auto weapons drop the top tick (COD marksman-rifle convention).
+    const WeaponDef *cwd = &WEAPONS[me->inventory[me->currentSlot].weaponIdx];
+    bool drawTop = (cwd->fireMode != FM_SEMI);
+
+    // Outline drawn 1px bigger underneath each tick for legibility against
+    // bright surfaces.
+    DrawRectangle(cx - gap - len - 1, cy - t/2 - 1, len + 2, t + 2, outline);
+    DrawRectangle(cx + gap     - 1,   cy - t/2 - 1, len + 2, t + 2, outline);
+    if (drawTop)
+        DrawRectangle(cx - t/2 - 1, cy - gap - len - 1, t + 2, len + 2, outline);
+    DrawRectangle(cx - t/2 - 1, cy + gap     - 1,   t + 2, len + 2, outline);
+
+    DrawRectangle(cx - gap - len, cy - t/2, len, t, cross);
+    DrawRectangle(cx + gap,       cy - t/2, len, t, cross);
+    if (drawTop)
+        DrawRectangle(cx - t/2, cy - gap - len, t, len, cross);
+    DrawRectangle(cx - t/2, cy + gap,       t, len, cross);
+
+    // Centre pip
+    DrawRectangle(cx - 1, cy - 1, 2, 2, cross);
 }
 
 static void HudDrawHitMarker(int cx, int cy) {
@@ -260,47 +436,55 @@ void Hud_Draw(int sw, int sh, Player *me, Interact ix) {
     char buf[96];
 
     // Top-center: round number with zombies-remaining underneath. Big and
-    // unframed, COD-style.
+    // unframed, COD-style, sitting over a soft dark gradient so it reads
+    // against the bright sky.
     {
         char rd[24]; snprintf(rd, sizeof rd, "%d", roundNum);
-        int fs = 56;
+        int fs = 58;
         int rw = MeasureText(rd, fs);
-        DrawText(rd, sw/2 - rw/2 + 2, 22, fs, (Color){0,0,0,200});
-        DrawText(rd, sw/2 - rw/2,     20, fs, (Color){220, 60, 60, 255});
-        char zsub[40]; snprintf(zsub, sizeof zsub, "Zombies  %d", enemiesAlive + enemiesToSpawn);
-        int zw = MeasureText(zsub, 18);
-        DrawText(zsub, sw/2 - zw/2, 20 + fs + 4, 18, (Color){220,220,220,220});
+        DrawRectangle(sw/2 - 130, 0, 260, 96, (Color){0,0,0,70});
+        // "ROUND" caption above the number.
+        const char *cap = "ROUND";
+        HudText(cap, sw/2 - MeasureText(cap, 14)/2, 12, 14, WithAlpha((Color){220,70,70,255}, 220));
+        HudText(rd, sw/2 - rw/2, 26, fs, (Color){224, 64, 64, 255});
+        int zleft = enemiesAlive + enemiesToSpawn;
+        char zsub[40]; snprintf(zsub, sizeof zsub, "%d  ZOMBIES", zleft);
+        HudText(zsub, sw/2 - MeasureText(zsub, 16)/2, 26 + fs + 2, 16, WithAlpha(HUD_TEXT, 220));
     }
 
-    // Bottom-left: compact HP bar (no panel chrome) + stamina sliver below.
-    // Sits above the perk icons.
+    // Bottom-left: HP bar + stamina sliver, sitting above the perk badges.
     {
-        int barW = 280, barH = 18;
-        int bx = 24, by = sh - 100;
-        DrawRectangle(bx - 2, by - 2, barW + 4, barH + 4, (Color){0,0,0,160});
-        Color hpCol = (hpFrac > 0.66f) ? (Color){80,200,80,230}
-                    : (hpFrac > 0.33f) ? (Color){220,200,60,230}
-                                       : (Color){220,60,60,230};
-        DrawRectangle(bx, by, (int)(barW * hpFrac), barH, hpCol);
-        DrawRectangleLines(bx - 2, by - 2, barW + 4, barH + 4, (Color){0,0,0,200});
-        snprintf(buf, sizeof buf, "%d / %d", me->hp, hpMax);
-        DrawText(buf, bx + 6, by - 1, 16, RAYWHITE);
-        // Stamina
-        int sy = by + barH + 4;
-        DrawRectangle(bx - 2, sy - 1, barW + 4, 7, (Color){0,0,0,160});
-        DrawRectangle(bx, sy, (int)(barW * me->stamina / 100.0f), 5, (Color){200,200,255,200});
+        float barW = 248, barH = 16;
+        float bx = 28, by = sh - 100;
+        Rectangle track = { bx, by, barW, barH };
+        DrawRectangleRounded(track, 0.5f, 8, (Color){ 0, 0, 0, 150 });
+        Color hpCol = (hpFrac > 0.66f) ? (Color){ 92, 200, 96, 240 }
+                    : (hpFrac > 0.33f) ? (Color){ 232, 196, 64, 240 }
+                                       : (Color){ 226, 64, 64, 240 };
+        if (hpFrac > 0.001f) {
+            float fw = barW * hpFrac; if (fw < barH) fw = barH;
+            DrawRectangleRounded((Rectangle){ bx, by, fw, barH }, 0.5f, 8, hpCol);
+            // glossy top highlight
+            DrawRectangle((int)(bx + 3), (int)(by + 2), (int)(fw - 6), 2, WithAlpha(WHITE, 60));
+        }
+        snprintf(buf, sizeof buf, "%d", me->hp);
+        HudText(buf, (int)(bx + 8), (int)(by - 1), 14, HUD_TEXT);
+        // Stamina sliver under the HP bar.
+        float sy = by + barH + 5;
+        DrawRectangleRounded((Rectangle){ bx, sy, barW, 5 }, 0.5f, 6, (Color){ 0, 0, 0, 150 });
+        float stf = me->stamina / 100.0f;
+        if (stf > 0.001f)
+            DrawRectangleRounded((Rectangle){ bx, sy, barW * stf, 5 }, 0.5f, 6, (Color){ 150, 180, 240, 220 });
     }
 
-    // Bottom-center: points (small but always visible).
+    // Bottom-center: points — the CoD economy anchor, large gold.
     {
         snprintf(buf, sizeof buf, "%d", me->points);
-        int fs = 28;
+        int fs = 32;
         int tw = MeasureText(buf, fs);
-        DrawText(buf, sw/2 - tw/2 + 2, sh - 44 + 2, fs, (Color){0,0,0,200});
-        DrawText(buf, sw/2 - tw/2,     sh - 44,     fs, (Color){240, 220, 60, 255});
+        HudText(buf, sw/2 - tw/2, sh - 50, fs, HUD_GOLD);
         const char *plbl = "POINTS";
-        int plw = MeasureText(plbl, 12);
-        DrawText(plbl, sw/2 - plw/2, sh - 16, 12, (Color){200,200,200,180});
+        HudText(plbl, sw/2 - MeasureText(plbl, 12)/2, sh - 16, 12, WithAlpha(HUD_DIM, 200));
     }
 
     // Bottom-right: weapon + ammo, large, no boxed frame. Big ammo number.
@@ -308,44 +492,42 @@ void Hud_Draw(int sw, int sh, Player *me, Interact ix) {
     const WeaponDef *cw = &WEAPONS[cur->weaponIdx];
     const char *displayName = cur->packed ? cw->packedName : cw->name;
     {
-        int rx = sw - 24, ry = sh - 90;
-        Color nameCol = cur->packed ? (Color){220,180,255,255} : RAYWHITE;
+        int rx = sw - 28, ry = sh - 92;
+        Color nameCol = cur->packed ? (Color){ 214, 170, 255, 255 } : HUD_TEXT;
 
         if (cur->reloadTimer > 0) {
-            const char *rl = "RELOADING";
-            int rlw = MeasureText(rl, 22);
-            DrawText(rl, rx - rlw, ry, 22, ORANGE);
+            HudTextR("RELOADING", rx, ry, 22, (Color){ 240, 150, 40, 255 });
             float t = 1.0f - (cur->reloadTimer / Weapon_EffReload(me, cur));
-            DrawRectangle(rx - 220, ry + 30, 220, 6, (Color){80,40,0,180});
-            DrawRectangle(rx - 220, ry + 30, (int)(220 * t), 6, ORANGE);
+            DrawRectangleRounded((Rectangle){ rx - 220, ry + 30, 220, 6 }, 0.5f, 6, (Color){ 70, 40, 10, 200 });
+            DrawRectangleRounded((Rectangle){ rx - 220, ry + 30, 220 * t, 6 }, 0.5f, 6, (Color){ 240, 150, 40, 255 });
         } else if (pap.activeTimer > 0 && pap.ownerPlayer == localPlayerIdx && pap.slotInProgress == me->currentSlot) {
-            const char *pl = "PACK-A-PUNCH";
-            int plw = MeasureText(pl, 22);
-            DrawText(pl, rx - plw, ry, 22, (Color){200,150,255,255});
+            HudTextR("PACK-A-PUNCH", rx, ry, 22, (Color){ 200, 150, 255, 255 });
             float t = 1.0f - (pap.activeTimer / PAP_DURATION);
-            DrawRectangle(rx - 220, ry + 30, 220, 6, (Color){40,20,60,180});
-            DrawRectangle(rx - 220, ry + 30, (int)(220 * t), 6, (Color){200,150,255,255});
+            DrawRectangleRounded((Rectangle){ rx - 220, ry + 30, 220, 6 }, 0.5f, 6, (Color){ 40, 20, 60, 200 });
+            DrawRectangleRounded((Rectangle){ rx - 220, ry + 30, 220 * t, 6 }, 0.5f, 6, (Color){ 200, 150, 255, 255 });
         } else {
             int nameW = MeasureText(displayName, 22);
-            DrawText(displayName, rx - nameW, ry, 22, nameCol);
-            // Big ammo / reserve
+            HudTextR(displayName, rx, ry, 22, nameCol);
+            // Category tag above the name — "PRIMARY" / "SPECIAL" / etc.
+            const char *cat = CategoryLabel(cw->category);
+            if (cat[0]) HudTextR(cat, rx, ry - 12, 11, WithAlpha(HUD_DIM, 220));
+            // Weapon-tint accent line under the name.
+            DrawRectangle(rx - nameW, ry + 25, nameW, 3, cw->tint);
+            // Big ammo / reserve, right-aligned.
             char ammo[16]; snprintf(ammo, sizeof ammo, "%d", cur->ammo);
             char rsv[24];  snprintf(rsv, sizeof rsv, "/ %d", cur->reserve);
-            int af = 44, rf = 22;
-            int aw = MeasureText(ammo, af);
+            int af = 46, rf = 22;
             int rw = MeasureText(rsv, rf);
-            Color ammoCol = (cur->ammo == 0) ? RED : (Color){240,220,60,255};
-            DrawText(rsv,  rx - rw,         ry + 36, rf, (Color){200,200,200,200});
-            DrawText(ammo, rx - rw - aw - 6, ry + 24, af, ammoCol);
-            // Small tint sliver under the gun name to identify weapon at a glance.
-            DrawRectangle(rx - nameW, ry + 24, nameW, 3, cw->tint);
+            Color ammoCol = (cur->ammo == 0) ? (Color){ 232, 64, 64, 255 } : HUD_GOLD;
+            HudTextR(rsv,  rx,          ry + 36, rf, WithAlpha(HUD_DIM, 220));
+            HudTextR(ammo, rx - rw - 8, ry + 24, af, ammoCol);
         }
     }
 
     // Tiny alt-slot indicator above the weapon block.
     WeaponSlot *other = &me->inventory[(me->currentSlot + 1) % INV_SLOTS];
     {
-        int rx = sw - 24, ry = sh - 110;
+        int rx = sw - 28, ry = sh - 112;
         if (other->owned) {
             const WeaponDef *ow = &WEAPONS[other->weaponIdx];
             const char *on = other->packed ? ow->packedName : ow->name;
@@ -353,11 +535,11 @@ void Hud_Draw(int sw, int sh, Player *me, Interact ix) {
         } else {
             snprintf(buf, sizeof buf, "[Q]  (empty)");
         }
-        int tw = MeasureText(buf, 14);
-        DrawText(buf, rx - tw, ry, 14, (Color){180,180,180,180});
+        HudTextR(buf, rx, ry, 14, WithAlpha(HUD_DIM, 200));
     }
 
     DrawPerkIcons(sh, me);
+    DrawEquipmentIcons(sw, sh, me);
 
     if (godMode) {
         const char *gm = "GOD MODE";

@@ -427,10 +427,19 @@ data/
     AnimState, `Anim_Update` each tick, `Anim_Draw` instead of `DrawProp`.
 - **Rigged zombie (`zombie.glb`, 2026-06-02).** First animated asset; the
   template for every future rigged model.
-  - **Single connected island.** Built from a skin-modifier stick figure then
-    simple-subdivided — guarantees one watertight mesh so automatic weights
-    deform cleanly and the connectivity audit passes. Don't rebuild it from
-    loose overlapping primitives (separate islands = audit FAIL).
+  - **Body = one skin-modifier island; head = separate modeled parts.** The
+    torso/limbs are a skin-modifier stick figure (single watertight island,
+    auto-weighted, deforms cleanly). The **head is modeled geometry** — a
+    skull box plus a heavy brow, two cheekbones, dark eye sockets with glowing
+    pale-green eyes, a dark maw with upper/lower tooth bars, and a chin — each
+    a separate beveled box, all *overlapping* the skull (so the audit's
+    floating-part check passes) and each rigidly bound to the `head` bone
+    (`teethL`/`chin` to `jaw`) via an Armature modifier + a single
+    full-weight vertex group. Pure skin-modifier heads come out as featureless
+    blobby wedges (the first two attempts) — model the face as real geometry.
+    Each separate part must stay ONE island (don't `join` the boxes — that
+    makes multi-island objects = audit FAIL) and must touch/overlap a
+    neighbour.
   - **Facing — author +Y in Blender.** glTF `export_yup=True` maps Blender
     **+Y → raylib -Z** (the forward/look direction the enemy yaw expects).
     The *first* export was authored facing -Y → came out +Z = **backwards**

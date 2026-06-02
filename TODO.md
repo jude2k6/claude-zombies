@@ -6,6 +6,24 @@ shader / system additions.
 
 ## Next up (highest impact-per-effort)
 
+### Animation & assets (engine pipeline is IN — assets next)
+The glTF skeletal-animation pipeline shipped 2026-06-02 (`anim.{c,h}`,
+`world_skinned.vs`, `--anim-test`). Specs: `data/ANIMATIONS.md` (clip lists,
+rig-first mandate) + the `blender-game-asset` skill (rig-first authoring +
+connectivity auditor). Remaining work is authoring + per-entity wiring:
+- [ ] **Rigged Normal zombie** (`zombie.glb`) — proof-of-pipeline. Build
+      rig-first (T-pose, joint loops), clips `walk`/`attack_a`/`death`.
+      Then add `AnimState` to `Enemy` and swap `DrawProp` → `Anim_Draw`.
+- [ ] **Zombie clip set + per-type variants** — `spawn`/`run`/`attack_b`,
+      runner `lunge`, crawler `crawl`, boss `steamroll`/`attack_heavy`.
+- [ ] **Weapon viewmodels** (`<name>_vm.glb`) — `idle`/`fire`/`reload`/
+      `reload_empty`/`raise`; blowback on `fire`, charging-handle cock on
+      `reload_empty`. Replaces the procedural viewmodel anim in `render.c`.
+- [ ] **Player third-person model** — `idle`/`walk`/`run`/`revive`/`downed`/
+      `death` for co-op visibility.
+- [ ] **Machine polish** (PaP chamber, mystery-box lid, perk dispense) —
+      optional, low priority; currently code/shader-faked.
+
 ### Weapons polish (architecture is in)
 - [x] **Verify the 5 new viewmodels in first-person** — done via
       `--screenshot-viewmodels` CLI mode. Sizes look right; pistol
@@ -40,15 +58,23 @@ shader / system additions.
       `DrawProp`. Matters once more props are in scene.
 
 ### Equipment / categories
-- [ ] **Wire `WeaponCategory`.** The enum exists (PRIMARY / SPECIAL /
-      MELEE / LETHAL / TACTICAL) and weapons are tagged, but nothing
-      reads `category` yet. Foundation for:
-  - [ ] **Lethal + tactical slots** with own input bindings (G frag,
-        LB stun). Needs a `Throwable` entity type (projectile + gravity
-        + bounce + timed detonation + AoE damage / stun effect).
-  - [ ] **Melee as a weapon slot** (bowie knife / bat) replacing the
-        "knife is a button" model.
-  - [ ] **HUD ordering** — group inventory display by category.
+- [x] **Wire `WeaponCategory`.** HUD now reads `category`:
+      `PRIMARY` / `SPECIAL` is shown as a small tag above the held
+      weapon name. Foundation for further category-driven UI.
+  - [x] **Lethal + tactical slots** with own bindings — G (kbd) /
+        DPad-Up (pad) throws a frag; H / DPad-Down throws a stun. New
+        `Throwable` entity in `entities.{c,h}` with gravity + XZ wall
+        bounce + floor settle; frag detonates on 2 s fuse (260 dmg
+        peak, 5 m radius, linear falloff, friendly-fire on local
+        player); stun freezes every zombie in 5.5 m for 4.5 s
+        (Enemy.stunTimer drives speed×0.2 + no bite). Players start
+        with 2 of each, capped at 4.
+  - [ ] **Melee as a weapon slot** (bowie knife / bat) — deferred.
+        Pulling V out into a 3rd slot is too much churn vs. the rest;
+        leaving the button-melee model in place.
+  - [x] **HUD grouping** — equipment badges (G / H + counts) continue the
+        bottom-left loadout row after the perk badges (redesigned
+        2026-06-02); current-weapon line shows a `PRIMARY` / `SPECIAL` tag.
 
 ### Audio (still the thinnest area)
 - [ ] **Per-map music** — `ATMOSPHERE { music name }` already parses;
@@ -118,6 +144,57 @@ shader / system additions.
 - [ ] **Crash reporting** — minidump on segfault.
 - [ ] **Weapon attachments** (red dot, suppressor) — `.weapon` file format
       is now ready to grow per-weapon sub-objects.
+
+## Done this session (2026-06-02)
+
+- [x] **glTF skeletal animation pipeline** — `anim.{c,h}` (AnimModel +
+      AnimState, GPU skinning via `UpdateModelAnimationBones`),
+      `world_skinned.vs` (skinning VS sharing `world.fs`), `--anim-test`
+      validator. Verified end-to-end on a 2-bone test rig.
+- [x] **CoD balance pass** — zombie HP curve (150+100/round → +10%/round
+      from 10), 50 contact damage, HP regeneration (110/s after 4 s),
+      CoD scoring (10/60/100/130), retuned weapon stats (M14 now semi-auto),
+      PaP reserve ×2. See HANDOFF balance gotcha.
+- [x] **HUD redesign** — circular perk/equipment badges with vector glyphs,
+      unified shadowed-text + gold/dim palette, rounded HP/stamina bars,
+      cleaner round/ammo/points blocks.
+- [x] **Door lintel fix** — `interiorWallNoClip[]` so door header walls
+      render + block bullets but don't wall off the (open) doorway.
+- [x] **Weapon sizing/colour fix** — world weapon draws life-size
+      (decoupled from the viewmodel scale knob); viewmodel under flat
+      lighting so it stops colour-swinging while turning.
+- [x] **Docs** — `data/ANIMATIONS.md` (rig-first animation spec),
+      `ASSETS.md` rig-first note, README/HANDOFF/TODO refresh, new
+      `blender-game-asset` skill with a connectivity auditor.
+
+## Done this session (later 2026-06-01)
+
+- [x] **Dynamic COD-style crosshair.** Four ticks that bloom with
+      weapon spread, sprintBlend, and a per-shot kick (scaled by
+      `spreadDeg` + `recoilPitch`); collapses to a centre dot while
+      ADS. Smoothed with a framerate-independent exp lerp at ~18 Hz;
+      kick decays at 36 px/s. Outlined for legibility against bright
+      surfaces. Lives in `hud.c::HudUpdateFeedback` +
+      `HudDrawCrosshair`.
+- [x] **Lethal + tactical equipment.** Frag (G / DPad-Up) and stun
+      (H / DPad-Down) throwables with full Throwable entity in
+      `entities.{c,h}` — gravity, XZ wall bounce, floor settle, fuse,
+      AoE damage / AoE stun. Stun applies `Enemy.stunTimer` →
+      speed×0.2 + bite suppressed; cyan body tint while stunned.
+      Players start with 2 of each, capped at 4. `BA_THROW_LETHAL` /
+      `BA_THROW_TACTICAL` bind actions added, default DPad Up/Down.
+      `ACT_THROW_LETHAL` / `_TACTICAL` packets for MP. Serialized in
+      snapshot (SerThrowable + SerPlayer.lethals/tacticals +
+      SerEnemy.stunTimer). NET_PROTO_VERSION bumped to 8.
+- [x] **Splash damage on bullet impact.** New `splashRadius` +
+      `splashDamage` on `WeaponDef`; `splash R D` directive in
+      `.weapon` files. Damage falls off linearly to 0 at radius;
+      never applied to the directly-hit enemy. Raygun set to
+      3.0 m / 70 dmg.
+- [x] **HUD grouping.** Bottom-right gains an equipment block
+      (lethal + tactical badges with G/H key hints + counts) next to
+      the perks. Current weapon now shows a small `PRIMARY` /
+      `SPECIAL` category tag above the name.
 
 ## Done this session (2026-06-01 evening)
 

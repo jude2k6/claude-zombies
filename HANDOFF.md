@@ -12,7 +12,32 @@ and **enet 1.3.18** (all via CMake `FetchContent`). Host-authoritative
 
 Repo: `git@github.com:jude2k6/claude-zombies.git` · branch: `main`.
 
-## Current state (2026-06-01)
+## Current state (2026-06-02)
+
+Latest pass (2026-06-02) — all committed to `main`, not pushed:
+
+- **Door fix** — door header/lintel walls were blocking the doorway in XZ
+  (collision ignores Y). Added `interiorWallNoClip[]`; lintels render +
+  block bullets but not walking. See the gotcha below.
+- **Weapon sizing/colour fix** — world weapon draws are now life-size
+  (decoupled from the viewmodel scale knob); viewmodel drawn under flat
+  lighting so it stops colour-swinging as you turn. See the scale gotcha.
+- **CoD balance pass** — zombie HP curve, 50 contact dmg, HP regen, CoD
+  scoring, retuned weapon stats (M14 is now semi-auto), PaP reserve ×2.
+  See the balance gotcha for the formulas.
+- **HUD redesign** — circular perk/equipment badges with vector glyphs,
+  unified styling (shadowed text, gold/dim palette), rounded HP/stamina
+  bars, cleaner round/ammo/points. All in `hud.c`.
+- **Skeletal animation pipeline** — `anim.{c,h}` + `world_skinned.vs` +
+  `--anim-test`. glTF GPU skinning, ready for animated assets. See gotcha.
+- **Docs** — `data/ANIMATIONS.md` (rig-first animation spec, gun
+  blowback + empty reloads), `ASSETS.md` rig-first note, this file, README,
+  TODO. New `.claude/skills/blender-game-asset` skill (rig-first authoring +
+  connectivity auditor).
+- **Policy** — always commit to `main`, never push (see below). Root-level
+  `*.png` screenshots are gitignored.
+
+### Prior session (2026-06-01)
 
 This session committed the big asset/rendering/map pass that had been
 sitting uncommitted, plus added: differentiated zombie AI, proactive
@@ -424,6 +449,15 @@ data/
   collision is XZ-only, ignores box Y extent. `UnstickXZ` will rescue
   the player but the spawn flash looks bad. Authoring discipline: keep
   spawns clear.
+- **Door lintel walls are no-clip for movement** (2026-06-02 fix). Each
+  parsed `DOOR` emits a header/lintel wall above the opening into
+  `interiorWalls[]`. Because movement collision is XZ-only, that lintel's
+  footprint would wall off the doorway whether the door is open or shut.
+  `interiorWallNoClip[]` (parallel to `interiorWalls[]`, set on the two
+  lintel emit sites) is skipped by the three XZ collision paths in
+  `level.c` but still rendered + bullet-collided (the bullet test is
+  Y-aware). Don't add new full-height geometry above a walkable gap
+  without flagging it no-clip.
 - **Settings persistence**: `Settings_Save` is called from a few paths
   — on graceful exit, on closing the Settings screen, and after every
   binding change. SIGTERM/SIGKILL won't save.
@@ -443,11 +477,13 @@ data/
 
 ## Controller bindings model
 
-Unchanged. `BindAction` enum in `settings.h` has 14 entries; UI is
+`BindAction` enum in `settings.h` has **16** entries; UI is
 `Menu_DrawBindings`. See `settings.{h,c}` for the live mapping. Default
 mapping mirrors the old hardcoded one (RT fire, LT ADS, Y reload, X
 interact, RB melee, LB swap, A jump, B crouch, L3 sprint, Start pause,
-Back hold scoreboard, R3 noclip).
+Back hold scoreboard, R3 noclip) plus DPad-Up throw lethal, DPad-Down
+throw tactical. Keyboard equivalents (hardcoded alongside binds in
+`main.c`): G lethal, H tactical, F3 god, F4 noclip.
 
 ## Working style the user has shown
 
@@ -473,33 +509,37 @@ Back hold scoreboard, R3 noclip).
 
 See `TODO.md` for the full live list. Impact-ordered short version:
 
-1. **Verify the new weapon viewmodels in-game.** Only the SMG + rifle
-   were rebuilt for connectivity this session; pistol/shotgun/raygun
-   may still have visible seams. Switch through all 5 in first-person
-   and tune `model_scale` / `model_offset` per `.weapon` file.
-2. **Per-type zombie tells** (visual + audio) — the new AI is
-   meaningful but unreadable. Distinct silhouette + groan per type,
-   plus a 0.2s growl wind-up before a runner lunge so the burst is
-   anticipated, not just "I died fast."
-3. **Reload + weapon-swap viewmodel animation** — currently instant
-   snap. Even a 200 ms slide/rotate is a huge feel upgrade.
-4. **Mystery box slow-roll** — currently snaps. Lerping through
-   `MBOX_ROLLING` over 4 s makes the iconic suspense moment work.
-5. **Particle system** — pooled additive-blend for muzzle flash,
+1. **Author the first rigged glTF asset** — the engine animation
+   pipeline is in (`anim.{c,h}`, `--anim-test`); only assets are
+   missing. Per `data/ANIMATIONS.md`, start with one Normal zombie
+   (`walk`/`attack_a`/`death`) built rig-first via the
+   `blender-game-asset` skill, then wire an `AnimState` onto `Enemy` and
+   swap its `DrawProp` for `Anim_Draw`. This is the proof-of-pipeline.
+2. **Roll animation out** — fill zombie clips + per-type overrides, then
+   the weapon viewmodels (replacing the procedural reload/swap in
+   `render.c`), then the player third-person model. Clip lists in
+   `data/ANIMATIONS.md`.
+3. **Per-type zombie audio tells** — distinct groan/hiss/roar via
+   raylib positional audio; the visual tells (runner red-eye wind-up,
+   boss stripe) already exist.
+4. **Particle system** — pooled additive-blend for muzzle flash,
    casing eject, blood mist. Replaces the HUD-tint muzzle hack.
-6. **Post-FX render target** — bloom + vignette + hit-flash red +
+5. **Post-FX render target** — bloom + vignette + hit-flash red +
    low-HP heartbeat. Unlocks every subsequent "feel" upgrade.
-7. **Equipment slots (LB stuns, G frags)** — `WeaponCategory` enum
-   exists, nothing reads it yet. Need a `Throwable` entity (projectile
-   + gravity + AoE/effect), dedicated lethal + tactical slots,
-   bindings.
-8. **`LIGHTS x y z r g b range`** in `.map` + `sky_tint` plumbing.
-9. **Textures (5)** — `floor_concrete.png`, `ground_dirt.png`,
+6. **Per-map music** — `ATMOSPHERE { music name }` already parses; load
+   `data/audio/<name>.ogg` on map load.
+7. **`LIGHTS x y z r g b range`** in `.map` + `sky_tint` plumbing.
+8. **Textures (5)** — `floor_concrete.png`, `ground_dirt.png`,
    `wall_brick.png`, `wall_plaster.png`, `ceiling_wood.png`.
-10. **Frustum culling for props** — bounding-sphere test before each
-    `DrawProp`. Matters once more props ship.
-11. **`tests/map_parser_test.c`** + CI step running `--validate` on
+9. **Frustum culling for props** — bounding-sphere test before each
+   `DrawProp`. Matters once more props ship.
+10. **`tests/map_parser_test.c`** + CI step running `--validate` on
     every shipped map.
+
+Tune-on-playtest flags from the 2026-06-02 balance pass: boss melee
+(100 dmg = 1-shot a no-Jug player from full), HP regen rate/delay
+(110/s after 4 s), PaP damage ×2.5, and the new weapon viewmodel base
+scale (0.05) — all single-number tweaks if they feel off.
 
 ## If something breaks
 

@@ -10,30 +10,42 @@ Built end-to-end with [Claude Code](https://claude.com/claude-code).
 
 ## Features
 
-- **Round-based survival** — endless waves, scaling zombie HP/speed/count
+- **Round-based survival** — endless waves with the classic *CoD: Zombies*
+  health curve (150 + 100/round through round 9, then +10% compounding)
+- **Health regeneration** — take a hit, break contact for a few seconds and
+  you heal back to full, just like CoD (downed players don't regen)
+- **CoD scoring** — 10 per hit, 60 body kill, 100 headshot kill, 130 melee
 - **Boarded windows** — zombies spawn outside, break boards to enter,
   hold `E` to repair (and earn points)
 - **Purchasable doors** — the south room (with Pack-a-Punch and the M14
   wall-buy) is locked behind a door. Spend points to open it and unlock
   that area's window as well.
-- **5 weapons** with wall-buys and ammo refills
-  - M1911 (starter pistol)
-  - MP5 SMG · Olympia shotgun · M14 rifle · Ray Gun
-- **Pack-a-Punch** — spend points to upgrade a weapon (damage x2.5, mag x2,
-  new name)
-- **Mystery Box** — $950 to roll a random weapon from the pool; the owner
-  has a few seconds to take it
+- **5 weapons** with wall-buys and ammo refills, each with its own fire
+  behaviour, recoil and damage drop-off
+  - M1911 (starter pistol, semi) · MP5 SMG (auto) · Olympia shotgun (semi)
+  - M14 rifle (semi) · Ray Gun (wonder weapon, splash damage)
+- **Lethal + tactical equipment** — `G` throws a frag, `H` throws a stun
+  grenade; start with 2 of each, capped at 4
+- **Pack-a-Punch** — spend points to upgrade a weapon (damage ×2.5, mag ×2,
+  reserve ×2, new name)
+- **Mystery Box** — $950 to roll a random weapon (decelerating slow-roll);
+  the owner has a few seconds to take it
+- **Power-ups** — Max Ammo, Nuke, Double Points, Insta-Kill, Carpenter drop
+  from kills
 - **4 perks** — Juggernog (more HP), Speed Cola (faster reload),
   Double Tap (more damage, faster fire), Stamin-Up (faster movement)
 - **Per-player progression** in coop — own HP, points, inventory, perks
 - **Down/revive** — at 0 HP you go down; a teammate can hold `E` over you
   for ~4s to bring you back, or you'll auto-revive at the next round break.
   Game over when everyone is down at the same time.
-- **Zombie types** — Runners appear from round 4 (faster, less HP),
-  Crawlers from round 7 (low/no head, can't be headshot), Bosses can spawn
-  every 5 rounds (huge HP)
+- **Differentiated zombie AI** — Runners lunge in bursts (with a wind-up
+  tell) from round 4, Crawlers weave and bite hard from round 7, Bosses
+  steamroll with heavy hits every 5 rounds; all do proactive obstacle
+  avoidance
 - **Door pathfinding** — zombies route via the doorway when chasing a
   player through an opened door
+- **Dynamic crosshair** that blooms with spread and collapses in ADS;
+  low-HP vignette, hit markers, directional damage indicators
 - **Stamina** — sprinting drains a small bar that regens while walking
 
 ## Controls
@@ -42,17 +54,22 @@ Built end-to-end with [Claude Code](https://claude.com/claude-code).
 |----------------------|---------------------------------|
 | `W` `A` `S` `D`      | Move                            |
 | Mouse                | Look                            |
-| `Shift` (hold)       | Sprint                          |
-| `C` / `Ctrl` (hold)  | Crouch                          |
 | Left click           | Fire                            |
-| `V`                  | Melee (knife)                   |
+| Right click (hold)   | Aim down sights                 |
+| `Shift` (hold)       | Sprint                          |
+| `C` / `Ctrl` (hold)  | Crouch / `Space` jump           |
 | `R`                  | Reload                          |
-| `Q` / `Tab` / `1` `2`| Swap weapon slot                |
-| `F`                  | Buy wall weapon / perk / PaP    |
-| `E` (hold)           | Repair window board             |
+| `Q`                  | Swap weapon slot                |
+| `V`                  | Melee (knife)                   |
+| `G` / `H`            | Throw lethal (frag) / tactical (stun) |
+| `F`                  | Buy wall weapon / perk / PaP / box / open door |
+| `E` (hold)           | Repair window board / revive teammate |
+| `Tab` (hold)         | Scoreboard                      |
 | `Esc`                | Pause                           |
 | `F11`                | Toggle fullscreen               |
-| `F3`                 | Toggle God Mode (cheat)         |
+| `F3` / `F4`          | Toggle God Mode / Noclip (cheats) |
+
+Gamepad is fully supported with rebindable controls (Settings → Controls).
 
 When downed, your camera becomes free-fly: `W`/`A`/`S`/`D` + mouse, `Space` to ascend, `Shift` to descend. You revive automatically at the next round break.
 
@@ -119,45 +136,73 @@ the starter loadout. Host disconnect kicks everyone to the menu.
 
 ## Cheats
 
-Press `F3` in-game to toggle **God Mode**: invincible + unlimited points.
-A yellow "GOD MODE" indicator appears in the top-right corner when active.
-Works fully in solo and as the host. In client mode the toggle still
-shows, but the server is authoritative on HP and points so the cheat
-won't have any real effect.
+Press `F3` in-game to toggle **God Mode** (invincible + unlimited points)
+and `F4` for **Noclip** (fly through geometry). Indicators appear in the
+top-right when active. Both work fully in solo and as the host; in client
+mode the toggle shows but the server is authoritative on HP/points/position,
+so the cheats won't have a real effect.
 
 ## Layout
 
 ```
 CMakeLists.txt        FetchContent for raylib / raygui / enet, per-OS link bits
-data/maps/*.map       map definitions (text, see format below)
 src/main.c            entry + main loop only
-src/{level,player,weapons,perks,entities,interact,game,protocol,render,hud,menu}
-                      one translation unit per responsibility
 src/types.h           shared structs / enums / constants
-src/net.{h,c}         enet wrapper (host/client init, poll, send)
+src/{level,player,weapons,perks,entities,interact,game}  simulation
+src/{render,hud,menu,assets,decals,anim,fx}              presentation
+src/{net,protocol}    networking (enet wrapper + snapshot serialization)
+src/{audio,pad,settings}                                 sfx, gamepad, bindings
+data/maps/*.map       map definitions (compact text grammar)
+data/models/          props + rigged glTF models (+ ASSETS.md spec)
+data/weapons/<name>/  per-weapon .weapon defs + models
+data/shaders/         world (lit + fog), world_skinned (GPU skinning), sky
 ```
+
+A deeper map for contributors lives in `HANDOFF.md` (architecture table,
+conventions, gotchas) and `TODO.md` (live punch list).
 
 ## Maps
 
-The level layout lives in `data/maps/default.map`. The format is a tiny
-text grammar — one entry per line, `#` comments — so adding a new map is
-just copying the file and editing it:
+Maps live in `data/maps/*.map` (`default`, `nacht`, `factory`). The format
+is a compact text grammar — one entry per line, `#` comments — so adding a
+map is just copying a file and editing it:
 
 ```
 SPAWN    x z
-OBSTACLE cx cy cz sx sy sz
-WALL     cx cy cz sx sy sz
-DOOR     cx cy cz sx sy sz cost
-WALLBUY  x z nx nz   PISTOL|SMG|SHOTGUN|RIFLE|RAYGUN
-WINDOW   x z nx nz   lockedByDoor    (-1 = always open)
-PERK     x z         JUG|SPEED|DTAP|STAMIN
+WALL     x1 z1 x2 z2 [DOOR center width cost [AS name]]
+WINDOW   x z <+x|-x|+z|-z> [LOCKED_BY door_name]
+OBSTACLE x z sx sz [h]
+PROP     <name> x z [yaw d] [scale s]
+WALLBUY  x z <+x|-x|+z|-z> PISTOL|SMG|SHOTGUN|RIFLE|RAYGUN
+PERK     x z JUG|SPEED|DTAP|STAMIN
 PAP      x z
 MBOX     x z
+ROOM <name> ... END
+ATMOSPHERE { fog R G B start end; sky_tint R G B; music name } END
 ```
 
-The build copies `data/` next to the executable, so the game finds it
-when launched from `build/`. Failing that it falls back to a hardcoded
-default layout so the binary always runs.
+Validate a map without launching the game (line-numbered errors, exit 0/1):
+
+```bash
+./build/shooter --validate data/maps/nacht.map
+```
+
+The build copies `data/` next to the executable, so the game finds it when
+launched from `build/`. Failing that it falls back to a hardcoded default
+layout so the binary always runs.
+
+### Assets
+
+3D models and animations have their own specs:
+
+- `data/models/ASSETS.md` — static low-poly mesh conventions (scale, axes,
+  palette, tri budget).
+- `data/ANIMATIONS.md` — the rigging-first mandate and per-weapon/entity
+  animation clip lists for the glTF skeletal-animation pipeline.
+
+Other dev CLI modes: `--screenshot-viewmodels` (renders each weapon's
+viewmodel to a PNG) and `--anim-test <file.glb> [clip]` (renders a skinned
+glTF model across an animation clip to verify it).
 
 ## License
 

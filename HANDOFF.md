@@ -606,6 +606,15 @@ data/
 - **Spectator mode** — when `!me->alive`, `main.c` runs a 3rd-person
   spectate cam over a live teammate's shoulder. F / A / LMB / Jump
   bind cycles to the next teammate. Auto-respawns at next round start.
+- **Noclip = out-of-body fly cam** (F4 / R3). The body is left behind
+  FROZEN at the spot/facing where you toggled noclip on — `main.c` no
+  longer writes the fly camera's yaw/pitch back onto the player, and never
+  moved `me->pos`. While noclipping, the local player's own third-person
+  body IS drawn (the `DrawOtherPlayer` loop skips `localPlayerIdx` only
+  when `!noclipMode`) and the first-person viewmodel is suppressed
+  (`DrawFirstPersonViewmodel` bails on `noclipMode`) so the arms+gun don't
+  trail the detached camera. Toggling noclip off snaps the camera back to
+  the body. Verify with `--screenshot-coop` (the `coop_noclip` shot).
 - **Round 1 skip** — was a real bug, fixed by initializing
   `roundNum=0; gamePhase=GS_ROUND_BREAK` so `Game_Tick` rolls it into
   `Game_StartRound(1)`. Don't regress.

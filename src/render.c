@@ -977,7 +977,10 @@ void Render_World3D(Camera camera) {
         DrawPowerUps();
         DrawThrowables();
         for (int i = 0; i < NET_MAX_PLAYERS; i++) {
-            if (i == localPlayerIdx) continue;
+            // Your own body is normally hidden (you're the camera). While
+            // noclipping it's drawn too, so the detached fly camera can see the
+            // body left standing where you entered noclip.
+            if (i == localPlayerIdx && !noclipMode) continue;
             DrawOtherPlayer(i);
         }
         for (int i = 0; i < MAX_ENEMIES; i++) if (enemies[i].alive) DrawEnemy(&enemies[i]);
@@ -1084,7 +1087,10 @@ static void DrawPistolViewmodelGLB(Camera camera) {
 
 static void DrawFirstPersonViewmodel(Camera camera) {
     Player *me = &players[localPlayerIdx];
-    if (!me->alive || me->downed) return;
+    // Hidden when dead/downed, and while noclipping — in noclip the camera
+    // detaches and flies free, so the arms+gun must NOT trail it; the body is
+    // drawn in third person at its frozen spot instead (see DrawOtherPlayer).
+    if (!me->alive || me->downed || noclipMode) return;
     int wi = me->inventory[me->currentSlot].weaponIdx;
     if (wi < 0 || wi >= W_COUNT) return;
     if (wi == W_PISTOL && pistolVM.loaded) { DrawPistolViewmodelGLB(camera); return; }

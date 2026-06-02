@@ -281,10 +281,22 @@ int main(int argc, char **argv) {
         const float YAW = PI;
         struct { const char *name; int frames; } scenes[] = {
             { "coop_locomotion", 30 }, { "coop_states", 45 }, { "coop_revive", 45 },
+            { "coop_noclip", 30 },
         };
-        for (int s = 0; s < 3; s++) {
+        for (int s = 0; s < 4; s++) {
             // reset all teammate slots inactive each scene
             for (int i = 1; i < NET_MAX_PLAYERS; i++) memset(&players[i], 0, sizeof players[i]);
+            // The noclip scene shows YOUR OWN body left behind: move the local
+            // player into view, flip noclipMode on so it's drawn + the
+            // first-person viewmodel is suppressed. Restored after the shot.
+            noclipMode = (s == 3);
+            if (s == 3) {
+                players[0].pos = (Vector3){ 0, PLAYER_EYE, 0 };
+                players[0].yaw = YAW;
+                players[0].inventory[0].owned = true;  // would show a gun if not noclip
+            } else {
+                players[0].pos = (Vector3){ 0, PLAYER_EYE, 9 };  // behind cam (not drawn)
+            }
             for (int f = 0; f < scenes[s].frames; f++) {
                 float dt = GetFrameTime(); if (dt <= 0) dt = 1.0f/60.0f;
                 if (s == 0) {
@@ -311,7 +323,7 @@ int main(int argc, char **argv) {
                         players[3].yaw=YAW; players[3].pos=(Vector3){2.4f,PLAYER_EYE,0.3f};
                     }
                     players[1].inventory[0].reloadTimer = 1.5f;  // hold in reload
-                } else {
+                } else if (s == 2) {
                     // reviver (slot1) kneeling over a downed teammate (slot2)
                     if (f == 0) {
                         players[1].active=players[1].alive=true; players[1].yaw=YAW;
@@ -331,6 +343,7 @@ int main(int argc, char **argv) {
             TakeScreenshot(fn);
             fprintf(stderr, "wrote %s\n", fn);
         }
+        noclipMode = false;
         Render_UnloadPlayerAnim();
         Assets_Unload(); Weapons_Unload();
         CloseWindow();
@@ -541,9 +554,10 @@ int main(int argc, char **argv) {
                     move = Vector3Scale(Vector3Normalize(move), flySpeed * dt);
                     specPos = Vector3Add(specPos, move);
                 }
-                // While noclipping alive, keep the player's view direction in
-                // sync so the body faces wherever the camera is looking.
-                if (noclipMode && me->alive) { me->yaw = specYaw; me->pitch = specPitch; }
+                // While noclipping, the body is left behind — frozen at its
+                // entry position AND facing — and the fly camera is fully
+                // detached, so we do NOT write specYaw/specPitch back onto the
+                // player. (Dead spectating doesn't move the body either.)
             }
             bool actable = me->alive && !me->downed && !noclipMode;
             me->fireHeld     = (IsMouseButtonDown(MOUSE_BUTTON_LEFT)  || Bind_Down(BA_FIRE)) && actable;

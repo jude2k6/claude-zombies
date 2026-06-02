@@ -6,12 +6,23 @@
 #include "entities.h"
 #include "assets.h"
 #include "decals.h"
+#include "anim.h"
 #include "raymath.h"
 #include "rlgl.h"
 #include <math.h>
 #include <stdio.h>
 
 float muzzleFlashLocal = 0.0f;
+
+// ---- shared rigged zombie (glTF skeletal animation) --------------------
+// One shared skinned model + clips; each enemy slot carries a lightweight,
+// render-local AnimState (clip + time). Driven entirely from DrawEnemy with
+// GetFrameTime() — purely visual, so it isn't serialized (same precedent as
+// the local viewmodel anim). Falls back to PROP_ZOMBIE / cubes when the
+// .glb isn't present.
+static AnimModel zombieAnim;
+static AnimState zombieAnimState[MAX_ENEMIES];
+static int zClipWalk = -1, zClipAttack = -1, zClipDeath = -1;
 
 static const Color PLAYER_COLORS[NET_MAX_PLAYERS] = {
     {220, 80, 80, 255}, {80, 120, 220, 255}, {90, 200, 90, 255}, {220, 200, 80, 255},
@@ -26,6 +37,23 @@ static inline void DrawPropEx(PropId id, Vector3 pos, float yawDeg, Vector3 scal
 }
 static inline void DrawProp(PropId id, Vector3 pos, float yawDeg, Color tint) {
     DrawPropEx(id, pos, yawDeg, (Vector3){1, 1, 1}, tint);
+}
+
+// Load the shared rigged zombie and bind the skinned (lit + fogged) shader.
+// Call once after Assets_Load (which loads worldSkinnedShader). No-op-safe:
+// if the .glb is missing, DrawEnemy falls back to the OBJ / cube draw.
+void Render_LoadZombieAnim(void) {
+    if (!Anim_Load(&zombieAnim, "zombie.glb")) return;
+    if (worldSkinnedShaderLoaded) Anim_ApplyShader(&zombieAnim, worldSkinnedShader);
+    zClipWalk   = Anim_FindClip(&zombieAnim, "walk");
+    zClipAttack = Anim_FindClip(&zombieAnim, "attack_a");
+    zClipDeath  = Anim_FindClip(&zombieAnim, "death");
+    for (int i = 0; i < MAX_ENEMIES; i++)
+        Anim_Play(&zombieAnimState[i], zClipWalk, true, 1.0f);
+}
+
+void Render_UnloadZombieAnim(void) {
+    Anim_Unload(&zombieAnim);
 }
 
 // ---- textured surfaces -------------------------------------------------
@@ -443,22 +471,69 @@ static void DrawEnemy(Enemy *e) {
         default: break;
     }
 
+    // Face the targeted player; fall back to 0 yaw if no target.
+    float yawDeg = 0.0f;
+    float distToTarget = 1e9f;
+    if (e->targetPlayer >= 0 && e->targetPlayer < NET_MAX_PLAYERS &&
+        players[e->targetPlayer].active) {
+        Vector3 t3 = players[e->targetPlayer].pos;
+        float dx = t3.x - e->pos.x;
+        float dz = t3.z - e->pos.z;
+        // raylib draws model with rotation around (0,1,0); 0 deg = -Z fwd.
+        yawDeg = atan2f(-dx, -dz) * RAD2DEG;
+        distToTarget = sqrtf(dx*dx + dz*dz);
+    }
+
+    // Feet sit on the ground; the model origin (feet) is the scale pivot,
+    // so a uniform scale keeps the soles planted for every type.
+    Vector3 feet = { e->pos.x, e->pos.y - ENEMY_HEIGHT * 0.5f, e->pos.z };
+
+    // Rigged, animated zombie (preferred): one shared skinned glTF posed
+    // per-instance via a render-local AnimState. Walk loops; swap to a
+    // one-shot attack swipe when in melee range of the target.
+    if (zombieAnim.loaded && zClipWalk >= 0) {
+        int idx = (int)(e - enemies);
+        AnimState *st = &zombieAnimState[idx];
+        bool inMelee = (distToTarget < ENEMY_RADIUS + 0.7f);
+
+        if (inMelee && zClipAttack >= 0) {
+            if (st->clip != zClipAttack || st->finished)
+                Anim_Play(st, zClipAttack, false, 1.2f);
+        } else {
+            // Playback rate tracks how fast this zombie is moving so the
+            // shamble reads faster for runners / slower while stunned.
+            float pb = e->speed > 0.05f ? Clamp(e->speed / 1.3f, 0.45f, 2.4f)
+                                        : 0.55f;
+            if (st->clip != zClipWalk) Anim_Play(st, zClipWalk, true, pb);
+            else st->speed = pb;
+        }
+        // Uniform scale (the rigged mesh has one shared skeleton; per-type
+        // non-uniform squish awaits dedicated crawler/boss meshes). Crawler
+        // is kept small so it still reads as a distinct, low type.
+        float animScale = (e->type == ZT_CRAWLER) ? 0.7f : modelScaleXZ;
+        Anim_Update(&zombieAnim, st, GetFrameTime());
+        Anim_Draw(&zombieAnim, st, feet, yawDeg, animScale, hpTint);
+
+        if (stripe.a) {
+            DrawCube((Vector3){body.x, body.y, body.z},
+                     w * 1.02f, h * 0.10f, w * 1.02f, stripe);
+        }
+        if (runnerWindup) {
+            float headY = body.y + h * 0.5f + 0.20f;
+            float fwdDx = sinf(yawDeg * DEG2RAD);
+            float fwdDz = -cosf(yawDeg * DEG2RAD);
+            float perpX = -fwdDz, perpZ = fwdDx;
+            float pulse = 0.6f + 0.4f * sinf((0.75f - e->specialTimer) * 30.0f);
+            unsigned char r = (unsigned char)(255.0f * pulse);
+            Color eye = (Color){ r, 30, 30, 255 };
+            DrawSphere((Vector3){ body.x + fwdDx*0.18f + perpX*0.08f, headY, body.z + fwdDz*0.18f + perpZ*0.08f }, 0.045f, eye);
+            DrawSphere((Vector3){ body.x + fwdDx*0.18f - perpX*0.08f, headY, body.z + fwdDz*0.18f - perpZ*0.08f }, 0.045f, eye);
+        }
+        return;
+    }
+
     if (propModelLoaded[PROP_ZOMBIE]) {
         // OBJ origin is at the feet, model -Z is forward (matches raylib).
-        // e->pos.y is the body centre, so subtract half-height to land feet.
-        Vector3 feet = { body.x, body.y - ENEMY_HEIGHT * 0.5f, body.z };
-
-        // Face the targeted player; fall back to 0 yaw if no target.
-        float yawDeg = 0.0f;
-        if (e->targetPlayer >= 0 && e->targetPlayer < NET_MAX_PLAYERS &&
-            players[e->targetPlayer].active) {
-            Vector3 t3 = players[e->targetPlayer].pos;
-            float dx = t3.x - e->pos.x;
-            float dz = t3.z - e->pos.z;
-            // raylib draws model with rotation around (0,1,0); 0 deg = -Z fwd.
-            yawDeg = atan2f(-dx, -dz) * RAD2DEG;
-        }
-
         Vector3 scale = { modelScaleXZ, modelScaleY, modelScaleXZ };
         DrawPropEx(PROP_ZOMBIE, feet, yawDeg, scale, hpTint);
 

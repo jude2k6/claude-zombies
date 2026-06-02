@@ -343,6 +343,7 @@ int main(int argc, char **argv) {
     Audio_Init();
     Weapons_Load();   // must run before Assets_Load — Assets_ApplyWorldShader iterates weaponModels[]
     Assets_Load();
+    Render_LoadZombieAnim();   // shared rigged zombie.glb (skinned shader from Assets_Load)
     Settings_Load();
     Decals_Init();
     if (fullscreen && !IsWindowFullscreen()) Menu_ToggleFullscreenSafe();
@@ -576,6 +577,7 @@ int main(int argc, char **argv) {
     }
 
     Settings_Save();
+    Render_UnloadZombieAnim();
     Assets_Unload();
     Weapons_Unload();
     Audio_Shutdown();

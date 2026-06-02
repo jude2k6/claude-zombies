@@ -16,6 +16,25 @@ Repo: `git@github.com:jude2k6/claude-zombies.git` · branch: `main`.
 
 Latest pass (2026-06-02) — all committed to `main`, not pushed:
 
+- **First rigged glTF asset shipped: `data/models/zombie.glb`** — the
+  proof-of-pipeline for the skeletal-animation system. Authored rig-first via
+  the `blender-game-asset` skill: 17-bone humanoid skeleton (pelvis/spine/
+  chest/neck/head, upperarm/forearm/hand ×2, thigh/shin/foot ×2), A-pose,
+  built from a skin-modifier stick figure so the whole body is ONE connected
+  island (integrity audit PASS), 4576 tris, 6 flat-colour material zones
+  (skin/shirt/pants/boots/blood/bone). Clips `walk` (loop, 0.85s, alternating
+  legs + knee bend + arm counter-swing), `attack_a` (0.61s overhead swipe),
+  `death` (1.34s stagger→collapse). Exported `export_yup=True` so it faces -Z
+  in raylib at yaw 0. Verified with `--anim-test` (deforms, lit, no skeleton
+  mismatch). **Wired onto `Enemy`:** `render.c:DrawEnemy` now prefers the
+  rigged model over `PROP_ZOMBIE`/cubes; per-enemy `AnimState` is a
+  render-local parallel array (`zombieAnimState[MAX_ENEMIES]`, indexed by
+  `e - enemies`) — NOT serialized (same precedent as the local viewmodel
+  anim), so no protocol bump. Walk plays with playback rate scaled by
+  `e->speed`; swaps to a one-shot `attack_a` when within melee range of the
+  target. Load/unload via `Render_LoadZombieAnim()` (after `Assets_Load`, so
+  `worldSkinnedShader` exists) / `Render_UnloadZombieAnim()`. See the rigged
+  zombie gotcha below.
 - **Door fix** — door header/lintel walls were blocking the doorway in XZ
   (collision ignores Y). Added `interiorWallNoClip[]`; lintels render +
   block bullets but not walking. See the gotcha below.
@@ -406,6 +425,32 @@ data/
     machine as `.glb`) and wire `AnimState` onto the entities. Engine work
     per entity is just: load AnimModel, `Anim_ApplyShader`, store an
     AnimState, `Anim_Update` each tick, `Anim_Draw` instead of `DrawProp`.
+- **Rigged zombie (`zombie.glb`, 2026-06-02).** First animated asset; the
+  template for every future rigged model.
+  - **Single connected island.** Built from a skin-modifier stick figure then
+    simple-subdivided — guarantees one watertight mesh so automatic weights
+    deform cleanly and the connectivity audit passes. Don't rebuild it from
+    loose overlapping primitives (separate islands = audit FAIL).
+  - **Facing.** Authored facing -Y in Blender; exported `export_yup=True` →
+    faces -Z in raylib at yaw 0 (matches the camera/forward convention). Note
+    this is the glTF path, *different* from the OBJ `forward_axis='Z'` rule —
+    don't apply the OBJ axis fudge to `.glb`.
+  - **AnimState is render-local, not on `Enemy`.** `render.c` keeps
+    `zombieAnimState[MAX_ENEMIES]` indexed by `e - enemies` and ticks it with
+    `GetFrameTime()` in `DrawEnemy`. Intentional: it's purely visual, so it
+    stays out of `SerEnemy` (no protocol bump). If you ever need teammates to
+    see *synchronised* attack/death frames, that's when it moves into the
+    serialized state.
+  - **Uniform scale only** (`Anim_Draw` takes one float). Boss uses 1.7×,
+    crawler is kept small (0.7×) but can't be Y-squished like the old cube
+    path — the crawler/boss really want their own meshes per `ANIMATIONS.md`.
+    The yellow runner stripe + magenta boss stripe + runner red-eye tell are
+    still drawn as overlays on top of the rigged model.
+  - **No death/attack from the sim yet.** Enemies just flip `alive=false` on
+    kill, so the `death` clip never plays in-game and `attack_a` is triggered
+    purely by render-side proximity. Wiring a real death window (keep the
+    corpse ~1.3s while the clip plays) + a sim attack flag is the natural
+    follow-up; the clips already exist.
 - **CoD-style balance pass (2026-06-02).** Numbers are tuned to classic
   Treyarch zombies, so don't "simplify" them back:
   - **Zombie HP** (`entities.c::Enemies_RoundHP`): `150 + 100*(r-1)` through

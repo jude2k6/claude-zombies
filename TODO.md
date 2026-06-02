@@ -11,9 +11,13 @@ The glTF skeletal-animation pipeline shipped 2026-06-02 (`anim.{c,h}`,
 `world_skinned.vs`, `--anim-test`). Specs: `data/ANIMATIONS.md` (clip lists,
 rig-first mandate) + the `blender-game-asset` skill (rig-first authoring +
 connectivity auditor). Remaining work is authoring + per-entity wiring:
-- [ ] **Rigged Normal zombie** (`zombie.glb`) — proof-of-pipeline. Build
-      rig-first (T-pose, joint loops), clips `walk`/`attack_a`/`death`.
-      Then add `AnimState` to `Enemy` and swap `DrawProp` → `Anim_Draw`.
+- [x] **Rigged Normal zombie** (`zombie.glb`) — proof-of-pipeline DONE.
+      Rig-first humanoid (17-bone skeleton, A-pose, skin-modifier single
+      island, 4576 tris, 6 material zones), clips `walk`/`attack_a`/`death`.
+      Audited PASS, validated via `--anim-test`. `DrawEnemy` now prefers the
+      rigged model (render-local `AnimState[]` per enemy slot, walk loop with
+      movement-scaled playback + a melee attack swipe), falling back to the
+      OBJ/cube path. See HANDOFF "rigged zombie" gotcha.
 - [ ] **Zombie clip set + per-type variants** — `spawn`/`run`/`attack_b`,
       runner `lunge`, crawler `crawl`, boss `steamroll`/`attack_heavy`.
 - [ ] **Weapon viewmodels** (`<name>_vm.glb`) — `idle`/`fire`/`reload`/

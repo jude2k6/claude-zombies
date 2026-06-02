@@ -16,6 +16,22 @@ Repo: `git@github.com:jude2k6/claude-zombies.git` · branch: `main`.
 
 Latest pass (2026-06-02) — all committed to `main`, not pushed:
 
+- **M1911 viewmodel authored: `data/weapons/pistol/pistol_vm.glb`** (rigged,
+  animated, NOT yet wired). Arms + gun, 9 bones (`root`/`frame`/`slide`/`mag`/
+  `hammer` + `hand.{L,R}`/`forearm.{L,R}`), 20 rigid box parts each bound 100%
+  to one bone (slide/mag/hammer are separate movable islands per the rig-first
+  mandate), audit PASS, ~880 tris. All 8 common viewmodel clips: `idle`,
+  `fire` (slide reciprocates + recoil kick on `root` + hammer fall, ~0.2s),
+  `reload` (left hand drops, mag ejects via the `mag` bone, new mag in — no
+  slide rack), `reload_empty` (slide held back the whole clip, then slide
+  release slams it forward), `raise`/`lower`, `sprint`, `inspect`. Authored
+  +Y-forward (muzzle +Y, sights +Z up, grip at origin) per the glTF facing
+  rule. Validated via `--anim-test`. **Still TODO: the engine viewmodel path
+  in `render.c` (`DrawFirstPersonViewmodel`) is still OBJ + procedural** — it
+  doesn't load `*_vm.glb` yet. Wiring it (map player fire/reload/sprint/swap
+  state → clip + playback, draw in camera space) is the next step; the other 4
+  guns stay on the OBJ path until they get their own vm.glb. See the viewmodel
+  gotcha below.
 - **First rigged glTF asset shipped: `data/models/zombie.glb`** — the
   proof-of-pipeline for the skeletal-animation system. Authored rig-first via
   the `blender-game-asset` skill: 17-bone humanoid skeleton (pelvis/spine/

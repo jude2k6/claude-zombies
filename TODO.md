@@ -20,9 +20,20 @@ connectivity auditor). Remaining work is authoring + per-entity wiring:
       OBJ/cube path. See HANDOFF "rigged zombie" gotcha.
 - [ ] **Zombie clip set + per-type variants** — `spawn`/`run`/`attack_b`,
       runner `lunge`, crawler `crawl`, boss `steamroll`/`attack_heavy`.
-- [ ] **Weapon viewmodels** (`<name>_vm.glb`) — `idle`/`fire`/`reload`/
+- [~] **Weapon viewmodels** (`<name>_vm.glb`) — `idle`/`fire`/`reload`/
       `reload_empty`/`raise`; blowback on `fire`, charging-handle cock on
       `reload_empty`. Replaces the procedural viewmodel anim in `render.c`.
+  - [x] **M1911** (`data/weapons/pistol/pistol_vm.glb`) authored: arms + gun,
+        9 bones (root/frame/slide/mag/hammer + both hands/forearms), 20 rigid
+        parts, audit PASS. All 8 clips — `idle` 2.4s, `fire` 0.2s (slide
+        blowback + recoil + hammer), `reload` 1.34s (mag swap, no rack),
+        `reload_empty` 1.62s (slide locked back → release), `raise`/`lower`,
+        `sprint`, `inspect`. Validated via `--anim-test`.
+  - [ ] **Wire the vm.glb path into `render.c`** — load the AnimModel, map
+        player state (fireTimer/reloadTimer/sprint/swap/empty-mag) to clip +
+        playback, draw in camera space replacing the procedural dip/tilt.
+        Hybrid: other 4 guns keep the OBJ path until they get their own vm.glb.
+  - [ ] Roll the vm clip set across SMG / shotgun / rifle / raygun.
 - [ ] **Player third-person model** — `idle`/`walk`/`run`/`revive`/`downed`/
       `death` for co-op visibility.
 - [ ] **Machine polish** (PaP chamber, mystery-box lid, perk dispense) —

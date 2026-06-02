@@ -431,10 +431,12 @@ data/
     simple-subdivided — guarantees one watertight mesh so automatic weights
     deform cleanly and the connectivity audit passes. Don't rebuild it from
     loose overlapping primitives (separate islands = audit FAIL).
-  - **Facing.** Authored facing -Y in Blender; exported `export_yup=True` →
-    faces -Z in raylib at yaw 0 (matches the camera/forward convention). Note
-    this is the glTF path, *different* from the OBJ `forward_axis='Z'` rule —
-    don't apply the OBJ axis fudge to `.glb`.
+  - **Facing — author +Y in Blender.** glTF `export_yup=True` maps Blender
+    **+Y → raylib -Z** (the forward/look direction the enemy yaw expects).
+    The *first* export was authored facing -Y → came out +Z = **backwards**
+    in-game; the rebuild faces +Y so it now turns to face the player at the
+    yaw `DrawEnemy` computes. This is the glTF rule and is the OPPOSITE of the
+    OBJ `forward_axis='Z'` convention in ASSETS.md — don't cross them.
   - **AnimState is render-local, not on `Enemy`.** `render.c` keeps
     `zombieAnimState[MAX_ENEMIES]` indexed by `e - enemies` and ticks it with
     `GetFrameTime()` in `DrawEnemy`. Intentional: it's purely visual, so it

@@ -13,8 +13,11 @@ per-model fudge factors.
   default export (`Forward: -Z, Up: Y`) matches this — keep it.
 - **Origin convention:** model origin sits at the model's **feet/grip**,
   not its centre. Reasons below.
-- **No rigging, no animation.** Static meshes only. Movement and bob
-  are applied in code via transforms.
+- **This doc = static meshes only** (movement/bob applied in code via
+  transforms). **Rigged + animated assets** (glTF `.glb`: zombies, weapon
+  viewmodels, machines) are specified in [`../ANIMATIONS.md`](../ANIMATIONS.md),
+  which lists the animation clips each weapon and entity needs. Use that for
+  anything that needs a skeleton.
 
 ## Aesthetic
 

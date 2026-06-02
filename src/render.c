@@ -656,6 +656,18 @@ static void BeginWorldShader(void) {
     SetShaderValue(worldShader, worldShader_sunDirLoc,       sd, SHADER_UNIFORM_VEC3);
     SetShaderValue(worldShader, worldShader_sunColorLoc,     sc, SHADER_UNIFORM_VEC3);
     SetShaderValue(worldShader, worldShader_ambientColorLoc, ac, SHADER_UNIFORM_VEC3);
+
+    // Animated models draw through the skinned variant (their material shader
+    // is worldSkinnedShader, used by DrawMesh regardless of rlSetShader), so
+    // it needs the same fog/sun/ambient values pushed each frame.
+    if (worldSkinnedShaderLoaded) {
+        SetShaderValue(worldSkinnedShader, worldSkinnedShader_fogColorLoc, fc, SHADER_UNIFORM_VEC4);
+        SetShaderValue(worldSkinnedShader, worldSkinnedShader_fogStartLoc, &fogStart, SHADER_UNIFORM_FLOAT);
+        SetShaderValue(worldSkinnedShader, worldSkinnedShader_fogEndLoc,   &fogEnd,   SHADER_UNIFORM_FLOAT);
+        SetShaderValue(worldSkinnedShader, worldSkinnedShader_sunDirLoc,       sd, SHADER_UNIFORM_VEC3);
+        SetShaderValue(worldSkinnedShader, worldSkinnedShader_sunColorLoc,     sc, SHADER_UNIFORM_VEC3);
+        SetShaderValue(worldSkinnedShader, worldSkinnedShader_ambientColorLoc, ac, SHADER_UNIFORM_VEC3);
+    }
     rlSetShader(worldShader.id, worldShader.locs);
 }
 static void EndWorldShader(void) {

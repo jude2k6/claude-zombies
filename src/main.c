@@ -23,6 +23,7 @@
 #include "audio.h"
 #include "decals.h"
 #include "assets.h"
+#include "anim.h"
 
 #include <stdio.h>
 #include <stdint.h>
@@ -114,6 +115,8 @@ static void HandleLocalActions(Player *me) {
     bool slot2Edge    = canAct && (IsKeyPressed(KEY_TWO) || Bind_Pressed(BA_SLOT2));
     bool interactEdge = canAct && (IsKeyPressed(KEY_F) || Bind_Pressed(BA_INTERACT));
     bool meleeEdge    = canAct && (IsKeyPressed(KEY_V) || Bind_Pressed(BA_MELEE));
+    bool lethalEdge   = canAct && (IsKeyPressed(KEY_G) || Bind_Pressed(BA_THROW_LETHAL));
+    bool tacticalEdge = canAct && (IsKeyPressed(KEY_H) || Bind_Pressed(BA_THROW_TACTICAL));
 
     int swapTarget = -1;
     if (swapEdge) {
@@ -128,6 +131,8 @@ static void HandleLocalActions(Player *me) {
         if (swapTarget >= 0) Weapon_SwapSlot(me, swapTarget);
         if (interactEdge) Interact_Do(me);
         if (meleeEdge)    Weapon_Melee(me);
+        if (lethalEdge)   Throwables_Throw(me, TH_FRAG);
+        if (tacticalEdge) Throwables_Throw(me, TH_STUN);
     } else {
         if (reloadEdge) {
             PktAction a = { .type = PKT_ACTION, .action = ACT_RELOAD };
@@ -144,6 +149,14 @@ static void HandleLocalActions(Player *me) {
         }
         if (meleeEdge) {
             PktAction a = { .type = PKT_ACTION, .action = ACT_MELEE };
+            Net_SendTo(0, &a, sizeof a, true);
+        }
+        if (lethalEdge) {
+            PktAction a = { .type = PKT_ACTION, .action = ACT_THROW_LETHAL };
+            Net_SendTo(0, &a, sizeof a, true);
+        }
+        if (tacticalEdge) {
+            PktAction a = { .type = PKT_ACTION, .action = ACT_THROW_TACTICAL };
             Net_SendTo(0, &a, sizeof a, true);
         }
     }
@@ -229,6 +242,93 @@ int main(int argc, char **argv) {
         }
         Assets_Unload();
         Weapons_Unload();
+        CloseWindow();
+        return 0;
+    }
+
+    // CLI: `--anim-test <file.glb> [clip]` loads a skinned glTF model through
+    // the animation pipeline and writes a strip of PNGs sampling the clip
+    // (anim_test_0..3.png) so skinning + lighting can be verified without the
+    // full game. Add `--live` to instead open an interactive spinning viewer.
+    if (argc >= 3 && strcmp(argv[1], "--anim-test") == 0) {
+        SetTraceLogLevel(LOG_WARNING);
+        SetConfigFlags(FLAG_MSAA_4X_HINT);
+        InitWindow(1280, 720, "Anim test");
+        Assets_Load();   // loads world + skinned shaders
+
+        AnimModel am;
+        if (!Anim_Load(&am, argv[2])) { CloseWindow(); return 1; }
+        if (worldSkinnedShaderLoaded) Anim_ApplyShader(&am, worldSkinnedShader);
+
+        int clip = (argc >= 4 && argv[3][0] >= '0' && argv[3][0] <= '9')
+                 ? atoi(argv[3]) : 0;
+        bool live = false;
+        for (int a = 3; a < argc; a++) if (strcmp(argv[a], "--live") == 0) live = true;
+
+        // No level: drive fog far away so the model isn't washed out, and use
+        // the default sun/ambient set in assets.c.
+        fogStart = 100.0f; fogEnd = 200.0f; fogColor = (Color){ 30, 33, 40, 255 };
+
+        Camera cam = {
+            .position = { 2.6f, 1.4f, 2.6f }, .target = { 0, 0.8f, 0 },
+            .up = { 0, 1, 0 }, .fovy = 55.0f, .projection = CAMERA_PERSPECTIVE,
+        };
+        AnimState st; Anim_Play(&st, clip, true, 1.0f);
+        float dur = Anim_ClipDuration(&am, clip);
+
+        // Helper to push the skinned shader's fog/sun uniforms (BeginWorldShader
+        // is internal to render.c; the test harness sets them directly).
+        #define PUSH_SKIN_UNIFORMS() do { \
+            if (worldSkinnedShaderLoaded) { \
+                float fc[4]={fogColor.r/255.f,fogColor.g/255.f,fogColor.b/255.f,1}; \
+                float sd[3]={sunDir.x,sunDir.y,sunDir.z}; \
+                float sc[3]={sunColor.x,sunColor.y,sunColor.z}; \
+                float ac[3]={ambientColor.x,ambientColor.y,ambientColor.z}; \
+                SetShaderValue(worldSkinnedShader, worldSkinnedShader_fogColorLoc, fc, SHADER_UNIFORM_VEC4); \
+                SetShaderValue(worldSkinnedShader, worldSkinnedShader_fogStartLoc, &fogStart, SHADER_UNIFORM_FLOAT); \
+                SetShaderValue(worldSkinnedShader, worldSkinnedShader_fogEndLoc,   &fogEnd,   SHADER_UNIFORM_FLOAT); \
+                SetShaderValue(worldSkinnedShader, worldSkinnedShader_sunDirLoc,       sd, SHADER_UNIFORM_VEC3); \
+                SetShaderValue(worldSkinnedShader, worldSkinnedShader_sunColorLoc,     sc, SHADER_UNIFORM_VEC3); \
+                SetShaderValue(worldSkinnedShader, worldSkinnedShader_ambientColorLoc, ac, SHADER_UNIFORM_VEC3); \
+            } } while (0)
+
+        if (live) {
+            float yaw = 0.0f;
+            while (!WindowShouldClose()) {
+                Anim_Update(&am, &st, GetFrameTime());
+                yaw += GetFrameTime() * 40.0f;
+                BeginDrawing();
+                ClearBackground((Color){ 50, 55, 65, 255 });
+                PUSH_SKIN_UNIFORMS();
+                BeginMode3D(cam);
+                    DrawGrid(10, 0.5f);
+                    Anim_Draw(&am, &st, (Vector3){0,0,0}, yaw, 1.0f, WHITE);
+                EndMode3D();
+                DrawText(TextFormat("clip %d/%d  %.2fs", clip, am.animCount, st.time), 20, 20, 24, RAYWHITE);
+                EndDrawing();
+            }
+        } else {
+            for (int i = 0; i < 4; i++) {
+                st.time = dur * (i / 4.0f);
+                float yaw = 35.0f + i * 12.0f;
+                BeginDrawing();
+                ClearBackground((Color){ 50, 55, 65, 255 });
+                PUSH_SKIN_UNIFORMS();
+                BeginMode3D(cam);
+                    DrawGrid(10, 0.5f);
+                    Anim_Draw(&am, &st, (Vector3){0,0,0}, yaw, 1.0f, WHITE);
+                EndMode3D();
+                DrawText(TextFormat("%s  clip %d  t=%.2fs/%.2fs", am.name, clip, st.time, dur),
+                         20, 20, 22, RAYWHITE);
+                EndDrawing();
+                char fn[64]; snprintf(fn, sizeof fn, "anim_test_%d.png", i);
+                TakeScreenshot(fn);
+                fprintf(stderr, "wrote %s\n", fn);
+            }
+        }
+        #undef PUSH_SKIN_UNIFORMS
+        Anim_Unload(&am);
+        Assets_Unload();
         CloseWindow();
         return 0;
     }

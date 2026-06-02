@@ -288,6 +288,7 @@ responsibility, sharing `types.h`:
 | `net.{c,h}`       | enet wrapper, `Net_GetLocalIPs` for the host's join prompt |
 | `render.{c,h}`    | 3D world draw (model-first with cube fallbacks), textured walls/floor via rlgl, fog/sky/lit shader swap, tracer billboards |
 | `decals.{c,h}`    | 96-slot ring buffer for blood + impact decals, drawn from `Render_World3D` |
+| `anim.{c,h}`      | Skeletal animation pipeline. `AnimModel` (shared skinned glTF + clips) + per-instance `AnimState`; load/find-clip/update/draw via raylib 5.5 GPU skinning |
 | `hud.{c,h}`       | 2D HUD overlay, round splash, downed/spectate overlays |
 | `menu.{c,h}`      | Menu screens incl. game-over stats table, controller bindings UI, map picker |
 | `pad.{c,h}`       | Raw gamepad axis/button readers                        |
@@ -359,6 +360,27 @@ data/
   buffer. **Always export with `export_triangulated_mesh=True`** —
   this fans caps into triangles and is safe regardless of cylinder
   resolution.
+- **Skeletal animation pipeline (2026-06-02).** Engine support for animated
+  models is in; only authored animated assets are missing. Key facts:
+  - Animations need **glTF (`.glb`)**, NOT OBJ — OBJ can't carry a skeleton.
+    raylib 5.5 GPU skinning is used (`UpdateModelAnimationBones` writes only
+    per-instance bone matrices; `DrawMesh` uploads them to the `boneMatrices`
+    uniform — cheap enough to draw all 48 zombies at different poses).
+  - `anim.{c,h}`: `Anim_Load/Unload/ApplyShader/FindClip/Play/Update/Draw`.
+    `AnimModel` is the shared asset (model + clips); `AnimState` is per
+    instance (clip/time/loop/speed). glTF clips are baked at ~60 fps
+    (`ANIM_FPS = 1000/17`), so playback is driven in seconds.
+  - Animated models must use **`worldSkinnedShader`** (`world_skinned.vs` +
+    the shared `world.fs`) via `Anim_ApplyShader`, so they get the same fog +
+    lighting. `BeginWorldShader` pushes the fog/sun uniforms to it each frame.
+  - Validate any `.glb` with **`./build/shooter --anim-test <file.glb> [clip]`**
+    (writes `anim_test_0..3.png` across the clip) or add `--live` for an
+    interactive spinning viewer. `data/models/anim_test.glb` is a 2-bone
+    bend-test fixture proving the path.
+  - **Next:** author the real assets (rigged zombie / viewmodel / perk
+    machine as `.glb`) and wire `AnimState` onto the entities. Engine work
+    per entity is just: load AnimModel, `Anim_ApplyShader`, store an
+    AnimState, `Anim_Update` each tick, `Anim_Draw` instead of `DrawProp`.
 - **CoD-style balance pass (2026-06-02).** Numbers are tuned to classic
   Treyarch zombies, so don't "simplify" them back:
   - **Zombie HP** (`entities.c::Enemies_RoundHP`): `150 + 100*(r-1)` through

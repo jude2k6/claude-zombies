@@ -52,6 +52,15 @@ int    worldShader_sunColorLoc;
 int    worldShader_ambientColorLoc;
 int    worldShader_tileVariationLoc;
 
+Shader worldSkinnedShader;
+bool   worldSkinnedShaderLoaded;
+int    worldSkinnedShader_fogColorLoc;
+int    worldSkinnedShader_fogStartLoc;
+int    worldSkinnedShader_fogEndLoc;
+int    worldSkinnedShader_sunDirLoc;
+int    worldSkinnedShader_sunColorLoc;
+int    worldSkinnedShader_ambientColorLoc;
+
 Shader skyShader;
 bool   skyShaderLoaded;
 Model  skyModel;
@@ -176,6 +185,25 @@ void Assets_Load(void) {
         fprintf(stderr, "shader: world.{vs,fs} not found, fog disabled\n");
     }
 
+    // Skinned world shader: world_skinned.vs paired with the same world.fs.
+    worldSkinnedShaderLoaded = false;
+    for (size_t p = 0; p < sizeof shaderPrefixes / sizeof shaderPrefixes[0]; p++) {
+        if (TryLoadShader(shaderPrefixes[p], "world_skinned.vs", "world.fs", &worldSkinnedShader)) {
+            worldSkinnedShaderLoaded = true;
+            worldSkinnedShader_fogColorLoc     = GetShaderLocation(worldSkinnedShader, "fogColor");
+            worldSkinnedShader_fogStartLoc     = GetShaderLocation(worldSkinnedShader, "fogStart");
+            worldSkinnedShader_fogEndLoc       = GetShaderLocation(worldSkinnedShader, "fogEnd");
+            worldSkinnedShader_sunDirLoc       = GetShaderLocation(worldSkinnedShader, "sunDir");
+            worldSkinnedShader_sunColorLoc     = GetShaderLocation(worldSkinnedShader, "sunColor");
+            worldSkinnedShader_ambientColorLoc = GetShaderLocation(worldSkinnedShader, "ambientColor");
+            fprintf(stderr, "shader: loaded %sworld_skinned.{vs,fs}\n", shaderPrefixes[p]);
+            break;
+        }
+    }
+    if (!worldSkinnedShaderLoaded) {
+        fprintf(stderr, "shader: world_skinned.vs not found, animated models unlit\n");
+    }
+
     skyShaderLoaded = false;
     for (size_t p = 0; p < sizeof shaderPrefixes / sizeof shaderPrefixes[0]; p++) {
         if (TryLoadShader(shaderPrefixes[p], "sky.vs", "sky.fs", &skyShader)) {
@@ -236,5 +264,9 @@ void Assets_Unload(void) {
     if (worldShaderLoaded) {
         UnloadShader(worldShader);
         worldShaderLoaded = false;
+    }
+    if (worldSkinnedShaderLoaded) {
+        UnloadShader(worldSkinnedShader);
+        worldSkinnedShaderLoaded = false;
     }
 }

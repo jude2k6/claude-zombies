@@ -76,6 +76,19 @@ extern int    worldShader_sunColorLoc;
 extern int    worldShader_ambientColorLoc;
 extern int    worldShader_tileVariationLoc;
 
+// Skinned variant of the world shader (world_skinned.vs + world.fs): same
+// lighting + fog, but with GPU skeletal skinning. Assigned to animated
+// (glTF) models' materials. Its fog/sun/ambient uniforms are pushed every
+// frame alongside worldShader's (see render BeginWorldShader).
+extern Shader worldSkinnedShader;
+extern bool   worldSkinnedShaderLoaded;
+extern int    worldSkinnedShader_fogColorLoc;
+extern int    worldSkinnedShader_fogStartLoc;
+extern int    worldSkinnedShader_fogEndLoc;
+extern int    worldSkinnedShader_sunDirLoc;
+extern int    worldSkinnedShader_sunColorLoc;
+extern int    worldSkinnedShader_ambientColorLoc;
+
 extern Shader skyShader;
 extern bool   skyShaderLoaded;
 extern Model  skyModel;             // unit cube, materials[0].shader = skyShader

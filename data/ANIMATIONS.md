@@ -34,7 +34,9 @@ new model is built *from the start* to deform:
   flap) is its own mesh island bound rigidly to its own bone — so it can be
   keyed independently. Rigid-part skinning is fine and on-style for the blocky
   look; smooth weight-painting only where things actually flex (limbs, jaw).
-- **Origin + axes per `ASSETS.md`** still apply (feet/grip origin, -Z forward),
+- **Origin + scale per `ASSETS.md`** still apply (feet/grip origin, 1 m =
+  1 unit), but for **facing use the glTF rule below** (author +Y in Blender),
+  not ASSETS.md's OBJ -Z-in-Blender rule;
   and the static look/palette rules there still hold — rig-first changes
   *topology and pose*, not the art direction.
 - **Exception:** genuinely inert props (crates, barrels, sandbags, boards) and
@@ -47,6 +49,14 @@ new model is built *from the start* to deform:
 
 - **Format: glTF `.glb`.** OBJ cannot hold a skeleton. Animated assets are
   `.glb`; static props stay OBJ.
+- **Facing — author +Y in Blender (NOT the OBJ rule).** Export with
+  `export_yup=True`, which maps Blender **+Y → raylib -Z** = the forward/look
+  direction enemies and players are turned to. So characters must face **+Y in
+  Blender** (toes/jaw/eyes pointing +Y). This is the OPPOSITE of the OBJ
+  convention in `ASSETS.md` ("face -Z in Blender") — do **not** carry the OBJ
+  axis rule over to `.glb`. Authoring -Y was the cause of the first
+  backwards-zombie; verify with `--anim-test` and, if it still looks reversed
+  in-game, the fix is the model's facing, not the draw yaw.
 - **One shared skeleton per family.** All variants of a thing (zombie types;
   player skins; both view + world weapon models that must match) should use
   the **same bone names + hierarchy**, so one set of clips drives every mesh

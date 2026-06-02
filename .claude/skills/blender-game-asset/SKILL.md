@@ -136,3 +136,25 @@ the load log shows the expected mesh/material/bone/clip counts and no
 - The integrity audit is the safeguard against the recurring "generated asset
   has parts not connected to the main body" problem. Treat a non-PASS as a
   hard block.
+
+## Techniques that worked here (learned authoring the zombie)
+- **Character body via a Skin-modifier stick figure.** A graph of joint
+  verts + edges with a `SKIN` modifier (per-vert radius), then apply +
+  Subdivision (`SIMPLE`) gives ONE watertight connected island for the whole
+  torso/limbs — automatic weights then deform it cleanly and the connectivity
+  audit passes for free. Tune radii for proportion (waist taper, shoulder
+  bulk); subdiv level 1 reads crisper/blockier, level 2 smoother.
+- **Model faces/detail as real geometry, NOT skin blobs.** A skin-modifier
+  head comes out a featureless wedge. Build the head and its features (brow,
+  cheekbones, dark eye sockets + glowing eyes, dark maw + tooth bars, chin) as
+  **separate beveled box objects** that *overlap* the skull, each a single
+  island, each rigidly bound to its bone (Armature modifier + one full-weight
+  vertex group — `head`, or `jaw` for the lower jaw/teeth so they drop on a
+  bite). Separate overlapping parts are fine for the audit (gap 0); never
+  `join` them (that makes a multi-island object = FAIL).
+- **Facing: characters face +Y in Blender.** `export_yup=True` maps Blender
+  +Y → raylib -Z (forward). Authoring -Y gives a backwards model in-game. This
+  is the OPPOSITE of the OBJ rule in `ASSETS.md`; see `ANIMATIONS.md` facing
+  note. anim-test's fixed camera views the back of a correctly-facing model.
+- **Emissive accents** (zombie eyes, raygun coils): set Principled
+  `Emission Color` + `Emission Strength` on that part's material.

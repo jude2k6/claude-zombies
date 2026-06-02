@@ -147,6 +147,12 @@ other.
 
 ### Zombie (`data/models/zombie.obj`)
 
+> **Superseded for the live enemy:** the in-game zombie now ships as a rigged,
+> animated `data/models/zombie.glb` (authored **+Y-forward** per the glTF rule
+> in [`../ANIMATIONS.md`](../ANIMATIONS.md), NOT the -Z-in-Blender OBJ rule
+> below). The OBJ checklist here is kept for the static fallback and for the
+> palette/scale conventions, which still hold.
+
 - [ ] Mesh: blocky humanoid, ~1.7 m tall, fits in r=0.6 m cylinder
 - [ ] Pose: arms forward at shoulder height, slight slouch, neutral
       stance (no walk cycle — that's procedural)

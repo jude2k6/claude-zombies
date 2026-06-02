@@ -34,6 +34,21 @@ static AnimState pistolVMState;
 static int pvmIdle = -1, pvmFire = -1, pvmReload = -1, pvmReloadEmpty = -1,
            pvmRaise = -1, pvmLower = -1, pvmSprint = -1;
 
+// ---- rigged third-person player model (glTF) ---------------------------
+// One shared skinned soldier (player.glb) + a render-local AnimState per
+// player slot. Only OTHER players are drawn with it (you never see your own
+// body). State is render-local / not serialized — same precedent as the
+// zombie anim: it's purely visual and reconstructed from the synced fields
+// (pos delta → locomotion, reloadTimer, downed, reviveAsTarget, alive). Falls
+// back to PROP_PLAYER_M / cubes when player.glb isn't present.
+static AnimModel playerAnim;
+static AnimState playerAnimState[NET_MAX_PLAYERS];
+static Vector3   playerAnimPrevPos[NET_MAX_PLAYERS];
+static float     playerAnimSpeed[NET_MAX_PLAYERS];   // smoothed horizontal m/s
+static bool      playerAnimSeen[NET_MAX_PLAYERS];
+static int pmIdle = -1, pmWalk = -1, pmRun = -1, pmFire = -1, pmReload = -1,
+          pmRevive = -1, pmDowned = -1, pmDeath = -1;
+
 static const Color PLAYER_COLORS[NET_MAX_PLAYERS] = {
     {220, 80, 80, 255}, {80, 120, 220, 255}, {90, 200, 90, 255}, {220, 200, 80, 255},
 };
@@ -84,6 +99,31 @@ void Render_LoadPistolVM(void) {
 
 void Render_UnloadPistolVM(void) {
     Anim_Unload(&pistolVM);
+}
+
+// Load the shared rigged player model; bind the skinned (lit + fogged) shader.
+// Call once after Assets_Load. No-op-safe: missing .glb leaves DrawOtherPlayer
+// on its PROP_PLAYER_M / cube path.
+void Render_LoadPlayerAnim(void) {
+    if (!Anim_Load(&playerAnim, "player.glb")) return;
+    if (worldSkinnedShaderLoaded) Anim_ApplyShader(&playerAnim, worldSkinnedShader);
+    pmIdle   = Anim_FindClip(&playerAnim, "idle");
+    pmWalk   = Anim_FindClip(&playerAnim, "walk");
+    pmRun    = Anim_FindClip(&playerAnim, "run");
+    pmFire   = Anim_FindClip(&playerAnim, "fire");
+    pmReload = Anim_FindClip(&playerAnim, "reload");
+    pmRevive = Anim_FindClip(&playerAnim, "revive");
+    pmDowned = Anim_FindClip(&playerAnim, "downed");
+    pmDeath  = Anim_FindClip(&playerAnim, "death");
+    for (int i = 0; i < NET_MAX_PLAYERS; i++) {
+        Anim_Play(&playerAnimState[i], pmIdle, true, 1.0f);
+        playerAnimSpeed[i] = 0.0f;
+        playerAnimSeen[i] = false;
+    }
+}
+
+void Render_UnloadPlayerAnim(void) {
+    Anim_Unload(&playerAnim);
 }
 
 // ---- textured surfaces -------------------------------------------------
@@ -606,6 +646,92 @@ static void DrawOtherPlayer(int idx) {
     Color c = PLAYER_COLORS[idx];
     if (!p->alive)      c = (Color){ 100,100,100, 200 };
     else if (p->downed) c = (Color){ 180, 60, 60, 230 };
+
+    // Rigged, animated soldier (preferred): one shared skinned glTF posed
+    // per-player via a render-local AnimState, with the clip reconstructed
+    // from the synced fields. Falls back to the OBJ / cube draws below.
+    if (playerAnim.loaded && pmIdle >= 0) {
+        AnimState *st = &playerAnimState[idx];
+
+        // Smoothed horizontal speed from the synced position. Snapshots land
+        // at 20 Hz but we render at ~60 fps, so the per-frame delta spikes on
+        // snapshot frames; an EMA of dist/dt recovers the true average speed.
+        float dt = GetFrameTime();
+        if (dt < 1e-4f) dt = 1e-4f;
+        if (playerAnimSeen[idx]) {
+            float dx = p->pos.x - playerAnimPrevPos[idx].x;
+            float dz = p->pos.z - playerAnimPrevPos[idx].z;
+            float inst = sqrtf(dx*dx + dz*dz) / dt;
+            if (inst > 14.0f) inst = 14.0f;   // clamp snapshot jumps / teleports
+            playerAnimSpeed[idx] += (inst - playerAnimSpeed[idx]) * 0.25f;
+        }
+        playerAnimPrevPos[idx] = p->pos;
+        playerAnimSeen[idx] = true;
+        float spd = playerAnimSpeed[idx];
+
+        // Reviving a teammate? reviverIdx isn't serialized, so infer it from
+        // proximity to a downed teammate that's being revived (reviveAsTarget).
+        bool reviving = false;
+        if (p->alive && !p->downed) {
+            for (int j = 0; j < NET_MAX_PLAYERS; j++) {
+                if (j == idx || !players[j].active || !players[j].downed) continue;
+                if (players[j].reviveAsTarget <= 0.01f) continue;
+                float dx = players[j].pos.x - p->pos.x;
+                float dz = players[j].pos.z - p->pos.z;
+                if (dx*dx + dz*dz < 2.2f*2.2f) { reviving = true; break; }
+            }
+        }
+
+        int cs = p->currentSlot;
+        bool reloading = (cs >= 0 && cs < INV_SLOTS &&
+                          p->inventory[cs].reloadTimer > 0.0f);
+
+        // Clip selection, highest priority first.
+        if (!p->alive) {
+            if (st->clip != pmDeath && pmDeath >= 0) Anim_Play(st, pmDeath, false, 1.0f);
+        } else if (p->downed) {
+            if (st->clip != pmDowned && pmDowned >= 0) Anim_Play(st, pmDowned, true, 1.0f);
+        } else if (reviving && pmRevive >= 0) {
+            if (st->clip != pmRevive) Anim_Play(st, pmRevive, true, 1.0f);
+        } else if (reloading && pmReload >= 0) {
+            // Scale playback so the clip fits the (possibly Speed-Cola'd) timer.
+            float rt = p->inventory[cs].reloadTimer;
+            float cd = Anim_ClipDuration(&playerAnim, pmReload);
+            float ps = (rt > 0.05f && cd > 0.0f) ? Clamp(cd / rt, 0.4f, 3.0f) : 1.0f;
+            if (st->clip != pmReload) Anim_Play(st, pmReload, false, ps);
+            else st->speed = ps;
+        } else if (p->fireHeld && pmFire >= 0) {
+            // fireHeld is only present on the host (not in the snapshot), so on
+            // clients this branch simply never fires — harmless.
+            if (st->clip != pmFire || st->finished) Anim_Play(st, pmFire, false, 1.0f);
+        } else if (spd > 8.5f && pmRun >= 0) {
+            float ps = Clamp(spd / 9.5f, 0.7f, 1.6f);
+            if (st->clip != pmRun) Anim_Play(st, pmRun, true, ps); else st->speed = ps;
+        } else if (spd > 0.8f && pmWalk >= 0) {
+            float ps = Clamp(spd / 5.0f, 0.6f, 2.2f);
+            if (st->clip != pmWalk) Anim_Play(st, pmWalk, true, ps); else st->speed = ps;
+        } else {
+            if (st->clip != pmIdle) Anim_Play(st, pmIdle, true, 1.0f);
+        }
+
+        Anim_Update(&playerAnim, st, dt);
+
+        // Model origin is at the feet; authored +Y-in-Blender → -Z forward in
+        // raylib, so the camera-yaw mapping matches the OBJ path below. The
+        // downed/death clips lay the body down themselves (no tilt hack).
+        Vector3 feet = { p->pos.x, 0.0f, p->pos.z };
+        float yawDeg = -p->yaw * RAD2DEG;
+        // Team-colour wash: lighten toward white so the soldier keeps its
+        // material detail while still reading as the player's team colour.
+        // Dead/downed keep the existing grey/red `c`.
+        Color tint = c;
+        if (p->alive && !p->downed)
+            tint = (Color){ (unsigned char)(128 + c.r/2),
+                            (unsigned char)(128 + c.g/2),
+                            (unsigned char)(128 + c.b/2), 255 };
+        Anim_Draw(&playerAnim, st, feet, yawDeg, 1.0f, tint);
+        return;
+    }
 
     if (propModelLoaded[PROP_PLAYER_M]) {
         // Model origin is at the feet — same convention as the zombie.

@@ -37,20 +37,29 @@ connectivity auditor). Remaining work is authoring + per-entity wiring:
         OBJ + procedural path. Shows in-game; verified via
         `--screenshot-viewmodels`.
   - [ ] Roll the vm clip set across SMG / shotgun / rifle / raygun.
-- [~] **Player third-person model** (`data/models/player.glb`) — authored +
-      validated. Rig-first soldier on the shared 17-bone humanoid family
+- [x] **Player third-person model** (`data/models/player.glb`) — authored +
+      validated + WIRED. Rig-first soldier on the shared 17-bone humanoid family
       (same bone names as `zombie.glb`): skin-modifier stick-figure body in
       A-pose facing +Y (olive fatigues), with helmet/visor/jaw/plate-vest/
       shoulder-straps/collar/belt/pouches/boots/gloves as separate single-island
       parts rigidly bound to one bone each. 1840 tris, 9 material zones, audit
       PASS. All 8 clips — `idle`/`walk`/`run`/`fire`/`reload`/`revive`/`downed`/
       `death` — in-place, no root motion; ground clips lower the `pelvis` (root)
-      to the floor. Validated via `--anim-test player.glb` (deforms, lit,
-      correct +Y facing). **Still TODO: wire it into `render.c:DrawOtherPlayer`**
-      — load the AnimModel, keep a render-local `AnimState[MAX_PLAYERS]`, map a
-      remote player's state to a clip (moving→walk/run, downed→downed,
-      reviving→revive, dead→death, fire/reload edges, else idle), and
-      `Anim_Draw` instead of the `player_m.obj` cube. Only visible in co-op.
+      to the floor. Validated via `--anim-test player.glb`.
+  - [x] **Wired into `render.c:DrawOtherPlayer`** — prefers the rigged model
+        over `PROP_PLAYER_M`/cubes; render-local `AnimState[NET_MAX_PLAYERS]`
+        (not serialized). Clip reconstructed from the synced fields: locomotion
+        from a smoothed pos-delta speed (>8.5 m/s → `run`, >0.8 → `walk`, else
+        `idle`, playback scaled by speed), `reload` from `inventory.reloadTimer`
+        (playback scaled to fit Speed Cola), `downed`/`death` from `downed`/
+        `!alive`, `revive` inferred from proximity to a downed teammate with
+        `reviveAsTarget>0` (reviverIdx isn't serialized), `fire` from `fireHeld`
+        (host-only). Team-colour wash lightened toward white so the soldier
+        keeps material detail. Loaded via `Render_LoadPlayerAnim()` in `main.c`.
+  - [x] **`--screenshot-coop`** debug mode (mirrors `--screenshot-viewmodels`):
+        spawns dummy teammates in locomotion/reload/downed/dead/revive states
+        and writes `coop_*.png` so the third-person model can be verified
+        without a real multiplayer game.
 - [ ] **Machine polish** (PaP chamber, mystery-box lid, perk dispense) —
       optional, low priority; currently code/shader-faked.
 

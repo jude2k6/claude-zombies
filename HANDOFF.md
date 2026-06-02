@@ -16,6 +16,26 @@ Repo: `git@github.com:jude2k6/claude-zombies.git` · branch: `main`.
 
 Latest pass (2026-06-02) — all committed to `main`, not pushed:
 
+- **Player third-person model authored AND wired (`data/models/player.glb`).**
+  Rig-first soldier on the shared 17-bone humanoid family (same bone names as
+  `zombie.glb` — `pelvis/spine/chest/neck/head`, `upperarm/forearm/hand.{L,R}`,
+  `thigh/shin/foot.{L,R}`): a skin-modifier stick-figure body (single island,
+  auto-weighted) in A-pose facing +Y, plus helmet/visor/jaw/plate-vest/shoulder-
+  straps/collar/belt/pouches/boots/gloves as separate single-island boxes each
+  rigidly bound to one bone. 1840 tris, 9 material zones, connectivity audit
+  PASS. 8 in-place clips (no root motion): `idle`/`walk`/`run`/`fire`/`reload`/
+  `revive`/`downed`/`death` — the ground clips drop the `pelvis` (root bone) to
+  the floor (verified min-Z ≈ 0). `render.c:DrawOtherPlayer` now prefers it over
+  `PROP_PLAYER_M`/cubes: render-local `AnimState[NET_MAX_PLAYERS]` (NOT
+  serialized — same precedent as zombie/viewmodel anim), clip reconstructed from
+  the synced player fields (smoothed pos-delta speed → walk/run/idle, `reload`
+  from `inventory.reloadTimer`, `downed`/`death` from `downed`/`!alive`, `revive`
+  inferred from proximity to a downed teammate with `reviveAsTarget>0`, `fire`
+  from host-only `fireHeld`). Team colour is a *lightened* wash (toward white) so
+  the soldier keeps its material detail. Loaded by `Render_LoadPlayerAnim()` in
+  `main.c` boot (after `Assets_Load`). Verify via the new
+  **`./build/shooter --screenshot-coop`** mode (writes `coop_*.png` of dummy
+  teammates in every state — no real MP needed). See the player-model gotcha.
 - **M1911 viewmodel wired into first person — shows in-game.**
   `render.c:DrawPistolViewmodelGLB` loads the shared `pistolVM` AnimModel
   (skinned shader from `Assets_Load`; `Render_LoadPistolVM` in `main.c` boot +
@@ -498,6 +518,32 @@ data/
     purely by render-side proximity. Wiring a real death window (keep the
     corpse ~1.3s while the clip plays) + a sim attack flag is the natural
     follow-up; the clips already exist.
+- **Rigged player third-person model (`player.glb`, 2026-06-02).** Built with
+  the same skin-figure-body + rigid-detail-parts technique as the zombie, on the
+  shared 17-bone humanoid skeleton (so the family's bone names/hierarchy match).
+  Wiring notes for `render.c:DrawOtherPlayer`:
+  - **Only OTHER players use it** — you never see your own body (that's the
+    viewmodel), so the draw loop skips `localPlayerIdx`. The `AnimState[]` is
+    render-local (not in `SerPlayer`); no protocol bump.
+  - **Clip is reconstructed from synced fields**, because the things you'd want
+    aren't all serialized. Locomotion uses a *smoothed* horizontal speed from
+    the per-frame `pos` delta (snapshots are 20 Hz but we render at 60 fps, so a
+    raw delta spikes on snapshot frames — an EMA of `dist/dt`, clamped, recovers
+    the true average). `reload` reads `inventory[currentSlot].reloadTimer` (it
+    IS serialized). `revive` is INFERRED: `reviverIdx` isn't serialized, so it
+    fires when a downed teammate with `reviveAsTarget>0` is within ~2.2 m. `fire`
+    keys off `fireHeld`, which is host-only (absent from the snapshot) — so it
+    just never plays on clients. Harmless, but if you want clients to see
+    teammates fire, add a fire flag to `SerPlayer` (protocol bump).
+  - **Ground clips own the lay-down.** `downed`/`death` lower the `pelvis` (root)
+    to the floor in the animation itself, so the draw passes `feet.y=0` with NO
+    tilt hack (unlike the old OBJ path's Y-squash). Facing is `-p->yaw*RAD2DEG`,
+    same as the OBJ path (the glb is +Y-in-Blender → -Z-forward in raylib).
+  - **Team colour is a *lightened* wash** (`128 + c/2` toward white), not the raw
+    team colour — a full-saturation multiply would flatten the soldier's
+    materials. Dead/downed keep the existing grey/red `c`.
+  - **Verify without MP:** `./build/shooter --screenshot-coop` spawns dummy
+    teammates in locomotion/reload/downed/dead/revive states → `coop_*.png`.
 - **CoD-style balance pass (2026-06-02).** Numbers are tuned to classic
   Treyarch zombies, so don't "simplify" them back:
   - **Zombie HP** (`entities.c::Enemies_RoundHP`): `150 + 100*(r-1)` through

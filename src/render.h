@@ -9,6 +9,8 @@ void Render_LoadZombieAnim(void);
 void Render_UnloadZombieAnim(void);
 void Render_LoadPistolVM(void);
 void Render_UnloadPistolVM(void);
+void Render_LoadPlayerAnim(void);
+void Render_UnloadPlayerAnim(void);
 
 void Render_World3D(Camera camera);
 void Render_WorldLabels(Camera camera, int sw, int sh, Player *me);

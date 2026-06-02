@@ -247,6 +247,96 @@ int main(int argc, char **argv) {
         return 0;
     }
 
+    // CLI: `--screenshot-coop` spawns dummy teammates in a range of states and
+    // renders them through DrawOtherPlayer, writing coop_*.png — a standalone
+    // way to verify the rigged third-person player.glb (state -> clip mapping,
+    // locomotion, downed/dead/revive) without needing a real multiplayer game.
+    if (argc >= 2 && strcmp(argv[1], "--screenshot-coop") == 0) {
+        SetTraceLogLevel(LOG_WARNING);
+        SetConfigFlags(FLAG_MSAA_4X_HINT);
+        InitWindow(1280, 720, "Coop player screenshot");
+        SetTargetFPS(60);   // realistic GetFrameTime() so the speed EMA works
+        Weapons_Load();
+        Assets_Load();
+        Assets_ApplyWorldShader();
+        Render_LoadPlayerAnim();
+        Level_Build();
+
+        localPlayerIdx = 0;
+        for (int i = 0; i < NET_MAX_PLAYERS; i++) memset(&players[i], 0, sizeof players[i]);
+        players[0].active = true; players[0].alive = true;
+        players[0].pos = (Vector3){ 0, PLAYER_EYE, 9 };  // not drawn (local)
+
+        // Camera looks down -Z at the teammates clustered near the origin.
+        Camera cam = {
+            .position   = (Vector3){ 0, 1.9f, 6.2f },
+            .target     = (Vector3){ 0, 1.0f, 0 },
+            .up         = (Vector3){ 0, 1, 0 },
+            .fovy       = 55.0f,
+            .projection = CAMERA_PERSPECTIVE,
+        };
+
+        // Each scene: configure slots 1..3, run `frames` frames (advancing the
+        // movers), then screenshot. Teammates face +Z (toward camera): yaw=PI.
+        const float YAW = PI;
+        struct { const char *name; int frames; } scenes[] = {
+            { "coop_locomotion", 30 }, { "coop_states", 45 }, { "coop_revive", 45 },
+        };
+        for (int s = 0; s < 3; s++) {
+            // reset all teammate slots inactive each scene
+            for (int i = 1; i < NET_MAX_PLAYERS; i++) memset(&players[i], 0, sizeof players[i]);
+            for (int f = 0; f < scenes[s].frames; f++) {
+                float dt = GetFrameTime(); if (dt <= 0) dt = 1.0f/60.0f;
+                if (s == 0) {
+                    // walker (slot1), runner (slot2), idler (slot3)
+                    if (f == 0) {
+                        players[1].active=players[1].alive=true; players[1].yaw=YAW;
+                        players[1].pos=(Vector3){-2.2f,PLAYER_EYE,0};
+                        players[2].active=players[2].alive=true; players[2].yaw=YAW;
+                        players[2].pos=(Vector3){-3.6f,PLAYER_EYE,1.4f};
+                        players[3].active=players[3].alive=true; players[3].yaw=YAW;
+                        players[3].pos=(Vector3){2.2f,PLAYER_EYE,0.4f};
+                    }
+                    players[1].pos.x += 7.0f * dt;    // walk speed
+                    players[2].pos.x += 11.0f * dt;   // sprint speed
+                } else if (s == 1) {
+                    // reloading (slot1), downed (slot2), dead (slot3)
+                    if (f == 0) {
+                        players[1].active=players[1].alive=true; players[1].yaw=YAW;
+                        players[1].pos=(Vector3){-2.4f,PLAYER_EYE,0};
+                        players[1].inventory[0].owned=true;
+                        players[2].active=players[2].alive=true; players[2].downed=true;
+                        players[2].yaw=YAW; players[2].pos=(Vector3){0,PLAYER_EYE,0.3f};
+                        players[3].active=true; players[3].alive=false;
+                        players[3].yaw=YAW; players[3].pos=(Vector3){2.4f,PLAYER_EYE,0.3f};
+                    }
+                    players[1].inventory[0].reloadTimer = 1.5f;  // hold in reload
+                } else {
+                    // reviver (slot1) kneeling over a downed teammate (slot2)
+                    if (f == 0) {
+                        players[1].active=players[1].alive=true; players[1].yaw=YAW;
+                        players[1].pos=(Vector3){-0.8f,PLAYER_EYE,0};
+                        players[2].active=players[2].alive=true; players[2].downed=true;
+                        players[2].yaw=YAW+PI*0.5f; players[2].pos=(Vector3){0.7f,PLAYER_EYE,0.2f};
+                    }
+                    players[2].reviveAsTarget = 2.0f;  // being revived
+                }
+                BeginDrawing();
+                ClearBackground((Color){ 60, 65, 75, 255 });
+                Render_World3D(cam);
+                DrawText(scenes[s].name, 20, 20, 30, (Color){240,240,240,255});
+                EndDrawing();
+            }
+            char fn[64]; snprintf(fn, sizeof fn, "%s.png", scenes[s].name);
+            TakeScreenshot(fn);
+            fprintf(stderr, "wrote %s\n", fn);
+        }
+        Render_UnloadPlayerAnim();
+        Assets_Unload(); Weapons_Unload();
+        CloseWindow();
+        return 0;
+    }
+
     // CLI: `--anim-test <file.glb> [clip]` loads a skinned glTF model through
     // the animation pipeline and writes a strip of PNGs sampling the clip
     // (anim_test_0..3.png) so skinning + lighting can be verified without the
@@ -346,6 +436,7 @@ int main(int argc, char **argv) {
     Assets_Load();
     Render_LoadZombieAnim();   // shared rigged zombie.glb (skinned shader from Assets_Load)
     Render_LoadPistolVM();     // rigged M1911 first-person viewmodel
+    Render_LoadPlayerAnim();   // rigged third-person soldier for co-op teammates
     Settings_Load();
     Decals_Init();
     if (fullscreen && !IsWindowFullscreen()) Menu_ToggleFullscreenSafe();
@@ -581,6 +672,7 @@ int main(int argc, char **argv) {
     Settings_Save();
     Render_UnloadZombieAnim();
     Render_UnloadPistolVM();
+    Render_UnloadPlayerAnim();
     Assets_Unload();
     Weapons_Unload();
     Audio_Shutdown();

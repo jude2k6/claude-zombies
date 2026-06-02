@@ -21,6 +21,56 @@ and a per-folder data-driven weapon system (`.weapon` files). All 5
 weapons were re-authored from scratch in Blender (replacing the
 Quaternius set). Build clean, smoke-tested.
 
+### Today's session (2026-06-01, later pass)
+
+- **Dynamic crosshair** — `hud.c` got a COD-style 4-tick reticle
+  that blooms with weapon spread (`spreadDeg`), sprintBlend, and a
+  per-shot kick (scaled by `spreadDeg` + `recoilPitch`). Smoothed
+  with a framerate-independent exp lerp at ~18 Hz; kick decays at
+  36 px/s. Collapses to a dot in ADS. State lives in
+  `hudCrossGap`/`hudCrossKick`/`hudCrossLastShots` statics.
+- **Equipment system** — `Throwable` entity (`entities.{c,h}` +
+  `MAX_THROWABLES=16` + serialized in snapshot) with gravity, XZ
+  wall/obstacle bounce via `Level_ResolveXZ` + per-axis velocity
+  damp, floor bounce + settle. Two kinds:
+  - `TH_FRAG`: 2 s fuse → 260 dmg peak, 5 m radius, linear falloff.
+    Damages the local player at 0.40× (friendly fire by proximity),
+    kicks camera + rumble.
+  - `TH_STUN`: 2 s fuse → 5.5 m radius, sets `Enemy.stunTimer`
+    = 4.5 s. While > 0, speed × 0.20 + bite suppressed; cyan body
+    tint in `DrawEnemy`.
+- **New bindings** — `BA_THROW_LETHAL` (kbd G, pad DPad-Up) and
+  `BA_THROW_TACTICAL` (kbd H, pad DPad-Down). Persisted to
+  `settings.cfg`, listed in `Menu_DrawBindings`, reset by RESET
+  DEFAULTS button.
+- **Player loadout** — `Player.lethals` / `Player.tacticals` int
+  counts; `STARTING_LETHALS`/`STARTING_TACTICALS` = 2, `MAX_*` = 4.
+  `Player_GiveStartingPistol` seeds the counts. Serialized in
+  `SerPlayer` as uint8_t (clamped).
+- **HUD equipment block** — `DrawEquipmentIcons` in `hud.c` renders
+  a pair of badges bottom-right of the screen near the perks,
+  showing G/H key hints, count, and a category-coloured icon
+  (olive disc for frag, cyan band for stun). Greyed when empty.
+- **HUD weapon category tag** — `WeaponCategory` is now read at
+  the HUD: a small `PRIMARY` / `SPECIAL` (etc.) tag sits above
+  the current weapon name in the bottom-right block.
+- **Splash damage on bullet impact** — `WeaponDef.splashRadius` +
+  `splashDamage`; `.weapon` file directive `splash R D`. After a
+  bullet's direct hit, `Bullets_Update` iterates all live enemies,
+  computes a linear-falloff damage at hit point, awards points to
+  the shooter, drops blood decals. Direct-hit enemy is skipped to
+  avoid double-counting; headshot ×2 does NOT apply to splash.
+  Raygun gets 3 m / 70 dmg by default in `data/weapons/raygun/raygun.weapon`.
+- **Protocol bump** — `NET_PROTO_VERSION` = **8**. Added
+  `SerThrowable` (pos / vel / fuse / kind / owner), serialized
+  list in the snapshot; added `SerPlayer.lethals/tacticals` and
+  `SerEnemy.stunTimer`; added `ACT_THROW_LETHAL` / `ACT_THROW_TACTICAL`
+  action codes for clients.
+- **Melee-as-slot deferred** — TODO #6 mentions a bowie/bat slot to
+  replace V-button melee. Implementing that fully would mean a 3rd
+  inventory slot + swap UI + wallbuy plumbing. Left in place for a
+  follow-up pass; V-button melee is unchanged and still good.
+
 ### Today's session (2026-06-01, evening pass)
 
 - **Zombie type AI** (`src/entities.c`):
@@ -195,8 +245,8 @@ are new), `CMakeLists.txt`, `data/maps/*.map`, and new files under
 `data/models/` + `data/shaders/`. `TODO.md` and `HANDOFF.md` are also
 updated.
 
-`NET_PROTO_VERSION` is **7** (`src/net.h`). Bump it whenever you change
-anything in `SerPlayer` / `SerEnemy` / `PktSnapshotHeader`.
+`NET_PROTO_VERSION` is **8** (`src/net.h`). Bump it whenever you change
+anything in `SerPlayer` / `SerEnemy` / `SerThrowable` / `PktSnapshotHeader`.
 
 ## Build / run
 
@@ -309,6 +359,17 @@ data/
   buffer. **Always export with `export_triangulated_mesh=True`** —
   this fans caps into triangles and is safe regardless of cylinder
   resolution.
+- **Two independent weapon scales (2026-06-02).** The 5 weapon OBJs are
+  authored at true real-world size (pistol 0.54 m … rifle 1.55 m long).
+  `weaponTune.scale` (`model_scale` in `.weapon`) is **only** the
+  first-person viewmodel framing knob (`render.c` viewmodel base ×
+  `weaponTune.scale`, base currently 0.05). World draws — wall-buy, Mystery
+  Box, PaP floater — go through `DrawWeaponDisplay`, which now draws at
+  literal world scale (1.0 = life-size) and ignores `weaponTune.scale`.
+  Don't reintroduce the `displayScale * weaponTune.scale` multiply: that was
+  making world guns ~10× too big while the viewmodel stayed small. The
+  viewmodel is also drawn under flattened lighting (low sun / high ambient,
+  restored after) so its facets don't swing dark↔bright as the camera turns.
 - **Weapon model sizing.** The Quaternius weapon OBJs we used to ship
   are authored at ~10 units long (1 unit ≈ 1 inch). Anything authored
   in metric metres (typical Blender default) needs `model_scale` in
@@ -336,8 +397,9 @@ data/
 - **Round 1 skip** — was a real bug, fixed by initializing
   `roundNum=0; gamePhase=GS_ROUND_BREAK` so `Game_Tick` rolls it into
   `Game_StartRound(1)`. Don't regress.
-- **Pre-game commit policy**: ask the user before committing. They've
-  consistently wanted to test runs in person before shipping.
+- **Commit policy** (updated 2026-06-02): always commit completed work
+  to `main`; never `git push` — the user pushes themselves. Don't ask
+  before committing. Terse subject + bulleted body.
 
 ## Controller bindings model
 

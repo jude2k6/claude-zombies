@@ -283,12 +283,15 @@ static void DrawWindows(void) {
 }
 
 // Draw a weapon at pos with given yaw (degrees). If a Model is loaded for the
-// weapon, use it; otherwise fall back to the old colored cube. `displayScale`
-// is multiplied with the per-weapon tune scale so callers can ask for "wall
-// buy" vs "PaP floater" sizes independently of pack-authored size.
+// weapon, use it; otherwise fall back to the old colored cube. The weapon OBJs
+// are authored at true real-world size, so `displayScale` is the literal world
+// scale: 1.0 = life-size. It is deliberately NOT multiplied by
+// `weaponTune.scale` — that knob is the first-person viewmodel framing scale
+// (tuned for the gun held close to the camera) and has no business sizing the
+// gun in the world, where it was making wall-buy/box guns ~10× too big.
 static void DrawWeaponDisplay(int weaponIdx, Vector3 pos, float yawDeg, float displayScale) {
     if (weaponIdx >= 0 && weaponIdx < W_COUNT && weaponModelLoaded[weaponIdx]) {
-        float s = displayScale * weaponTune[weaponIdx].scale;
+        float s = displayScale;
         DrawModelEx(weaponModels[weaponIdx], pos,
                     (Vector3){0, 1, 0},
                     yawDeg + weaponTune[weaponIdx].yawDeg,
@@ -331,7 +334,7 @@ static void DrawWallBuys(void) {
                 wb->pos.y,
                 wb->pos.z + wb->normal.z * 0.18f,
             };
-            DrawWeaponDisplay(wb->weaponIdx, p, yaw, 0.35f);
+            DrawWeaponDisplay(wb->weaponIdx, p, yaw, 1.0f);  // life-size on the mount
         }
     }
 }
@@ -395,7 +398,7 @@ static void DrawPaP(void) {
         float spin = pap.bob * 4.0f;
         Vector3 weaponPos = { pap.pos.x, 2.6f + sinf(pap.bob*2) * 0.15f, pap.pos.z };
         int w = players[pap.ownerPlayer].inventory[pap.slotInProgress].weaponIdx;
-        DrawWeaponDisplay(w, weaponPos, spin * 60.0f, 0.45f);
+        DrawWeaponDisplay(w, weaponPos, spin * 60.0f, 1.0f);
     }
 }
 
@@ -410,6 +413,8 @@ static void DrawEnemy(Enemy *e) {
     bool runnerWindup = (e->type == ZT_RUNNER &&
                          e->specialTimer > 0.55f && e->specialTimer <= 0.75f);
     if (runnerWindup) hpTint = (Color){255, 90, 70, 255};
+    bool stunned = (e->stunTimer > 0);
+    if (stunned && !runnerWindup) hpTint = (Color){120, 180, 230, 255};
 
     // Per-type silhouette scale. Runner is leaner & shorter, crawler is
     // squished low to the ground (no head), boss is hulking and accented.
@@ -573,7 +578,30 @@ static void DrawMysteryBox(void) {
 
     if (mbox.state == MBOX_ROLLING || mbox.state == MBOX_WAITING) {
         Vector3 wp = { b.x, b.y + 1.4f + sinf(mbox.bob * 2.0f) * 0.1f, b.z };
-        DrawWeaponDisplay(mbox.showingWeapon, wp, mbox.bob * 60.0f, 0.4f);
+        DrawWeaponDisplay(mbox.showingWeapon, wp, mbox.bob * 60.0f, 1.0f);
+    }
+}
+
+static void DrawThrowables(void) {
+    for (int i = 0; i < MAX_THROWABLES; i++) {
+        Throwable *t = &throwables[i];
+        if (!t->alive) continue;
+        // Frag: dark green metal ball with a glowing fuse cap; faster pulse
+        // as the fuse runs down so the throw cooks the player's eyes.
+        // Stun: matte black puck with cyan band.
+        if (t->kind == TH_FRAG) {
+            float urge = (FRAG_FUSE - t->fuse) / FRAG_FUSE;   // 0..1
+            if (urge < 0.0f) urge = 0.0f; if (urge > 1.0f) urge = 1.0f;
+            float pulse = 0.5f + 0.5f * sinf((float)GetTime() * (6.0f + 18.0f * urge));
+            unsigned char gr = (unsigned char)(160 + (unsigned)(95 * pulse * urge));
+            DrawSphere(t->pos, THROWABLE_RADIUS * 1.2f, (Color){40, 60, 40, 255});
+            DrawSphere((Vector3){t->pos.x, t->pos.y + 0.10f, t->pos.z},
+                       THROWABLE_RADIUS * 0.55f, (Color){gr, 80, 30, 255});
+        } else {
+            DrawSphere(t->pos, THROWABLE_RADIUS * 1.2f, (Color){25, 25, 30, 255});
+            DrawSphere((Vector3){t->pos.x, t->pos.y + 0.08f, t->pos.z},
+                       THROWABLE_RADIUS * 0.5f, (Color){80, 200, 240, 255});
+        }
     }
 }
 
@@ -704,6 +732,7 @@ void Render_World3D(Camera camera) {
         DrawPaP();
         DrawMysteryBox();
         DrawPowerUps();
+        DrawThrowables();
         for (int i = 0; i < NET_MAX_PLAYERS; i++) {
             if (i == localPlayerIdx) continue;
             DrawOtherPlayer(i);
@@ -773,7 +802,10 @@ static void DrawFirstPersonViewmodel(Camera camera) {
     Vector3 right = Vector3Normalize(Vector3CrossProduct(fwd, camera.up));
     Vector3 up    = Vector3CrossProduct(right, fwd);
 
-    float s = 0.025f * weaponTune[wi].scale;
+    // Viewmodel framing scale. The per-weapon `weaponTune.scale` knob is the
+    // relative size between guns; this base sets the overall in-hand size.
+    // (World pickups/wall-buys are sized separately in DrawWeaponDisplay.)
+    float s = 0.05f * weaponTune[wi].scale;
     Vector3 anchor = camera.position;
     anchor = Vector3Add(anchor, Vector3Scale(fwd,    0.55f - swap_back + reload_fwd));
     anchor = Vector3Add(anchor, Vector3Scale(right,  0.35f));
@@ -818,7 +850,27 @@ static void DrawFirstPersonViewmodel(Camera camera) {
 
     Model m = weaponModels[wi];
     m.transform = tx;
-    DrawModel(m, (Vector3){0,0,0}, 1.0f, WHITE);
+
+    // The world shader lights every fragment from a fixed *world* direction
+    // using a screen-space-derivative normal. The viewmodel rotates with the
+    // camera, so that makes its facets swing between lit and near-black as the
+    // player looks around — "colour all over the place". Draw it under near-
+    // flat lighting (tiny directional term for form, high ambient) so the gun
+    // shows its authored material colours consistently, then restore the world
+    // lighting for everything drawn afterwards.
+    if (worldShaderLoaded) {
+        Vector3 flatSun = { 0.12f, 0.13f, 0.16f };
+        Vector3 flatAmb = { 0.90f, 0.91f, 0.96f };
+        rlDrawRenderBatchActive();
+        SetShaderValue(worldShader, worldShader_sunColorLoc,     &flatSun, SHADER_UNIFORM_VEC3);
+        SetShaderValue(worldShader, worldShader_ambientColorLoc, &flatAmb, SHADER_UNIFORM_VEC3);
+        DrawModel(m, (Vector3){0,0,0}, 1.0f, WHITE);
+        rlDrawRenderBatchActive();
+        SetShaderValue(worldShader, worldShader_sunColorLoc,     &sunColor,     SHADER_UNIFORM_VEC3);
+        SetShaderValue(worldShader, worldShader_ambientColorLoc, &ambientColor, SHADER_UNIFORM_VEC3);
+    } else {
+        DrawModel(m, (Vector3){0,0,0}, 1.0f, WHITE);
+    }
 }
 
 void Render_FirstPersonViewmodel(Camera camera, Player *me) {

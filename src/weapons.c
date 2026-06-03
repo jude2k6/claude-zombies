@@ -86,11 +86,7 @@ Model weaponModels[W_COUNT];
 bool  weaponModelLoaded[W_COUNT];
 
 WeaponModelTune weaponTune[W_COUNT] = {
-    // M1911 uses the gun-only viewmodel path (no arms). scale/yaw come from
-    // pistol.weapon; the offset is set here (NOT via model_offset in the
-    // .weapon — parsing that extra line perturbs the heap and trips raylib's
-    // OBJ no-UV overflow). offset = right/up/fwd nudge in metres.
-    [W_PISTOL]  = { .scale = 1.2f, .yawDeg = 90.0f, .offset = {0.05f, 0.09f, 0} },
+    [W_PISTOL]  = { .scale = 1.2f, .yawDeg = 90.0f, .offset = {0, 0, 0} },
     [W_SMG]     = { .scale = 1.0f, .yawDeg =  0.0f, .offset = {0, 0, 0} },
     [W_SHOTGUN] = { .scale = 1.0f, .yawDeg =  0.0f, .offset = {0, 0, 0} },
     [W_RIFLE]   = { .scale = 1.0f, .yawDeg =  0.0f, .offset = {0, 0, 0} },

@@ -15,6 +15,10 @@ FetchContent_Declare(
     GIT_REPOSITORY https://github.com/raysan5/raylib.git
     GIT_TAG        5.5
     GIT_PROGRESS   TRUE
+    # Guard LoadOBJ's texcoord/normal reads for UV-less OBJs (all of ours).
+    # Without this, model load is heap-layout-dependent UB that crashes when
+    # e.g. a .weapon file gains a line. See cmake/patch_raylib_obj.cmake.
+    PATCH_COMMAND  ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/patch_raylib_obj.cmake
 )
 FetchContent_MakeAvailable(raylib)
 

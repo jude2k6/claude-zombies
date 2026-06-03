@@ -30,10 +30,30 @@ the shared arms path (pos only, on top of its sprint clip). `Player.moveBlend`
 (`weapons.c:Weapon_Fire` adds `moveBlend*1.2 + sprintBlend*3.5` deg of spread,
 ×0.25 in ADS). MP caveat: moveBlend/sprintBlend are local-only, so remote
 players' shots aren't movement-penalised on the host (same caveat as recoil).
-The pistol viewmodel is framed by `pistol.weapon` `model_scale 35` + `model_yaw
-28`; its `offset` is set in the **compiled `weaponTune[W_PISTOL]` default**, NOT
-via a `model_offset` line — adding that line to the `.weapon` deterministically
-trips raylib's OBJ no-UV heap overflow and crashes the loader at boot.
+The pistol viewmodel is framed entirely from `pistol.weapon` (`model_scale 35`,
+`model_yaw 28`, `model_offset 0.05 0.09 0.0`).
+
+**raylib OBJ loader fixed at the root (2026-06-03).** Adding that `model_offset`
+line used to crash the OBJ loader at boot. The cause was NOT model_offset — it
+was two latent bugs in raylib 5.5's `LoadOBJ`, and parsing one extra `.weapon`
+line just shifted the heap enough to detonate them. Both are now patched durably
+via **`cmake/patch_raylib_obj.cmake`**, wired as a `PATCH_COMMAND` on the raylib
+`FetchContent_Declare` (idempotent; cross-platform; runs on fresh fetches). The
+two bugs (found with an ASan build):
+  1. **tinyobj face-buffer overflow (the actual crash).** `parseLine` reads an
+     `f` line's verts into a fixed `f[16]` stack array with no bounds check,
+     *before* triangulating. `pistol.obj` (20-vert faces) and `shotgun.obj`
+     (24-vert cap n-gons) overflow it. Fix: raise `TINYOBJ_MAX_FACES_PER_F_LINE`
+     16 → 256. This means **the "always export triangulated" rule is no longer a
+     crash-safety requirement** (still fine to triangulate, but un-triangulated
+     n-gons up to ~85 verts now load + triangulate cleanly).
+  2. **UV-less texcoord/normal read.** `LoadOBJ` reads
+     `objAttributes.texcoords[vt_idx*2]` with no `vt` data (vt_idx = 0x80000000
+     → wild index). All our OBJs are UV-less. Fix: guard the read, zero-fill
+     when absent. So **don't add UVs to "fix" anything, and ASan can now be
+     enabled** (this was the blocker noted in the old gotcha).
+If you bump the raylib `GIT_TAG`, re-check the patch still matches (the script
+fails loudly with a clear message if `LoadOBJ`/tinyobj sources moved).
 
 Prior pass (2026-06-03) — **uncommitted in the working tree** (new
 `data/models/arms_vm.glb` + edits to `src/{anim.{c,h},render.c,render.h,main.c}`):
@@ -498,19 +518,20 @@ data/
   - For MTL `Kd` to carry, the material must `use_nodes = True` and
     the colour set on `Principled BSDF → Base Color`. Plain
     `material.diffuse_color` is viewport-only.
-- **raylib 5.5 OBJ loader has a no-UV bug** (ASan flags
-  `rmodels.c:4397` heap-buffer-overflow when an OBJ has no `vt`
-  lines). All our OBJs have no UVs and trip it; the read goes to
-  garbage memory but the resulting texcoords are unused (none of our
-  materials sample textures). Don't try to add UV maps to "fix" it —
-  the bug is on raylib's side. ASan can't be enabled until they patch
-  it; build without sanitizers.
-- **raylib 5.5 OBJ loader ALSO SEGVs on n-gons > 20 vertices**
-  (separate bug, discovered 2026-06-01 evening). Cylinder caps with
-  `vertices ≥ 24` export as one n-gon and overflow tinyobj's face
-  buffer. **Always export with `export_triangulated_mesh=True`** —
-  this fans caps into triangles and is safe regardless of cylinder
-  resolution.
+- **raylib 5.5 OBJ loader — both known bugs are now PATCHED** (2026-06-03)
+  via `cmake/patch_raylib_obj.cmake`, applied as a `PATCH_COMMAND` on the
+  raylib `FetchContent_Declare`. Historic context (the patch makes both moot):
+  - *No-UV read:* `LoadOBJ` read `texcoords[vt_idx*2]` for OBJs with no `vt`
+    (all of ours) → wild OOB read. Now guarded + zero-filled. **You may add
+    sanitizers now** (the old "ASan can't be enabled" blocker is gone), and
+    don't bother adding UVs to "fix" anything.
+  - *N-gon overflow (was the crash for `model_offset`):* tinyobj's `parseLine`
+    read an `f` line into a fixed `f[16]` before triangulating; our cap n-gons
+    (pistol 20-vert, shotgun 24-vert) overflowed it. Limit raised to 256.
+    `export_triangulated_mesh=True` is still good hygiene but **no longer
+    required for crash-safety** — un-triangulated n-gons load fine.
+  - If you bump raylib's `GIT_TAG`, re-verify the patch matches (the script
+    aborts loudly with a clear message if the upstream source moved).
 - **Skeletal animation pipeline (2026-06-02).** Engine support for animated
   models is in; only authored animated assets are missing. Key facts:
   - Animations need **glTF (`.glb`)**, NOT OBJ — OBJ can't carry a skeleton.

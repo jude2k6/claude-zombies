@@ -12,9 +12,57 @@ and **enet 1.3.18** (all via CMake `FetchContent`). Host-authoritative
 
 Repo: `git@github.com:jude2k6/claude-zombies.git` · branch: `main`.
 
-## Current state (2026-06-02)
+## Current state (2026-06-03)
 
-Latest pass (2026-06-02) — all committed to `main`, not pushed:
+Movement/viewmodel pass (2026-06-03) — **M1911 no longer uses `pistol_vm.glb`.**
+The combined arms+gun pistol viewmodel was dropped per request ("take the arms
+away"); `W_PISTOL` now takes the **gun-only floating OBJ path** in
+`DrawFirstPersonViewmodel` (the arms path is gated `wi != W_PISTOL`).
+`DrawPistolViewmodelGLB` + the `pistolVM` load are now dead code (kept,
+unreferenced; no `-Wall` so no warning) — remove if you want it gone. New
+`render.c:ViewmodelMotion(me, fwd, right, up, &pos, &tilt)` adds procedural
+**walk-bob** (sinusoidal, amplitude scales with the new `Player.moveBlend`) and
+a **sprint sink + muzzle-down tilt + high-freq shake** (scales with
+`sprintBlend`, settled by ADS); applied to both the gun-only path (pos+tilt) and
+the shared arms path (pos only, on top of its sprint clip). `Player.moveBlend`
+(new, local-only, eased like `sprintBlend`, set in `Player_ApplyLocalMove`) also
+**opens the crosshair** (`hud.c` bloom) and **degrades hip-fire accuracy**
+(`weapons.c:Weapon_Fire` adds `moveBlend*1.2 + sprintBlend*3.5` deg of spread,
+×0.25 in ADS). MP caveat: moveBlend/sprintBlend are local-only, so remote
+players' shots aren't movement-penalised on the host (same caveat as recoil).
+The pistol viewmodel is framed by `pistol.weapon` `model_scale 35` + `model_yaw
+28`; its `offset` is set in the **compiled `weaponTune[W_PISTOL]` default**, NOT
+via a `model_offset` line — adding that line to the `.weapon` deterministically
+trips raylib's OBJ no-UV heap overflow and crashes the loader at boot.
+
+Prior pass (2026-06-03) — **uncommitted in the working tree** (new
+`data/models/arms_vm.glb` + edits to `src/{anim.{c,h},render.c,render.h,main.c}`):
+
+- **Shared first-person ARMS viewmodel for the other 4 guns (`data/models/arms_vm.glb`).**
+  One rigged pair of arms+hands on the viewmodel skeleton with the full clip set
+  (`idle`/`fire`/`reload`/`reload_empty`/`raise`/`lower`/`sprint`); the equipped
+  gun is a **separate model bolted onto the `hand.R` bone each frame**, so a
+  future character skin only retextures this *one* arms model instead of baking
+  a combined arms+gun glb per weapon. `render.c:DrawArmsViewmodel(camera, wi)`
+  drives it: same player-state→clip state machine as the pistol VM (raise on
+  swap, fire on shot, reload/reload_empty by mag-empty latch, sprint, idle),
+  posed via `Anim_Pose`, then the arms are drawn with a camera-space root matrix
+  (model `X→right, Y→camFwd, Z→camUp`) and the gun is drawn at
+  `root * handBone * gunLocal` using the **new `Anim_FindBone` + `Anim_BoneMatrix`**
+  helpers (anim.{c,h}) — so recoil/reload hand motion carries the gun for free.
+  Arms use `worldSkinnedShader`, the gun keeps its OBJ `worldShader`; both under
+  the flat-lighting override. Wired in `DrawFirstPersonViewmodel`: `W_PISTOL`
+  still takes the combined `pistolVM` path; the other four take this arms path
+  when `armsVM.loaded`, else fall through to the legacy gun-only floating OBJ
+  viewmodel. Loaded/unloaded via `Render_LoadArmsVM()`/`Render_UnloadArmsVM()`
+  in `main.c` (boot + `--screenshot-viewmodels`). **Status: wired and builds
+  clean, the model is authored, but the per-gun grips are NOT tuned yet** — the
+  `gunGrip[W_COUNT]` table at the top of `DrawArmsViewmodel` is all
+  `{pos {0,0,0}, rotDeg {0,0,0}, scale 1.0}` placeholders. Each gun needs its
+  `pos`/`rotDeg`/`scale` dialed in via `--screenshot-viewmodels` so the muzzle
+  and grip sit right in the hand. See the arms-viewmodel gotcha below.
+
+Prior pass (2026-06-02) — committed to `main`, not pushed:
 
 - **Player third-person model authored AND wired (`data/models/player.glb`).**
   Rig-first soldier on the shared 17-bone humanoid family (same bone names as
@@ -388,7 +436,7 @@ responsibility, sharing `types.h`:
 | `net.{c,h}`       | enet wrapper, `Net_GetLocalIPs` for the host's join prompt |
 | `render.{c,h}`    | 3D world draw (model-first with cube fallbacks), textured walls/floor via rlgl, fog/sky/lit shader swap, tracer billboards |
 | `decals.{c,h}`    | 96-slot ring buffer for blood + impact decals, drawn from `Render_World3D` |
-| `anim.{c,h}`      | Skeletal animation pipeline. `AnimModel` (shared skinned glTF + clips) + per-instance `AnimState`; load/find-clip/update/draw via raylib 5.5 GPU skinning |
+| `anim.{c,h}`      | Skeletal animation pipeline. `AnimModel` (shared skinned glTF + clips) + per-instance `AnimState`; load/find-clip/update/draw via raylib 5.5 GPU skinning. `Anim_Pose` (pose without draw, for custom transforms), `Anim_FindBone`/`Anim_BoneMatrix` (bolt a separate object — e.g. a gun — onto a skeleton bone) |
 | `hud.{c,h}`       | 2D HUD overlay, round splash, downed/spectate overlays |
 | `menu.{c,h}`      | Menu screens incl. game-over stats table, controller bindings UI, map picker |
 | `pad.{c,h}`       | Raw gamepad axis/button readers                        |
@@ -402,12 +450,15 @@ Data layout under `data/`:
 data/
 ├── audio/                       # (nothing here yet; ATMOSPHERE music: parses but isn't loaded)
 ├── maps/*.map                   # new format; --validate to check
-├── models/                      # generic props/decor (zombie, mystery box, etc.)
+├── models/                      # props/decor (OBJ) + rigged characters (glTF)
 │   ├── ASSETS.md                # spec for every prop + texture + shader
-│   ├── *.obj/*.mtl
+│   ├── *.obj/*.mtl              # static props (mystery box, doors, perks, …)
+│   ├── zombie.glb               # rigged enemy (walk/attack_a/death)
+│   ├── player.glb               # rigged co-op third-person soldier
+│   ├── arms_vm.glb              # shared first-person arms (4 non-pistol guns)
 │   └── weapons/                 # legacy holdouts (revolver/sniper, not yet wired)
 ├── weapons/                     # NEW — per-folder weapon defs + assets
-│   ├── pistol/{pistol.weapon,pistol.obj,pistol.mtl}
+│   ├── pistol/{pistol.weapon,pistol.obj,pistol.mtl,pistol_vm.glb}
 │   ├── smg/...
 │   ├── shotgun/...
 │   ├── rifle/...
@@ -559,6 +610,36 @@ data/
     materials. Dead/downed keep the existing grey/red `c`.
   - **Verify without MP:** `./build/shooter --screenshot-coop` spawns dummy
     teammates in locomotion/reload/downed/dead/revive states → `coop_*.png`.
+- **Shared arms viewmodel + bone-bolted gun (`arms_vm.glb`, 2026-06-03).** The
+  non-pistol guns share ONE rigged arms model; the gun is a separate object
+  attached to the `hand.R` bone each frame instead of being baked into a combined
+  arms+gun glb. So skins/new guns are cheap (retexture the arms once, drop in any
+  gun OBJ). Implementation notes for `render.c:DrawArmsViewmodel`:
+  - **The attach math.** `Anim_BoneMatrix(am, st, boneIdx)` returns the bone's
+    model-space transform at the current frame; the gun's world matrix is
+    `gunLocal * bone * root` (raylib `MatrixMultiply` applies the LEFT operand
+    first, so the chain reads inner→outer). `root` is the same camera-space matrix
+    the arms are drawn with. `gunLocal` first rotates the gun OBJ +90° about X
+    (the OBJ's `-Z` muzzle / `+Y` up → `+Y` muzzle / `+Z` up to match the
+    arms-forward frame), then applies the per-gun `gunGrip[wi]` `scale`/`rotDeg`/
+    `pos` nudge in hand-local metres.
+  - **Pistol stays combined.** The M1911 keeps its own `pistol_vm.glb` (arms+gun
+    in one rig) — it was authored first, before the shared-arms split. Don't try
+    to route the pistol through the arms path; it has no separate gun OBJ to bolt.
+  - **Two shaders, two flat-light overrides.** Arms are skinned
+    (`worldSkinnedShader`); the gun is a rigid OBJ (`worldShader`). Each gets its
+    own flat sun/ambient override (restored after) so neither colour-swings —
+    note the gun's override is darker (it's gunmetal, not skin).
+  - **Grips are unfinished.** `gunGrip[]` ships as all-zero placeholders, so right
+    now the gun renders at the raw hand-bone origin with only the base +90°
+    orientation — it will look misplaced until each entry is tuned. Tune with
+    `--screenshot-viewmodels` (it renders every weapon's viewmodel); adjust
+    `pos`/`rotDeg`/`scale` per gun until the grip sits in the hand and the muzzle
+    points forward. The arms model itself is authored at real metric; one
+    `VM_SCALE` (0.62) sizes the whole assembly.
+  - **Falls back gracefully.** If `arms_vm.glb` is missing or has no `hand.R`
+    bone, `DrawFirstPersonViewmodel` drops through to the legacy procedural
+    gun-only OBJ viewmodel for those 4 guns — nothing crashes.
 - **CoD-style balance pass (2026-06-02).** Numbers are tuned to classic
   Treyarch zombies, so don't "simplify" them back:
   - **Zombie HP** (`entities.c::Enemies_RoundHP`): `150 + 100*(r-1)` through
@@ -677,10 +758,12 @@ See `TODO.md` for the full live list. Impact-ordered short version:
    (`walk`/`attack_a`/`death`) built rig-first via the
    `blender-game-asset` skill, then wire an `AnimState` onto `Enemy` and
    swap its `DrawProp` for `Anim_Draw`. This is the proof-of-pipeline.
-2. **Roll animation out** — fill zombie clips + per-type overrides, then
-   the weapon viewmodels (replacing the procedural reload/swap in
-   `render.c`), then the player third-person model. Clip lists in
-   `data/ANIMATIONS.md`.
+2. **Roll animation out** — fill zombie clips + per-type overrides. The
+   weapon viewmodels and the player third-person model are now wired; the
+   open item there is **tuning the per-gun `gunGrip[]` table** in
+   `render.c:DrawArmsViewmodel` (shared arms + bone-bolted gun for the 4
+   non-pistol guns — currently placeholder zeros) and authoring the rest of
+   the zombie/per-type clips. Clip lists in `data/ANIMATIONS.md`.
 3. **Per-type zombie audio tells** — distinct groan/hiss/roar via
    raylib positional audio; the visual tells (runner red-eye wind-up,
    boss stripe) already exist.

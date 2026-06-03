@@ -9,6 +9,8 @@ void Render_LoadZombieAnim(void);
 void Render_UnloadZombieAnim(void);
 void Render_LoadPistolVM(void);
 void Render_UnloadPistolVM(void);
+void Render_LoadArmsVM(void);
+void Render_UnloadArmsVM(void);
 void Render_LoadPlayerAnim(void);
 void Render_UnloadPlayerAnim(void);
 

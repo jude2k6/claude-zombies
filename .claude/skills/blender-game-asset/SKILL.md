@@ -186,3 +186,12 @@ the load log shows the expected mesh/material/bone/clip counts and no
   note. anim-test's fixed camera views the back of a correctly-facing model.
 - **Emissive accents** (zombie eyes, raygun coils): set Principled
   `Emission Color` + `Emission Strength` on that part's material.
+- **Shared arms viewmodel, gun bolted to a bone (don't bake combined rigs).**
+  For first-person weapons, author ONE arms+hands rig (`arms_vm.glb`) with the
+  full clip set and a `hand.R` bone — the engine attaches the gun mesh to that
+  bone at runtime (`Anim_BoneMatrix`), so one arms model serves every gun and a
+  skin only retextures the arms. Author the arms facing +Y (gun points away from
+  the camera) at real metric scale; keep a clean `hand.R` bone where the grip
+  sits. Only bake a *combined* arms+gun glb when a gun's hands must do something
+  the shared rig can't (the M1911 `pistol_vm.glb` predates this split). Same
+  bone-attach trick works for any "object held/mounted on a skeleton" case.

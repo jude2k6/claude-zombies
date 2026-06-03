@@ -184,6 +184,7 @@ int main(int argc, char **argv) {
         Assets_Load();
         Assets_ApplyWorldShader();
         Render_LoadPistolVM();   // so the pistol slot shows the rigged viewmodel
+        Render_LoadArmsVM();     // shared arms + bolted gun for the other 4
 
         // Need a minimal level so Render_World3D doesn't barf on the
         // walls/floor draw paths. Level_Build initializes the hardcoded
@@ -449,6 +450,7 @@ int main(int argc, char **argv) {
     Assets_Load();
     Render_LoadZombieAnim();   // shared rigged zombie.glb (skinned shader from Assets_Load)
     Render_LoadPistolVM();     // rigged M1911 first-person viewmodel
+    Render_LoadArmsVM();       // shared first-person arms (non-pistol guns bolt onto hand.R)
     Render_LoadPlayerAnim();   // rigged third-person soldier for co-op teammates
     Settings_Load();
     Decals_Init();
@@ -686,6 +688,7 @@ int main(int argc, char **argv) {
     Settings_Save();
     Render_UnloadZombieAnim();
     Render_UnloadPistolVM();
+    Render_UnloadArmsVM();
     Render_UnloadPlayerAnim();
     Assets_Unload();
     Weapons_Unload();

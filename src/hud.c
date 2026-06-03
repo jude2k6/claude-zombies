@@ -239,7 +239,8 @@ static void HudUpdateFeedback(Player *me, float dt) {
     const WeaponDef *cwd = &WEAPONS[cs->weaponIdx];
     float target = 6.0f;
     target += cwd->spreadDeg * 0.9f;
-    target += me->sprintBlend * 14.0f;
+    target += me->moveBlend * 6.0f;          // walking opens the reticle
+    target += me->sprintBlend * 14.0f;       // sprinting blows it wide
     target += hudCrossKick;
     if (me->adsHeld) target = 1.0f;          // collapse to a dot while ADS
     if (target < 1.0f) target = 1.0f;

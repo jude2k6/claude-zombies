@@ -105,6 +105,20 @@ Shared viewmodel arm skeleton across all 5 guns is ideal (one set of arms,
 swap the gun mesh + gun-specific bones), so hand poses and the `raise/lower`
 clips are authored once.
 
+> **Implemented (2026-06-03): shared arms + bone-bolted gun.** The 4 non-pistol
+> guns now use ONE rigged arms model, `data/models/arms_vm.glb` (arms+hands, the
+> full clip set above, no gun baked in). The equipped gun is a *separate* model
+> attached to the **`hand.R`** bone each frame in `render.c:DrawArmsViewmodel`
+> (via `Anim_BoneMatrix(am, st, handR)` — the bone's model-space transform —
+> composed as `gunLocal * bone * root`). So authoring a new gun viewmodel = just
+> the gun mesh (any of the existing world OBJs works); the arms, hand pose, and
+> recoil/reload motion are inherited. **The arms model must include a `hand.R`
+> bone** for the gun to ride. A per-gun grip nudge (`gunGrip[]` in `render.c`:
+> position/rotation/scale in hand-local metres) seats each gun in the hand —
+> tune it with `--screenshot-viewmodels`. The **M1911 is the exception**: it was
+> authored first as a *combined* arms+gun rig (`pistol_vm.glb`) and keeps its own
+> path. New guns should follow the shared-arms model, not bake a combined glb.
+
 > Gameplay timings (current `.weapon` files): reload — pistol **1.3s**,
 > smg **1.8s**, shotgun **2.0s**, rifle **1.5s**, raygun **2.6s**. Fire
 > cooldown — pistol 0.18, smg 0.067 (auto), shotgun 0.45, rifle 0.13,
@@ -272,5 +286,7 @@ Keep these code-/shader-driven; rigging them is wasted effort.
 3. **M1911 viewmodel** with `idle`/`fire`/`reload`/`raise` — replaces the
    procedural viewmodel anim; proves the weapon view path + reload sync.
 4. Roll the viewmodel clip set across the other 4 guns (shared arm rig).
-5. Player third-person model (co-op visibility).
+   *Engine path done (`arms_vm.glb` + bone-bolted gun, 2026-06-03); remaining
+   work is tuning the per-gun `gunGrip[]` seating.*
+5. Player third-person model (co-op visibility). *Done (`player.glb`, wired).*
 6. Machine polish (PaP, box, perks) as time allows.

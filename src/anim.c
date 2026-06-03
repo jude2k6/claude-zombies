@@ -108,6 +108,32 @@ void Anim_Pose(AnimModel *am, AnimState *st) {
     UpdateModelAnimationBones(am->model, a, frame);
 }
 
+int Anim_FindBone(const AnimModel *am, const char *name) {
+    if (!am->loaded || !name) return -1;
+    for (int i = 0; i < am->model.boneCount; i++)
+        if (strcmp(am->model.bones[i].name, name) == 0) return i;
+    return -1;
+}
+
+Matrix Anim_BoneMatrix(const AnimModel *am, const AnimState *st, int boneIdx) {
+    Matrix id = MatrixIdentity();
+    if (!am->loaded || st->clip < 0 || st->clip >= am->animCount) return id;
+    ModelAnimation a = am->anims[st->clip];
+    if (boneIdx < 0 || boneIdx >= a.boneCount || a.frameCount <= 0) return id;
+    int frame = (int)(st->time * ANIM_FPS);
+    if (frame >= a.frameCount) frame = st->loop ? (frame % a.frameCount)
+                                                : (a.frameCount - 1);
+    if (frame < 0) frame = 0;
+    // framePoses are model-space (global) bone transforms. Build the bone's
+    // local->model matrix as scale, then rotate, then translate (raylib's
+    // left-applied-first MatrixMultiply convention, same as DrawModelEx).
+    Transform t = a.framePoses[frame][boneIdx];
+    Matrix s = MatrixScale(t.scale.x, t.scale.y, t.scale.z);
+    Matrix r = QuaternionToMatrix(t.rotation);
+    Matrix tr = MatrixTranslate(t.translation.x, t.translation.y, t.translation.z);
+    return MatrixMultiply(MatrixMultiply(s, r), tr);
+}
+
 void Anim_Draw(AnimModel *am, AnimState *st, Vector3 pos, float yawDeg,
                float scale, Color tint) {
     if (!am->loaded) return;

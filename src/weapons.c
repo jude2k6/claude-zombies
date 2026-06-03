@@ -86,7 +86,11 @@ Model weaponModels[W_COUNT];
 bool  weaponModelLoaded[W_COUNT];
 
 WeaponModelTune weaponTune[W_COUNT] = {
-    [W_PISTOL]  = { .scale = 1.2f, .yawDeg = 90.0f, .offset = {0, 0, 0} },
+    // M1911 uses the gun-only viewmodel path (no arms). scale/yaw come from
+    // pistol.weapon; the offset is set here (NOT via model_offset in the
+    // .weapon — parsing that extra line perturbs the heap and trips raylib's
+    // OBJ no-UV overflow). offset = right/up/fwd nudge in metres.
+    [W_PISTOL]  = { .scale = 1.2f, .yawDeg = 90.0f, .offset = {0.05f, 0.09f, 0} },
     [W_SMG]     = { .scale = 1.0f, .yawDeg =  0.0f, .offset = {0, 0, 0} },
     [W_SHOTGUN] = { .scale = 1.0f, .yawDeg =  0.0f, .offset = {0, 0, 0} },
     [W_RIFLE]   = { .scale = 1.0f, .yawDeg =  0.0f, .offset = {0, 0, 0} },
@@ -173,7 +177,14 @@ void Weapon_Fire(Player *p) {
     origin = Vector3Add(origin, Vector3Scale(up,    -downOff));
     int dmg = Weapon_EffDamage(p, s);
     int ownerIdx = (int)(p - players);
-    float spread = w->spreadDeg * (p->adsHeld ? 0.25f : 1.0f);
+    // Movement throws off accuracy: walking adds a little bloom, sprinting a
+    // lot. ADS settles everything (and you can't sprint while aiming). For
+    // remote players on the host, moveBlend/sprintBlend stay 0 (local-only
+    // fields), so their hip-fire isn't movement-penalised — same MP caveat as
+    // the per-weapon recoil.
+    float adsMul = p->adsHeld ? 0.25f : 1.0f;
+    float moveSpread = p->moveBlend * 1.2f + p->sprintBlend * 3.5f;
+    float spread = (w->spreadDeg + moveSpread) * adsMul;
     for (int k = 0; k < w->pellets; k++) {
         Vector3 d = Weapon_SpreadDir(dir, spread);
         Bullets_Spawn(origin, d, w->bulletSpeed, w->bulletLife, dmg, s->weaponIdx, ownerIdx);

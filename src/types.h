@@ -214,6 +214,7 @@ typedef struct {
     // Locally-tracked (not in snapshot)
     float      stamina;       // 0..100
     float      sprintBlend;   // 0 = walk, 1 = full sprint (eased)
+    float      moveBlend;     // 0 = still, 1 = moving (eased; drives bob/spread)
 
     // Target for hold-action (revive)
     float      reviveAsTarget;  // progress while another player revives THIS one

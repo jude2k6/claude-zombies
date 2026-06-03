@@ -201,8 +201,11 @@ layout so the binary always runs.
   animation clip lists for the glTF skeletal-animation pipeline.
 
 Other dev CLI modes: `--screenshot-viewmodels` (renders each weapon's
-viewmodel to a PNG) and `--anim-test <file.glb> [clip]` (renders a skinned
-glTF model across an animation clip to verify it).
+first-person viewmodel to a PNG), `--screenshot-coop` (renders dummy
+teammates in every animation state — locomotion/reload/downed/dead/revive —
+so the third-person player model can be checked without a multiplayer game),
+and `--anim-test <file.glb> [clip]` (renders a skinned glTF model across an
+animation clip to verify it).
 
 ## License
 

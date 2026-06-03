@@ -36,7 +36,17 @@ connectivity auditor). Remaining work is authoring + per-entity wiring:
         +Y→fwd / +Z→up / +X→right) under flat lighting. Other 4 guns keep the
         OBJ + procedural path. Shows in-game; verified via
         `--screenshot-viewmodels`.
-  - [ ] Roll the vm clip set across SMG / shotgun / rifle / raygun.
+  - [~] Roll the vm clip set across SMG / shotgun / rifle / raygun. **Engine
+        path built (2026-06-03, uncommitted):** a shared rigged
+        `data/models/arms_vm.glb` (arms+hands, full clip set) drives all 4
+        non-pistol guns via `render.c:DrawArmsViewmodel`; the equipped gun OBJ
+        is bolted onto the `hand.R` bone each frame (new `Anim_FindBone` /
+        `Anim_BoneMatrix`), so only the arms need a skin, not a combined glb per
+        gun. Same clip state machine as the pistol VM. **Remaining: tune the
+        per-gun `gunGrip[W_COUNT]` table** (pos/rotDeg/scale, currently all-zero
+        placeholders) via `--screenshot-viewmodels` so each grip sits in the
+        hand and the muzzle points forward. The M1911 keeps its own combined
+        `pistol_vm.glb`. See HANDOFF "shared arms viewmodel" gotcha.
 - [x] **Player third-person model** (`data/models/player.glb`) — authored +
       validated + WIRED. Rig-first soldier on the shared 17-bone humanoid family
       (same bone names as `zombie.glb`): skin-modifier stick-figure body in

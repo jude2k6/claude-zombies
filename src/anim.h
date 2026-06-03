@@ -77,4 +77,13 @@ void Anim_Draw(AnimModel *am, AnimState *st, Vector3 pos, float yawDeg,
 // DrawModel(am->model, ...).
 void Anim_Pose(AnimModel *am, AnimState *st);
 
+// Index of the named bone in the model (or -1). Used to attach a separate
+// object (e.g. a gun) to a skeleton bone.
+int Anim_FindBone(const AnimModel *am, const char *name);
+
+// Model-space transform of bone `boneIdx` at the AnimState's current frame.
+// Compose with the model's own transform to get the bone's world matrix, then
+// post-multiply a local offset to place an attached object in the bone's space.
+Matrix Anim_BoneMatrix(const AnimModel *am, const AnimState *st, int boneIdx);
+
 #endif // SHOOTER_ANIM_H

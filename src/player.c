@@ -65,6 +65,7 @@ void Player_GiveStartingPistol(Player *p) {
     p->bleedTimer = 0.0f;
     p->stamina = 100.0f;
     p->sprintBlend = 0.0f;
+    p->moveBlend = 0.0f;
     p->reviverIdx = -1;
     p->reviveAsTarget = 0.0f;
     p->lethals   = STARTING_LETHALS;
@@ -138,6 +139,13 @@ void Player_ApplyLocalMove(Player *p, float dt) {
     p->sprintBlend += (sprintTarget - p->sprintBlend) * (1.0f - expf(-sprintRate * dt));
     if (p->sprintBlend < 0.001f) p->sprintBlend = 0.0f;
     speed *= 1.0f + 0.6f * p->sprintBlend;
+
+    // Any-movement blend (drives viewmodel bob, crosshair bloom, hip-fire
+    // spread). Eased like sprintBlend; eases out a touch faster than in.
+    float moveTarget = moving ? 1.0f : 0.0f;
+    float moveRate   = moving ? 10.0f : 13.0f;
+    p->moveBlend += (moveTarget - p->moveBlend) * (1.0f - expf(-moveRate * dt));
+    if (p->moveBlend < 0.001f) p->moveBlend = 0.0f;
     if (IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_C) || Bind_Down(BA_CROUCH)) speed *= 0.55f; // crouch
     if (p->adsHeld) speed *= ADS_MOVE_MUL;
 

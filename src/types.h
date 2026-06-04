@@ -60,7 +60,6 @@
 #define BOARD_REPAIR_TIME   0.5f
 
 #define PAP_COST           5000
-#define PAP_DURATION        4.0f
 
 #define MAX_WINDOWS         4
 #define MAX_BOARDS_PER_WIN  5
@@ -340,11 +339,22 @@ typedef struct {
     int     perkIdx;
 } PerkMachine;
 
+// Pack-a-Punch phases. See docs/pack-a-punch-spec.md.
+#define PAP_IDLE        0   // free, ready to take a weapon
+#define PAP_INSERT      1   // gun animating from hands into the chamber
+#define PAP_WORK        2   // chamber closed, upgrading
+#define PAP_READY       3   // upgraded gun presented, awaiting manual pickup
+
+#define PAP_INSERT_TIME  0.8f
+#define PAP_WORK_TIME    3.5f
+
 typedef struct {
     Vector3 pos;
-    float   activeTimer;
-    int     slotInProgress;
+    int     phase;          // PAP_IDLE / INSERT / WORK / READY
+    float   timer;          // counts down within the current timed phase
+    int     slotInProgress; // owner's inventory slot being upgraded (locked)
     int     ownerPlayer;
+    int     weaponIdx;      // weapon being upgraded (for render + retrieval)
     float   bob;
 } PackAPunch;
 

@@ -4,6 +4,7 @@
 #include "perks.h"
 #include "player.h"
 #include "level.h"
+#include "interact.h"
 #include "game.h"
 #include "entities.h"
 #include "pad.h"
@@ -501,11 +502,18 @@ void Hud_Draw(int sw, int sh, Player *me, Interact ix) {
             float t = 1.0f - (cur->reloadTimer / Weapon_EffReload(me, cur));
             DrawRectangleRounded((Rectangle){ rx - 220, ry + 30, 220, 6 }, 0.5f, 6, (Color){ 70, 40, 10, 200 });
             DrawRectangleRounded((Rectangle){ rx - 220, ry + 30, 220 * t, 6 }, 0.5f, 6, (Color){ 240, 150, 40, 255 });
-        } else if (pap.activeTimer > 0 && pap.ownerPlayer == localPlayerIdx && pap.slotInProgress == me->currentSlot) {
-            HudTextR("PACK-A-PUNCH", rx, ry, 22, (Color){ 200, 150, 255, 255 });
-            float t = 1.0f - (pap.activeTimer / PAP_DURATION);
-            DrawRectangleRounded((Rectangle){ rx - 220, ry + 30, 220, 6 }, 0.5f, 6, (Color){ 40, 20, 60, 200 });
-            DrawRectangleRounded((Rectangle){ rx - 220, ry + 30, 220 * t, 6 }, 0.5f, 6, (Color){ 200, 150, 255, 255 });
+        } else if (PaP_SlotLocked(localPlayerIdx, me->currentSlot)) {
+            if (pap.phase == PAP_READY) {
+                HudTextR("READY - TAKE IT", rx, ry, 22, (Color){ 200, 150, 255, 255 });
+            } else {
+                HudTextR("PACK-A-PUNCH", rx, ry, 22, (Color){ 200, 150, 255, 255 });
+                // Progress across both timed phases (insert + work).
+                float total  = PAP_INSERT_TIME + PAP_WORK_TIME;
+                float remain = pap.timer + (pap.phase == PAP_INSERT ? PAP_WORK_TIME : 0.0f);
+                float t = 1.0f - remain / total;
+                DrawRectangleRounded((Rectangle){ rx - 220, ry + 30, 220, 6 }, 0.5f, 6, (Color){ 40, 20, 60, 200 });
+                DrawRectangleRounded((Rectangle){ rx - 220, ry + 30, 220 * t, 6 }, 0.5f, 6, (Color){ 200, 150, 255, 255 });
+            }
         } else {
             int nameW = MeasureText(displayName, 22);
             HudTextR(displayName, rx, ry, 22, nameCol);
@@ -629,7 +637,15 @@ void Hud_Draw(int sw, int sh, Player *me, Interact ix) {
         } else if (ix.kind == IK_PAP) {
             border = (Color){200,150,255,255};
             WeaponSlot *s = &me->inventory[me->currentSlot];
-            if (pap.activeTimer > 0) { snprintf(prompt, sizeof prompt, "Upgrading... %.1fs", pap.activeTimer); promptColor = (Color){200,150,255,255}; }
+            if (pap.phase == PAP_READY) {
+                if (pap.ownerPlayer == localPlayerIdx) snprintf(prompt, sizeof prompt, "[F]  TAKE WEAPON");
+                else { snprintf(prompt, sizeof prompt, "In use"); promptColor = GRAY; }
+            }
+            else if (pap.phase != PAP_IDLE) {
+                if (pap.ownerPlayer == localPlayerIdx) snprintf(prompt, sizeof prompt, "Upgrading...");
+                else snprintf(prompt, sizeof prompt, "In use");
+                promptColor = (Color){200,150,255,255};
+            }
             else if (s->packed) { snprintf(prompt, sizeof prompt, "Already Pack-a-Punched"); promptColor = GRAY; }
             else { snprintf(prompt, sizeof prompt, "[F]  PACK-A-PUNCH  -  %d", PAP_COST);
                    if (me->points < PAP_COST) promptColor = (Color){200,80,80,255}; }

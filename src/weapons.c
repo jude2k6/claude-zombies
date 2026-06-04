@@ -1,6 +1,7 @@
 #include "weapons.h"
 #include "player.h"
 #include "level.h"
+#include "interact.h"
 #include "fx.h"
 #include "raymath.h"
 #include <math.h>
@@ -154,7 +155,7 @@ void Weapon_Fire(Player *p) {
     WeaponSlot *s = &p->inventory[p->currentSlot];
     if (!s->owned) return;
     if (s->reloadTimer > 0 || s->fireTimer > 0 || s->ammo <= 0) return;
-    if (pap.activeTimer > 0 && pap.slotInProgress == p->currentSlot && pap.ownerPlayer == (int)(p - players)) return;
+    if (PaP_SlotLocked((int)(p - players), p->currentSlot)) return;  // in the PaP machine
 
     const WeaponDef *w = &WEAPONS[s->weaponIdx];
     Vector3 dir = Player_LookDir(p->yaw, p->pitch);

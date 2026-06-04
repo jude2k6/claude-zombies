@@ -71,10 +71,11 @@ typedef struct {
     uint16_t enemiesAlive, enemiesToSpawn;
     uint8_t  windowBoards[MAX_WINDOWS];
     float    windowRepair[MAX_WINDOWS];
-    uint8_t  papActive;
+    uint8_t  papPhase;
     float    papTimer;
     int8_t   papSlotInProgress;
     int8_t   papOwnerPlayer;
+    int8_t   papWeaponIdx;
     uint8_t  doorsOpened;
     float    doublePointsTimer;
     float    instaKillTimer;
@@ -189,10 +190,11 @@ void Protocol_HostBroadcastSnapshot(void) {
         hdr->windowBoards[i] = (uint8_t)windows[i].boards;
         hdr->windowRepair[i] = windows[i].repairProgress;
     }
-    hdr->papActive = (pap.activeTimer > 0) ? 1 : 0;
-    hdr->papTimer = pap.activeTimer;
+    hdr->papPhase = (uint8_t)pap.phase;
+    hdr->papTimer = pap.timer;
     hdr->papSlotInProgress = (int8_t)pap.slotInProgress;
     hdr->papOwnerPlayer = (int8_t)pap.ownerPlayer;
+    hdr->papWeaponIdx = (int8_t)pap.weaponIdx;
     {
         uint8_t mask = 0;
         for (int i = 0; i < doorCount && i < 8; i++) if (doors[i].opened) mask |= (uint8_t)(1u << i);
@@ -282,9 +284,11 @@ void Protocol_ClientApplySnapshot(uint8_t *data, size_t len) {
         windows[i].boards = hdr->windowBoards[i];
         windows[i].repairProgress = hdr->windowRepair[i];
     }
-    pap.activeTimer = hdr->papTimer;
+    pap.phase = hdr->papPhase;
+    pap.timer = hdr->papTimer;
     pap.slotInProgress = hdr->papSlotInProgress;
     pap.ownerPlayer = hdr->papOwnerPlayer;
+    pap.weaponIdx = hdr->papWeaponIdx;
     for (int i = 0; i < doorCount && i < 8; i++) doors[i].opened = (hdr->doorsOpened & (1u << i)) != 0;
     doublePointsTimer = hdr->doublePointsTimer;
     instaKillTimer    = hdr->instaKillTimer;

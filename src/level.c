@@ -212,7 +212,7 @@ static void ClearLevel(void) {
     mapSpawnCount = 0;
     mapPropCount = 0;
     mapName[0] = 0;
-    pap = (PackAPunch){ .pos = {0,0,0}, .activeTimer = 0, .slotInProgress = -1, .ownerPlayer = -1 };
+    pap = (PackAPunch){ .pos = {0,0,0}, .phase = PAP_IDLE, .slotInProgress = -1, .ownerPlayer = -1, .weaponIdx = -1 };
     mbox = (MysteryBox){ .placed = false, .pos = {0,0,0}, .state = MBOX_IDLE,
                          .timer = 0, .showingWeapon = 0, .finalWeapon = 0, .ownerPlayer = -1, .bob = 0 };
     // Reset atmosphere globals to defaults so each map starts from the
@@ -640,8 +640,8 @@ static int ParseMapFile(const char *path, bool validateOnly) {
                 fprintf(errs, "map: line %d: PAP bad coord\n", lineNo);
                 errors++; continue;
             }
-            pap = (PackAPunch){ .pos = {x, 0, z}, .activeTimer = 0,
-                                .slotInProgress = -1, .ownerPlayer = -1 };
+            pap = (PackAPunch){ .pos = {x, 0, z}, .phase = PAP_IDLE,
+                                .slotInProgress = -1, .ownerPlayer = -1, .weaponIdx = -1 };
             continue;
         }
 
@@ -852,7 +852,7 @@ void Level_LoadHardcodedFallback(void) {
     perkMachines[perkMachineCount++] = (PerkMachine){ { 22.0f, 0, 25.0f }, PERK_DTAP };
     perkMachines[perkMachineCount++] = (PerkMachine){ {-25.0f, 0,-22.0f }, PERK_STAMIN };
 
-    pap = (PackAPunch){ .pos = { 0, 0, -28.0f }, .activeTimer = 0, .slotInProgress = -1, .ownerPlayer = -1 };
+    pap = (PackAPunch){ .pos = { 0, 0, -28.0f }, .phase = PAP_IDLE, .slotInProgress = -1, .ownerPlayer = -1, .weaponIdx = -1 };
     mbox = (MysteryBox){ .placed = true, .pos = { -22.0f, 0.5f, 15.0f },
                          .state = MBOX_IDLE, .timer = 0,
                          .showingWeapon = 0, .finalWeapon = 0,
@@ -881,9 +881,11 @@ void Level_Reset(void) {
         windows[i].repairProgress = 0;
         windows[i].repairPlayer = -1;
     }
-    pap.activeTimer = 0;
+    pap.phase = PAP_IDLE;
+    pap.timer = 0;
     pap.slotInProgress = -1;
     pap.ownerPlayer = -1;
+    pap.weaponIdx = -1;
     mbox.state = MBOX_IDLE;
     mbox.timer = 0;
     mbox.ownerPlayer = -1;

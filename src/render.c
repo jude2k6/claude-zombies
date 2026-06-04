@@ -4,6 +4,7 @@
 #include "perks.h"
 #include "player.h"
 #include "entities.h"
+#include "interact.h"
 #include "assets.h"
 #include "decals.h"
 #include "anim.h"
@@ -414,17 +415,20 @@ static void DrawWindows(void) {
 
 // Draw a weapon at pos with given yaw (degrees). If a Model is loaded for the
 // weapon, use it; otherwise fall back to the old colored cube. The weapon OBJs
-// are authored at true real-world size, so `displayScale` is the literal world
-// scale: 1.0 = life-size. It is deliberately NOT multiplied by
-// `weaponTune.scale` — that knob is the first-person viewmodel framing scale
-// (tuned for the gun held close to the camera) and has no business sizing the
-// gun in the world, where it was making wall-buy/box guns ~10× too big.
+// are authored at wildly different unit scales (model_scale 10–35 in the
+// .weapon files), so a raw scale of 1.0 makes each gun a different size — the
+// M1911 (scale 35) came out ~3.5× smaller than the rifle/smg (scale 10). Use
+// the same life-size base the first-person viewmodel uses, 0.05 * tune.scale,
+// so every gun shows at true world size; `displayScale` is then an extra
+// caller multiplier (1.0 = life-size). weaponTune.yawDeg is deliberately NOT
+// added here — it is an in-hand framing tilt (28° on the pistol) that would
+// skew the gun off a flat wall/box mount.
 static void DrawWeaponDisplay(int weaponIdx, Vector3 pos, float yawDeg, float displayScale) {
     if (weaponIdx >= 0 && weaponIdx < W_COUNT && weaponModelLoaded[weaponIdx]) {
-        float s = displayScale;
+        float s = displayScale * 0.05f * weaponTune[weaponIdx].scale;
         DrawModelEx(weaponModels[weaponIdx], pos,
                     (Vector3){0, 1, 0},
-                    yawDeg + weaponTune[weaponIdx].yawDeg,
+                    yawDeg,
                     (Vector3){s, s, s},
                     WHITE);
     } else {
@@ -454,11 +458,13 @@ static void DrawWallBuys(void) {
         }
 
         if (weaponModelLoaded[wb->weaponIdx]) {
-            // Pop the gun off the mount plate, aligned along the wall.
-            Vector3 along = (fabsf(wb->normal.x) > 0.5f)
-                ? (Vector3){ 0, 0, 1 } : (Vector3){ 1, 0, 0 };
-            (void)along;
-            float yaw = (fabsf(wb->normal.x) > 0.5f) ? 90.0f : 0.0f;
+            // The gun lies flat on the panel with its barrel parallel to the
+            // wall. That is 90° off the panel's outward-facing yaw above —
+            // reusing the panel yaw pointed the barrel straight out of the
+            // wall. Models are authored barrel-along-(-Z): yaw 0 runs the
+            // barrel along Z (for a wall whose normal is ±X), yaw 90 along X
+            // (for a wall whose normal is ±Z).
+            float yaw = (fabsf(wb->normal.x) > 0.5f) ? 0.0f : 90.0f;
             Vector3 p = {
                 wb->pos.x + wb->normal.x * 0.18f,
                 wb->pos.y,
@@ -502,33 +508,72 @@ static void DrawPerkMachines(void) {
     }
 }
 
+// CoD-style Pack-a-Punch. The cabinet body is the existing pap_machine.obj
+// (or a primitive fallback); the upgrade *chamber* on top, its sliding lid,
+// and the weapon animation are driven by the phase machine in interact.c.
+// See docs/pack-a-punch-spec.md.
 static void DrawPaP(void) {
+    float px = pap.pos.x, pz = pap.pos.z;
+
+    // --- Cabinet body --------------------------------------------------
     if (propModelLoaded[PROP_PAP]) {
-        // Cabinet body sits on the floor at pap.pos.x/z.
-        Vector3 base = { pap.pos.x, 0.0f, pap.pos.z };
-        DrawProp(PROP_PAP, base, 0.0f, WHITE);
-        // Bobbing upgrade chamber stays as the existing primitive draw so
-        // the animation reads the same as before — the model spec leaves
-        // this on top to be replaced by `pap_chamber.obj` later.
-        Vector3 top = { pap.pos.x, 1.7f + sinf(pap.bob) * 0.05f, pap.pos.z };
-        DrawCube(top, 1.6f, 0.5f, 1.6f, (Color){80, 50, 130, 255});
-        DrawCubeWires(top, 1.6f, 0.5f, 1.6f, (Color){200,150,255,255});
-        DrawSphere((Vector3){pap.pos.x, 2.2f, pap.pos.z}, 0.15f, (Color){220, 180, 255, 255});
+        DrawProp(PROP_PAP, (Vector3){ px, 0.0f, pz }, 0.0f, WHITE);
     } else {
         DrawCube(pap.pos, 2.5f, 0.6f, 2.5f, (Color){25,25,30,255});
         DrawCubeWires(pap.pos, 2.5f, 0.6f, 2.5f, BLACK);
-        DrawCube((Vector3){pap.pos.x, 1.0f, pap.pos.z}, 2.0f, 0.8f, 2.0f, (Color){50,50,60,255});
-        Vector3 top = { pap.pos.x, 1.7f + sinf(pap.bob) * 0.05f, pap.pos.z };
-        DrawCube(top, 1.6f, 0.5f, 1.6f, (Color){80, 50, 130, 255});
-        DrawCubeWires(top, 1.6f, 0.5f, 1.6f, (Color){200,150,255,255});
-        DrawSphere((Vector3){pap.pos.x, 2.2f, pap.pos.z}, 0.15f, (Color){220, 180, 255, 255});
+        DrawCube((Vector3){ px, 1.0f, pz }, 2.0f, 0.8f, 2.0f, (Color){50,50,60,255});
     }
 
-    if (pap.activeTimer > 0 && pap.ownerPlayer >= 0 && pap.slotInProgress >= 0) {
-        float spin = pap.bob * 4.0f;
-        Vector3 weaponPos = { pap.pos.x, 2.6f + sinf(pap.bob*2) * 0.15f, pap.pos.z };
-        int w = players[pap.ownerPlayer].inventory[pap.slotInProgress].weaponIdx;
-        DrawWeaponDisplay(w, weaponPos, spin * 60.0f, 1.0f);
+    // Glow pulses; faster + brighter while the machine is working.
+    float pulse     = 0.5f + 0.5f * sinf(pap.bob * 3.0f);
+    float workPulse = 0.5f + 0.5f * sinf(pap.bob * 9.0f);
+    Color trimHot = (Color){ 200, 150, 255, 255 };
+
+    // --- Chamber housing (static) + emitter ---------------------------
+    Vector3 housing = { px, 1.7f, pz };
+    DrawCubeV(housing, (Vector3){1.6f, 0.5f, 1.6f}, (Color){80, 50, 130, 255});
+    DrawCubeWiresV(housing, (Vector3){1.6f, 0.5f, 1.6f}, trimHot);
+    float emitB = (pap.phase == PAP_WORK) ? workPulse : pulse;
+    DrawSphere((Vector3){ px, 2.2f, pz }, 0.15f,
+               (Color){ (unsigned char)(160 + 70*emitB),
+                        (unsigned char)(120 + 60*emitB), 255, 255 });
+
+    // --- Sliding lid over the chamber mouth ---------------------------
+    // 0 = open (gun can enter/leave), 1 = sealed shut while upgrading.
+    float lidClose =
+        (pap.phase == PAP_INSERT) ? (1.0f - pap.timer / PAP_INSERT_TIME) :
+        (pap.phase == PAP_WORK)   ? 1.0f : 0.0f;
+    if (lidClose > 0.02f) {
+        // Slides in from -X to cover the top mouth.
+        float dx = (1.0f - lidClose) * 1.5f;
+        Vector3 lid = { px - dx, 1.97f, pz };
+        DrawCubeV(lid, (Vector3){1.5f, 0.08f, 1.5f}, (Color){55, 38, 80, 255});
+        DrawCubeWiresV(lid, (Vector3){1.5f, 0.08f, 1.5f}, trimHot);
+    }
+
+    // --- Phase-driven weapon animation --------------------------------
+    Vector3 chamberIn = { px, 1.7f, pz };   // recessed inside the housing
+    if (pap.phase == PAP_INSERT && pap.weaponIdx >= 0) {
+        // Gun descends from a "handed-over" point above the front into the
+        // chamber, spinning as it drops, then the lid seals it in.
+        float frac = 1.0f - pap.timer / PAP_INSERT_TIME;   // 0 -> 1
+        Vector3 handPt = { px, 2.1f, pz + 1.3f };
+        Vector3 gp = Vector3Lerp(handPt, chamberIn, frac);
+        DrawWeaponDisplay(pap.weaponIdx, gp, 90.0f + frac * 180.0f, 1.0f);
+    } else if (pap.phase == PAP_WORK) {
+        // Sealed: sparks spit from the lid seam.
+        for (int i = 0; i < 6; i++) {
+            float a = pap.bob * 6.0f + i * 1.7f;
+            float r = 0.25f + 0.2f * sinf(a * 1.3f);
+            Vector3 sp = { px + cosf(a) * r, 1.95f + sinf(a*2.0f) * 0.12f, pz + sinf(a) * r };
+            DrawCubeV(sp, (Vector3){0.05f,0.05f,0.05f},
+                      (Color){255, (unsigned char)(170 + 70*workPulse), 110, 255});
+        }
+    } else if (pap.phase == PAP_READY && pap.weaponIdx >= 0) {
+        // Upgraded weapon rises back out, glowing + slowly spinning, until
+        // the owner manually takes it (Use).
+        Vector3 gp = { px, 2.45f + sinf(pap.bob) * 0.08f, pz };
+        DrawWeaponDisplay(pap.weaponIdx, gp, pap.bob * 50.0f, 1.0f);
     }
 }
 
@@ -1292,6 +1337,8 @@ static void DrawFirstPersonViewmodel(Camera camera) {
     // detaches and flies free, so the arms+gun must NOT trail it; the body is
     // drawn in third person at its frozen spot instead (see DrawOtherPlayer).
     if (!me->alive || me->downed || noclipMode) return;
+    // Held weapon is physically in the PaP machine — show empty hands.
+    if (PaP_SlotLocked(localPlayerIdx, me->currentSlot)) return;
     int wi = me->inventory[me->currentSlot].weaponIdx;
     if (wi < 0 || wi >= W_COUNT) return;
     if (!weaponModelLoaded[wi]) return;

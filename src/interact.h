@@ -13,6 +13,7 @@ void Interact_UseMBox(Player *p);
 void Interact_Do(Player *p);                  // single-press F dispatch
 
 void Interact_UpdatePaP(float dt);
+bool PaP_SlotLocked(int playerIdx, int slot);  // weapon is in the PaP machine
 void Interact_UpdateRepairs(float dt);
 void Interact_UpdateMBox(float dt);
 

@@ -100,15 +100,50 @@ void Interact_BuyDoor(Player *p, int doorIdx) {
     d->opened = true;
 }
 
+// True while (playerIdx, slot) is the weapon sitting in the PaP machine — it's
+// out of the player's hands, so the viewmodel hides and firing is blocked.
+bool PaP_SlotLocked(int playerIdx, int slot) {
+    return pap.phase != PAP_IDLE &&
+           pap.ownerPlayer == playerIdx && pap.slotInProgress == slot;
+}
+
+// Apply the upgrade to the owner's locked slot and free the machine.
+static void PaP_Finalize(void) {
+    if (pap.ownerPlayer >= 0 && pap.slotInProgress >= 0) {
+        WeaponSlot *s = &players[pap.ownerPlayer].inventory[pap.slotInProgress];
+        if (s->owned && s->weaponIdx == pap.weaponIdx) {
+            s->packed = true;
+            s->ammo = Weapon_EffMagSize(s);
+            s->reserve = Weapon_EffReserveMax(s);
+            s->reloadTimer = 0;
+        }
+    }
+    pap.phase = PAP_IDLE;
+    pap.timer = 0;
+    pap.slotInProgress = -1;
+    pap.ownerPlayer = -1;
+    pap.weaponIdx = -1;
+}
+
 void Interact_UsePackAPunch(Player *p) {
-    if (pap.activeTimer > 0) return;
+    int meIdx = (int)(p - players);
+    // READY: only the owner can take the finished weapon out.
+    if (pap.phase == PAP_READY) {
+        if (pap.ownerPlayer == meIdx) PaP_Finalize();
+        return;
+    }
+    // Any other non-idle phase: machine is busy.
+    if (pap.phase != PAP_IDLE) return;
+    // IDLE: start a new job with the currently-held weapon.
     WeaponSlot *s = &p->inventory[p->currentSlot];
     if (!s->owned || s->packed) return;
     if (p->points < PAP_COST) return;
     p->points -= PAP_COST;
-    pap.activeTimer = PAP_DURATION;
+    pap.phase = PAP_INSERT;
+    pap.timer = PAP_INSERT_TIME;
     pap.slotInProgress = p->currentSlot;
-    pap.ownerPlayer = (int)(p - players);
+    pap.ownerPlayer = meIdx;
+    pap.weaponIdx = s->weaponIdx;
 }
 
 void Interact_UseMBox(Player *p) {
@@ -182,22 +217,29 @@ void Interact_Do(Player *p) {
 
 void Interact_UpdatePaP(float dt) {
     pap.bob += dt * 3.0f;
-    if (pap.activeTimer > 0) {
-        pap.activeTimer -= dt;
-        if (pap.activeTimer <= 0) {
-            pap.activeTimer = 0;
-            if (pap.ownerPlayer >= 0 && pap.slotInProgress >= 0) {
-                WeaponSlot *s = &players[pap.ownerPlayer].inventory[pap.slotInProgress];
-                if (s->owned) {
-                    s->packed = true;
-                    s->ammo = Weapon_EffMagSize(s);
-                    s->reserve = Weapon_EffReserveMax(s);
-                    s->reloadTimer = 0;
-                }
-            }
-            pap.slotInProgress = -1;
-            pap.ownerPlayer = -1;
-        }
+    if (pap.phase == PAP_IDLE) return;
+
+    // Safety: never strand a weapon. If the owner vanished or died, finalize
+    // (apply the upgrade if the slot is still valid) and free the machine.
+    if (pap.ownerPlayer < 0 || pap.ownerPlayer >= NET_MAX_PLAYERS ||
+        !players[pap.ownerPlayer].active || !players[pap.ownerPlayer].alive) {
+        PaP_Finalize();
+        return;
+    }
+
+    switch (pap.phase) {
+        case PAP_INSERT:
+            pap.timer -= dt;
+            if (pap.timer <= 0) { pap.phase = PAP_WORK; pap.timer = PAP_WORK_TIME; }
+            break;
+        case PAP_WORK:
+            pap.timer -= dt;
+            if (pap.timer <= 0) { pap.phase = PAP_READY; pap.timer = 0; }
+            break;
+        case PAP_READY:
+            // Waits indefinitely for the owner to manually retrieve (Use).
+            break;
+        default: break;
     }
 }
 

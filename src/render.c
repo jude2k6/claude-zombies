@@ -508,72 +508,72 @@ static void DrawPerkMachines(void) {
     }
 }
 
-// CoD-style Pack-a-Punch. The cabinet body is the existing pap_machine.obj
-// (or a primitive fallback); the upgrade *chamber* on top, its sliding lid,
-// and the weapon animation are driven by the phase machine in interact.c.
-// See docs/pack-a-punch-spec.md.
+// CoD-style Pack-a-Punch. The cabinet + chamber housing + emitter posts are
+// the authored pap_machine.obj; only the chamber *shutter*, the spark FX, and
+// the weapon animation are drawn here, driven by the phase machine in
+// interact.c. Coordinates match the model's chamber mouth (top rim ~y=1.99,
+// opening ~0.58 x 0.46). See docs/pack-a-punch-spec.md.
+//
+// Mouth geometry the animation aligns to:
+#define PAP_MOUTH_Y    1.99f   // top rim of the chamber (world Y)
+#define PAP_INSIDE_Y   1.70f   // weapon's resting depth inside the chamber
 static void DrawPaP(void) {
     float px = pap.pos.x, pz = pap.pos.z;
 
-    // --- Cabinet body --------------------------------------------------
+    // --- Cabinet (authored model, or primitive fallback) --------------
     if (propModelLoaded[PROP_PAP]) {
         DrawProp(PROP_PAP, (Vector3){ px, 0.0f, pz }, 0.0f, WHITE);
     } else {
         DrawCube(pap.pos, 2.5f, 0.6f, 2.5f, (Color){25,25,30,255});
         DrawCubeWires(pap.pos, 2.5f, 0.6f, 2.5f, BLACK);
         DrawCube((Vector3){ px, 1.0f, pz }, 2.0f, 0.8f, 2.0f, (Color){50,50,60,255});
+        DrawCube((Vector3){ px, 1.7f, pz }, 0.9f, 0.45f, 0.7f, (Color){80,50,130,255});
     }
 
-    // Glow pulses; faster + brighter while the machine is working.
-    float pulse     = 0.5f + 0.5f * sinf(pap.bob * 3.0f);
     float workPulse = 0.5f + 0.5f * sinf(pap.bob * 9.0f);
     Color trimHot = (Color){ 200, 150, 255, 255 };
 
-    // --- Chamber housing (static) + emitter ---------------------------
-    Vector3 housing = { px, 1.7f, pz };
-    DrawCubeV(housing, (Vector3){1.6f, 0.5f, 1.6f}, (Color){80, 50, 130, 255});
-    DrawCubeWiresV(housing, (Vector3){1.6f, 0.5f, 1.6f}, trimHot);
-    float emitB = (pap.phase == PAP_WORK) ? workPulse : pulse;
-    DrawSphere((Vector3){ px, 2.2f, pz }, 0.15f,
-               (Color){ (unsigned char)(160 + 70*emitB),
-                        (unsigned char)(120 + 60*emitB), 255, 255 });
-
-    // --- Sliding lid over the chamber mouth ---------------------------
-    // 0 = open (gun can enter/leave), 1 = sealed shut while upgrading.
-    float lidClose =
-        (pap.phase == PAP_INSERT) ? (1.0f - pap.timer / PAP_INSERT_TIME) :
-        (pap.phase == PAP_WORK)   ? 1.0f : 0.0f;
+    // --- Chamber shutter ----------------------------------------------
+    // A panel that rises from inside the chamber to seal the mouth while the
+    // machine works. Timed so it is OPEN while the gun is dropping in (INSERT)
+    // and while the gun rises back out (end of WORK / READY), and SHUT in the
+    // middle of the work cycle — it never collides with the weapon.
+    float lidClose = 0.0f;
+    if (pap.phase == PAP_WORK) {
+        float elapsed = PAP_WORK_TIME - pap.timer;
+        float closeUp = elapsed / 0.5f;       if (closeUp  > 1) closeUp  = 1;
+        float openDn  = pap.timer / 0.5f;      if (openDn   > 1) openDn   = 1;
+        lidClose = (closeUp < openDn) ? closeUp : openDn;  // min: seal then open
+    }
     if (lidClose > 0.02f) {
-        // Slides in from -X to cover the top mouth.
-        float dx = (1.0f - lidClose) * 1.5f;
-        Vector3 lid = { px - dx, 1.97f, pz };
-        DrawCubeV(lid, (Vector3){1.5f, 0.08f, 1.5f}, (Color){55, 38, 80, 255});
-        DrawCubeWiresV(lid, (Vector3){1.5f, 0.08f, 1.5f}, trimHot);
+        float y = PAP_INSIDE_Y + lidClose * (PAP_MOUTH_Y - PAP_INSIDE_Y);
+        DrawCubeV((Vector3){ px, y, pz }, (Vector3){0.58f, 0.07f, 0.46f}, (Color){60,42,90,255});
+        DrawCubeWiresV((Vector3){ px, y, pz }, (Vector3){0.58f, 0.07f, 0.46f}, trimHot);
     }
 
     // --- Phase-driven weapon animation --------------------------------
-    Vector3 chamberIn = { px, 1.7f, pz };   // recessed inside the housing
+    Vector3 chamberIn = { px, PAP_INSIDE_Y, pz };
     if (pap.phase == PAP_INSERT && pap.weaponIdx >= 0) {
-        // Gun descends from a "handed-over" point above the front into the
-        // chamber, spinning as it drops, then the lid seals it in.
+        // Gun descends from a hand-height point in front into the chamber
+        // mouth, spinning as it drops.
         float frac = 1.0f - pap.timer / PAP_INSERT_TIME;   // 0 -> 1
-        Vector3 handPt = { px, 2.1f, pz + 1.3f };
+        Vector3 handPt = { px, 2.35f, pz + 0.95f };
         Vector3 gp = Vector3Lerp(handPt, chamberIn, frac);
         DrawWeaponDisplay(pap.weaponIdx, gp, 90.0f + frac * 180.0f, 1.0f);
     } else if (pap.phase == PAP_WORK) {
-        // Sealed: sparks spit from the lid seam.
+        // Sealed: sparks spit from the mouth seam, brightest at the seal.
         for (int i = 0; i < 6; i++) {
             float a = pap.bob * 6.0f + i * 1.7f;
-            float r = 0.25f + 0.2f * sinf(a * 1.3f);
-            Vector3 sp = { px + cosf(a) * r, 1.95f + sinf(a*2.0f) * 0.12f, pz + sinf(a) * r };
-            DrawCubeV(sp, (Vector3){0.05f,0.05f,0.05f},
+            float r = 0.18f + 0.16f * sinf(a * 1.3f);
+            Vector3 sp = { px + cosf(a) * r, PAP_MOUTH_Y + sinf(a*2.0f) * 0.1f, pz + sinf(a) * r };
+            DrawCubeV(sp, (Vector3){0.045f,0.045f,0.045f},
                       (Color){255, (unsigned char)(170 + 70*workPulse), 110, 255});
         }
     } else if (pap.phase == PAP_READY && pap.weaponIdx >= 0) {
-        // Upgraded weapon rises back out, glowing + slowly spinning, until
-        // the owner manually takes it (Use).
-        Vector3 gp = { px, 2.45f + sinf(pap.bob) * 0.08f, pz };
-        DrawWeaponDisplay(pap.weaponIdx, gp, pap.bob * 50.0f, 1.0f);
+        // Upgraded weapon rises out of the mouth, glowing + slowly spinning,
+        // until the owner manually takes it (Use).
+        Vector3 gp = { px, 2.28f + sinf(pap.bob) * 0.06f, pz };
+        DrawWeaponDisplay(pap.weaponIdx, gp, pap.bob * 50.0f, 1.15f);
     }
 }
 

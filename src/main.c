@@ -351,6 +351,59 @@ int main(int argc, char **argv) {
         return 0;
     }
 
+    // CLI: `--screenshot-pap` loads the world and shoots the Pack-a-Punch
+    // machine through its phases (idle / insert / work / ready) so the authored
+    // model + the procedural shutter/weapon animation can be eyeballed without
+    // playing into a round. Writes pap_0..3.png.
+    if (argc >= 2 && strcmp(argv[1], "--screenshot-pap") == 0) {
+        SetTraceLogLevel(LOG_WARNING);
+        SetConfigFlags(FLAG_MSAA_4X_HINT);
+        InitWindow(1280, 720, "PaP screenshot");
+        SetTargetFPS(60);
+        Weapons_Load();
+        Assets_Load();
+        Assets_ApplyWorldShader();
+        Render_LoadPlayerAnim();
+        Level_Build();
+
+        localPlayerIdx = 0;
+        for (int i = 0; i < NET_MAX_PLAYERS; i++) memset(&players[i], 0, sizeof players[i]);
+        players[0].active = true; players[0].alive = true;
+        players[0].pos = (Vector3){ 0, PLAYER_EYE, 6 };
+
+        pap.pos = (Vector3){ 0, 0, 0 };           // bring it to the origin
+        pap.ownerPlayer = 0; pap.slotInProgress = 0; pap.weaponIdx = W_RIFLE;
+
+        Camera cam = {
+            .position   = (Vector3){ 1.6f, 1.7f, 3.4f },
+            .target     = (Vector3){ 0, 1.7f, 0 },
+            .up         = (Vector3){ 0, 1, 0 },
+            .fovy       = 55.0f, .projection = CAMERA_PERSPECTIVE,
+        };
+        struct { const char *name; int phase; float timer; } shots[] = {
+            { "pap_0_idle",   PAP_IDLE,   0.0f },
+            { "pap_1_insert", PAP_INSERT, PAP_INSERT_TIME * 0.45f },
+            { "pap_2_work",   PAP_WORK,   PAP_WORK_TIME * 0.5f },
+            { "pap_3_ready",  PAP_READY,  0.0f },
+        };
+        for (int s = 0; s < 4; s++) {
+            pap.phase = shots[s].phase; pap.timer = shots[s].timer;
+            pap.bob = 1.2f;
+            BeginDrawing();
+            ClearBackground((Color){ 50, 52, 60, 255 });
+            Render_World3D(cam);
+            DrawText(shots[s].name, 20, 20, 28, (Color){240,240,240,255});
+            EndDrawing();
+            char fn[64]; snprintf(fn, sizeof fn, "%s.png", shots[s].name);
+            TakeScreenshot(fn);
+            fprintf(stderr, "wrote %s\n", fn);
+        }
+        Render_UnloadPlayerAnim();
+        Assets_Unload(); Weapons_Unload();
+        CloseWindow();
+        return 0;
+    }
+
     // CLI: `--anim-test <file.glb> [clip]` loads a skinned glTF model through
     // the animation pipeline and writes a strip of PNGs sampling the clip
     // (anim_test_0..3.png) so skinning + lighting can be verified without the

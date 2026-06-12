@@ -108,6 +108,12 @@ typedef enum { FM_SEMI = 0, FM_BURST, FM_AUTO } FireMode;
 // Which procedural fire-SFX bank in audio.c a weapon's shots route to.
 typedef enum { WSFX_SHOT = 0, WSFX_SHOTGUN, WSFX_RAYGUN } WeaponSfxKind;
 
+// Which arms-viewmodel hold the weapon uses at idle. LONG = two-hand
+// foregrip hold (the shared `idle` clip); PISTOL = support hand cups the
+// gun hand (`idle_pistol` clip, falls back to `idle` if the clip is
+// missing from arms_vm.glb).
+typedef enum { VMPOSE_LONG = 0, VMPOSE_PISTOL } WeaponVmPose;
+
 // High-level slot category. Drives HUD ordering, wallbuy filter,
 // equipment-slot rules (lethal/tactical occupy their own slots).
 typedef enum {
@@ -173,6 +179,8 @@ typedef struct {
     // Mystery Box roll weighting (relative; 1.0 = baseline, 0 = never
     // rolls). .weapon key: `mbox_weight w`
     float  mboxWeight;
+    // Arms-viewmodel idle hold. .weapon key: `vm_pose LONG|PISTOL`
+    WeaponVmPose vmPose;
 } WeaponDef;
 
 // Adding a 6th weapon? Checklist (everything else is data-driven via the

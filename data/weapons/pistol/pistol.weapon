@@ -47,3 +47,6 @@ mbox_weight     1.0
 vm_grip_pos     0 0 -0.05
 vm_grip_rot     0 0 0
 vm_grip_scale   1.0
+
+# Arms-viewmodel idle hold: support hand cups the gun hand.
+vm_pose         PISTOL

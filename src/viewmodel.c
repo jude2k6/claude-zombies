@@ -21,7 +21,7 @@ static AnimModel armsVM;
 static AnimState armsVMState;
 static int avmIdle = -1, avmFire = -1, avmReload = -1, avmReloadEmpty = -1,
            avmRaise = -1, avmLower = -1, avmSprint = -1, avmHandR = -1,
-           avmHandL = -1;
+           avmHandL = -1, avmIdlePistol = -1;
 
 // Grip-tuning aid: draw markers at the hand bones (red sphere = hand.R
 // origin + RGB axis ticks for its local X/Y/Z, blue sphere = hand.L).
@@ -36,6 +36,7 @@ void Viewmodel_LoadArms(void) {
     if (!Anim_Load(&armsVM, "arms_vm.glb")) return;
     if (worldSkinnedShaderLoaded) Anim_ApplyShader(&armsVM, worldSkinnedShader);
     avmIdle        = Anim_FindClip(&armsVM, "idle");
+    avmIdlePistol  = Anim_FindClip(&armsVM, "idle_pistol");  // optional clip
     avmFire        = Anim_FindClip(&armsVM, "fire");
     avmReload      = Anim_FindClip(&armsVM, "reload");
     avmReloadEmpty = Anim_FindClip(&armsVM, "reload_empty");
@@ -129,7 +130,11 @@ static void DrawArmsViewmodel(Camera camera, int wi) {
         bool busy = ((st->clip == avmFire || st->clip == avmRaise) && !st->finished)
                  || (reloading && (st->clip == avmReload || st->clip == avmReloadEmpty));
         if (!busy) {
-            int want = (sprinting && avmSprint >= 0) ? avmSprint : avmIdle;
+            // Idle hold is per-weapon (`vm_pose` key): pistols cup the gun
+            // hand (`idle_pistol`), long guns use the foregrip `idle`.
+            int idle = (WEAPONS[wi].vmPose == VMPOSE_PISTOL && avmIdlePistol >= 0)
+                       ? avmIdlePistol : avmIdle;
+            int want = (sprinting && avmSprint >= 0) ? avmSprint : idle;
             if (st->clip != want) Anim_Play(st, want, true, 1.0f);
         }
     }

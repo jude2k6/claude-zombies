@@ -266,6 +266,7 @@ void Weapon_Melee(Player *p) {
 //     vm_grip_pos     0.04 -0.12 0.05      # arms-path grip nudge (+x right, +y muzzle, +z up)
 //     vm_grip_rot     0 0 0                # fine rotation (deg) after the base +90X
 //     vm_grip_scale   1.0                  # gun size relative to the arms
+//     vm_pose         LONG                 # idle hold: LONG (foregrip) | PISTOL (cupped)
 //
 // There are NO compiled-in defaults — a field not present in the file stays
 // ZERO (identity 1.0 for the scale keys), so every gameplay field should be
@@ -477,6 +478,12 @@ static int Weapons_ParseFile(const char *path) {
         else if (strcmp(k, "vm_grip_scale") == 0 && n >= 2) {
             ParseFloatTok(toks[1], &grip.scale);
             gripSet = true;
+        }
+        else if (strcmp(k, "vm_pose") == 0 && n >= 2) {
+            if      (strcmp(toks[1], "PISTOL") == 0) d.vmPose = VMPOSE_PISTOL;
+            else if (strcmp(toks[1], "LONG")   == 0) d.vmPose = VMPOSE_LONG;
+            else fprintf(stderr, "weapon: %s line %d: unknown vm_pose '%s'\n",
+                         path, lineNo, toks[1]);
         }
         else {
             fprintf(stderr, "weapon: %s line %d: unknown key '%s'\n",

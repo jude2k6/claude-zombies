@@ -607,7 +607,6 @@ static void DrawEnemy(Enemy *e) {
 
     // Face the targeted player; fall back to 0 yaw if no target.
     float yawDeg = 0.0f;
-    float distToTarget = 1e9f;
     if (e->targetPlayer >= 0 && e->targetPlayer < NET_MAX_PLAYERS &&
         players[e->targetPlayer].active) {
         Vector3 t3 = players[e->targetPlayer].pos;
@@ -615,7 +614,6 @@ static void DrawEnemy(Enemy *e) {
         float dz = t3.z - e->pos.z;
         // raylib draws model with rotation around (0,1,0); 0 deg = -Z fwd.
         yawDeg = atan2f(-dx, -dz) * RAD2DEG;
-        distToTarget = sqrtf(dx*dx + dz*dz);
     }
 
     // Feet sit on the ground; the model origin (feet) is the scale pivot,

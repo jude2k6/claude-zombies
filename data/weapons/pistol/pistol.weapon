@@ -33,3 +33,17 @@ model           pistol.obj
 model_scale     35.0
 model_yaw       28.0
 model_offset    0.05 0.09 0.0
+
+# Fire SFX: bank (SHOT|SHOTGUN|RAYGUN), volume, pitch.
+sfx             SHOT 0.55 1.10
+# Haptic punch on fire: shake amount, shake time, rumble low, rumble high.
+haptic          0.10 0.30 0.25 0.06
+# Mystery Box roll weight (1.0 = baseline, 0 = never).
+mbox_weight     1.0
+
+# Arms-viewmodel grip (hand.R bone seating). pos is bone-local metres after
+# the base +90X rotation: +x right, +y toward muzzle, +z up. Tune via
+# --screenshot-viewmodels.
+vm_grip_pos     0 0 0
+vm_grip_rot     0 0 0
+vm_grip_scale   1.0

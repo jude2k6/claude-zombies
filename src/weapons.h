@@ -23,6 +23,20 @@ typedef struct WeaponModelTune {
 
 extern WeaponModelTune weaponTune[W_COUNT];
 
+// Per-weapon grip: where/how the gun OBJ sits in the arms viewmodel's
+// hand.R bone (viewmodel.c arms path). `pos` is in bone-local metres AFTER
+// the base +90° X rotation (+x = right, +y = toward muzzle, +z = up),
+// `rotDeg` is extra fine rotation, `scale` sizes the gun against the arms.
+// Data-driven via the .weapon keys vm_grip_pos / vm_grip_rot / vm_grip_scale;
+// tuned with --screenshot-viewmodels.
+typedef struct WeaponGrip {
+    Vector3 pos;
+    Vector3 rotDeg;
+    float   scale;
+} WeaponGrip;
+
+extern WeaponGrip weaponGrip[W_COUNT];
+
 // ---- loader -------------------------------------------------------------
 // Scans data/weapons/ for *.weapon files, parses each, populates WEAPONS[]
 // + weaponTune[] and loads the model into weaponModels[]. Call BEFORE

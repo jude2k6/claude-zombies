@@ -120,18 +120,26 @@ static int Dev_ScreenshotViewmodels(void) {
         // viewmodel inside it — so we get lit materials instead of
         // a black silhouette. The empty level just draws a sky + floor
         // backdrop which makes scale easier to gauge anyway.
-        BeginDrawing();
-        ClearBackground((Color){ 60, 65, 75, 255 });
-        Render_World3D(cam);
-        DrawText(WEAPONS[wi].idName ? WEAPONS[wi].idName : "?",
-                 20, 20, 36, (Color){240,240,240,255});
-        DrawText(WEAPONS[wi].name ? WEAPONS[wi].name : "?",
-                 20, 64, 24, (Color){200,200,200,255});
-        char dims[64];
-        snprintf(dims, sizeof dims, "model_scale=%.1f  yaw=%.0f deg",
-                 weaponTune[wi].scale, weaponTune[wi].yawDeg);
-        DrawText(dims, 20, 96, 18, (Color){180,180,200,255});
-        EndDrawing();
+        //
+        // The arms VM plays its `raise` clip on every weapon change, so a
+        // single frame would capture the gun mid-raise (low, half off
+        // screen). Render ~1.25 s of settle frames first so the capture is
+        // the true idle pose — that's the pose grips are tuned against.
+        SetTargetFPS(60);
+        for (int f = 0; f < 75; f++) {
+            BeginDrawing();
+            ClearBackground((Color){ 60, 65, 75, 255 });
+            Render_World3D(cam);
+            DrawText(WEAPONS[wi].idName ? WEAPONS[wi].idName : "?",
+                     20, 20, 36, (Color){240,240,240,255});
+            DrawText(WEAPONS[wi].name ? WEAPONS[wi].name : "?",
+                     20, 64, 24, (Color){200,200,200,255});
+            char dims[64];
+            snprintf(dims, sizeof dims, "model_scale=%.1f  yaw=%.0f deg",
+                     weaponTune[wi].scale, weaponTune[wi].yawDeg);
+            DrawText(dims, 20, 96, 18, (Color){180,180,200,255});
+            EndDrawing();
+        }
 
         char fname[128];
         snprintf(fname, sizeof fname, "viewmodel_%s.png",

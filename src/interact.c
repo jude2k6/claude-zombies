@@ -155,7 +155,24 @@ void Interact_UseMBox(Player *p) {
         mbox.state = MBOX_ROLLING;
         mbox.timer = MBOX_ROLL_TIME;
         mbox.ownerPlayer = meIdx;
-        mbox.finalWeapon = rand() % W_COUNT;
+        // Weighted roll — per-weapon `mbox_weight` from the .weapon files
+        // (0 = never rolls; uniform fallback if every weight is zero).
+        float totalW = 0.0f;
+        for (int w = 0; w < W_COUNT; w++)
+            if (WEAPONS[w].mboxWeight > 0.0f) totalW += WEAPONS[w].mboxWeight;
+        if (totalW > 0.0f) {
+            float r = ((float)rand() / (float)RAND_MAX) * totalW;
+            int pick = 0;
+            for (int w = 0; w < W_COUNT; w++) {
+                if (WEAPONS[w].mboxWeight <= 0.0f) continue;
+                pick = w;
+                r -= WEAPONS[w].mboxWeight;
+                if (r <= 0.0f) break;
+            }
+            mbox.finalWeapon = pick;
+        } else {
+            mbox.finalWeapon = rand() % W_COUNT;
+        }
         mbox.showingWeapon = 0;
     } else if (mbox.state == MBOX_WAITING && meIdx == mbox.ownerPlayer) {
         const WeaponDef *w = &WEAPONS[mbox.finalWeapon];

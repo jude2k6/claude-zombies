@@ -10,11 +10,12 @@
 #include <math.h>
 
 // ---- shared first-person ARMS viewmodel (glTF) -------------------------
-// One rigged pair of arms+hands (arms_vm.glb) used by every NON-pistol gun.
-// The gun is a separate model bolted onto the `hand.R` bone each frame, so a
-// character skin only needs to retexture this one arms model (not every gun).
-// The pistol keeps its own combined pistol_vm.glb. Clip set mirrors the gun
-// viewmodel clips; the gun rides the right hand, so recoil/reload read for free.
+// One rigged pair of arms+hands (arms_vm.glb) used by ALL guns. The gun is a
+// separate model bolted onto the `hand.R` bone each frame, so a character
+// skin only needs to retexture this one arms model (not every gun). Clip set
+// mirrors the gun viewmodel clips; the gun rides the right hand, so
+// recoil/reload read for free. Per-gun seating comes from weaponGrip[]
+// (vm_grip_* keys in the .weapon files).
 static AnimModel armsVM;
 static AnimState armsVMState;
 static int avmIdle = -1, avmFire = -1, avmReload = -1, avmReloadEmpty = -1,
@@ -41,21 +42,14 @@ void Viewmodel_UnloadArms(void) {
     Anim_Unload(&armsVM);
 }
 
-// Per-weapon grip: where/how the gun sits in the right hand. The base
-// orientation rotates the gun OBJ (long axis model -Z = muzzle, +Y = up) so the
-// muzzle points +Y (arms forward) and up stays +Z. `pos` nudges the grip in
-// hand-local metres, `rotDeg` is extra fine rotation, `scale` sizes the gun
-// against the arms. Tuned via --screenshot-viewmodels.
-typedef struct { Vector3 pos; Vector3 rotDeg; float scale; } GunGrip;
-static GunGrip gunGrip[W_COUNT] = {
-    // pos is in bone-local frame (after base +90deg X rotation applied to gun).
-    // +x=right, +y=toward muzzle (gun forward), +z=up in hand bone frame.
-    // Empirically: pos.x positive moves gun right on screen.
-    [W_SMG]     = { {0.04f, -0.12f, 0.05f}, {0, 0, 0}, 1.0f },
-    [W_SHOTGUN] = { {0.03f, -0.14f, 0.05f}, {0, 0, 0}, 1.0f },
-    [W_RIFLE]   = { {0.03f, -0.18f, 0.04f}, {0, 0, 0}, 1.0f },
-    [W_RAYGUN]  = { {0.08f, -0.10f, 0.04f}, {0, 0, 0}, 0.65f },
-};
+// Per-weapon grip seating lives in weaponGrip[] (weapons.c), populated from
+// the vm_grip_pos / vm_grip_rot / vm_grip_scale keys of each .weapon file.
+// The base orientation rotates the gun OBJ (long axis model -Z = muzzle,
+// +Y = up) so the muzzle points +Y (arms forward) and up stays +Z. `pos`
+// nudges the grip in hand-local metres (after that base rotation: +x=right,
+// +y=toward muzzle, +z=up; pos.x positive moves the gun right on screen),
+// `rotDeg` is extra fine rotation, `scale` sizes the gun against the arms.
+// Tune via --screenshot-viewmodels — edit the .weapon, rerun, no recompile.
 
 // Procedural viewmodel movement: a gentle bob while walking and a stronger
 // sink + high-frequency jitter while sprinting. `outPos` is a world-space
@@ -166,7 +160,7 @@ static void DrawArmsViewmodel(Camera camera, int wi) {
 
     // gun model.transform = root * handBone * gunLocal (raylib MatrixMultiply
     // applies the LEFT operand first, so the chain reads inner->outer).
-    GunGrip g = gunGrip[wi];
+    WeaponGrip g = weaponGrip[wi];
     float gs = (g.scale > 0.0f) ? g.scale : 1.0f;
     Matrix gunLocal = MatrixScale(gs, gs, gs);
     gunLocal = MatrixMultiply(gunLocal, MatrixRotateX(PI * 0.5f)); // -Z->+Y, +Y->+Z
@@ -229,11 +223,10 @@ void Viewmodel_DrawFirstPerson(Camera camera) {
     int wi = me->inventory[me->currentSlot].weaponIdx;
     if (wi < 0 || wi >= W_COUNT) return;
     if (!weaponModelLoaded[wi]) return;
-    // M1911 deliberately uses the gun-only procedural viewmodel below (no arms)
-    // — it bobs while walking and sinks + shakes while sprinting. The other 4
-    // guns use the shared arms + gun bolted to hand.R (skinnable arms), falling
-    // through to the legacy gun-only floating path if arms_vm.glb isn't loaded.
-    if (wi != W_PISTOL && armsVM.loaded && avmHandR >= 0) { DrawArmsViewmodel(camera, wi); return; }
+    // All guns use the shared arms + gun bolted to hand.R (skinnable arms),
+    // falling through to the legacy gun-only floating OBJ path below only if
+    // arms_vm.glb isn't loaded (graceful degradation, never crashes).
+    if (armsVM.loaded && avmHandR >= 0) { DrawArmsViewmodel(camera, wi); return; }
 
     // ---- viewmodel anim state (local to the player's render) ----
     // Swap: when the displayed weapon changes (currentSlot flip OR a

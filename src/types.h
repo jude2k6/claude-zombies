@@ -105,6 +105,9 @@
 
 typedef enum { FM_SEMI = 0, FM_BURST, FM_AUTO } FireMode;
 
+// Which procedural fire-SFX bank in audio.c a weapon's shots route to.
+typedef enum { WSFX_SHOT = 0, WSFX_SHOTGUN, WSFX_RAYGUN } WeaponSfxKind;
+
 // High-level slot category. Drives HUD ordering, wallbuy filter,
 // equipment-slot rules (lethal/tactical occupy their own slots).
 typedef enum {
@@ -155,8 +158,36 @@ typedef struct {
     // multiplier does NOT apply to splash.
     float  splashRadius;
     int    splashDamage;
+    // Fire SFX routing — bank + volume + pitch (consumed by audio.c).
+    // .weapon key: `sfx SHOT|SHOTGUN|RAYGUN vol pitch`
+    WeaponSfxKind sfxKind;
+    float  sfxVol;
+    float  sfxPitch;
+    // Haptic punch on fire, local player only (weapons.c:Weapon_Fire):
+    // camera shake amount/time + pad rumble low/high motor strengths.
+    // .weapon key: `haptic shake time rumbleLow rumbleHigh`
+    float  hapticShake;
+    float  hapticTime;
+    float  rumbleLow;
+    float  rumbleHigh;
+    // Mystery Box roll weighting (relative; 1.0 = baseline, 0 = never
+    // rolls). .weapon key: `mbox_weight w`
+    float  mboxWeight;
 } WeaponDef;
 
+// Adding a 6th weapon? Checklist (everything else is data-driven via the
+// data/weapons/<name>/<name>.weapon file — see weapons.c for the format):
+//   1. Extend this enum before W_COUNT.
+//   2. Add a minimal fallback entry to WEAPONS[] + weaponGrip[] in weapons.c
+//      (idName at minimum — the .weapon file supplies the real values).
+//   3. Add the id token to IdNameToIdx (weapons.c), WeaponNameToIdx
+//      (level.c), and the WALLBUY token list in mapdoc.c.
+//   4. Bump NET_PROTO_VERSION in net.h — weapon indices are serialized raw
+//      (inventory, mystery box, PaP) and old clients would mis-decode the
+//      new index.
+//   5. Author data/weapons/<name>/{<name>.weapon,<name>.obj,<name>.mtl}
+//      (~0.5–1.5 m long, origin at the grip, forward_axis='Z' export) and
+//      tune vm_grip_* via --screenshot-viewmodels.
 enum { W_PISTOL = 0, W_SMG, W_SHOTGUN, W_RIFLE, W_RAYGUN, W_COUNT };
 
 typedef struct {

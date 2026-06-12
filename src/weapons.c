@@ -19,89 +19,31 @@ static char *xstrdup(const char *s) {
 }
 
 // ---- WEAPONS[] storage --------------------------------------------------
-// Mutable so Weapons_Load() can populate / override entries from .weapon
-// files. Compiled-in defaults below act as fallbacks for any slot whose
-// file is missing — the game stays playable with no data/weapons/ tree.
-WeaponDef WEAPONS[W_COUNT] = {
-    [W_PISTOL] = {
-        .idName="PISTOL", .name="M1911", .packedName="Mustang",
-        .category=WC_PRIMARY,
-        .damage=40, .magSize=8, .reserveMax=80,
-        .fireCooldown=0.18f, .reloadTime=1.3f,
-        .pellets=1, .spreadDeg=0.0f,
-        .fireMode=FM_SEMI,
-        .buyPrice=0, .ammoPrice=100,
-        .tint=(Color){255,220,140,255},
-        .bulletSpeed=320.0f, .bulletLife=0.35f, .tracerWidth=0.025f,
-        .recoilPitch=0.55f, .recoilYaw=0.18f,
-        .dropoffStart=15.0f, .dropoffEnd=35.0f, .dropoffMinMul=0.55f,
-    },
-    [W_SMG] = {
-        .idName="SMG", .name="MP5", .packedName="MP5-K+",
-        .category=WC_PRIMARY,
-        .damage=35, .magSize=30, .reserveMax=240,
-        .fireCooldown=0.067f, .reloadTime=1.8f,
-        .pellets=1, .spreadDeg=1.5f,
-        .fireMode=FM_AUTO,
-        .buyPrice=1000, .ammoPrice=500,
-        .tint=(Color){255,210,120,255},
-        .bulletSpeed=280.0f, .bulletLife=0.35f, .tracerWidth=0.022f,
-        .recoilPitch=0.38f, .recoilYaw=0.35f,
-        .dropoffStart=18.0f, .dropoffEnd=40.0f, .dropoffMinMul=0.45f,
-    },
-    [W_SHOTGUN] = {
-        .idName="SHOTGUN", .name="Olympia", .packedName="Hades",
-        .category=WC_PRIMARY,
-        .damage=60, .magSize=2, .reserveMax=30,
-        .fireCooldown=0.45f, .reloadTime=2.0f,
-        .pellets=6, .spreadDeg=6.0f,
-        .fireMode=FM_SEMI,
-        .buyPrice=500, .ammoPrice=250,
-        .tint=(Color){255,180,80,255},
-        .bulletSpeed=240.0f, .bulletLife=0.18f, .tracerWidth=0.020f,
-        .recoilPitch=2.40f, .recoilYaw=0.55f,
-        .dropoffStart=5.0f, .dropoffEnd=18.0f, .dropoffMinMul=0.25f,
-    },
-    [W_RIFLE] = {
-        .idName="RIFLE", .name="M14", .packedName="Mnesia",
-        .category=WC_PRIMARY,
-        .damage=100, .magSize=8, .reserveMax=120,
-        .fireCooldown=0.13f, .reloadTime=1.5f,
-        .pellets=1, .spreadDeg=0.4f,
-        .fireMode=FM_SEMI,
-        .buyPrice=500, .ammoPrice=250,
-        .tint=(Color){255,230,160,255},
-        .bulletSpeed=420.0f, .bulletLife=0.40f, .tracerWidth=0.028f,
-        .recoilPitch=1.20f, .recoilYaw=0.20f,
-        .dropoffStart=50.0f, .dropoffEnd=100.0f, .dropoffMinMul=0.75f,
-    },
-    [W_RAYGUN] = {
-        .idName="RAYGUN", .name="Ray Gun", .packedName="Porter's X2",
-        .category=WC_SPECIAL,
-        .damage=1000, .magSize=20, .reserveMax=160,
-        .fireCooldown=0.22f, .reloadTime=2.6f,
-        .pellets=1, .spreadDeg=0.0f,
-        .fireMode=FM_SEMI,
-        .buyPrice=10000, .ammoPrice=4500,
-        .tint=(Color){120,255,160,255},
-        .bulletSpeed=80.0f, .bulletLife=1.10f, .tracerWidth=0.060f,
-        .recoilPitch=0.85f, .recoilYaw=0.25f,
-        .dropoffStart=80.0f, .dropoffEnd=120.0f, .dropoffMinMul=0.90f,
-        .splashRadius=3.5f, .splashDamage=500,
-    },
+// PLAIN STORAGE — there are NO compiled-in weapon stats. The .weapon files
+// under data/weapons/<name>/ are the single source of truth for every
+// number; Weapons_Load zeroes these arrays (identity scale only), parses
+// the files, and complains loudly about any W_* slot no file claimed.
+// A slot with no file has all-zero stats (can't fire, never rolls in the
+// mystery box) and shows its raw id token as its name.
+WeaponDef WEAPONS[W_COUNT];
+
+// Stable string id per slot. Mirrors the W_* enum order; this is the token
+// a .weapon file's `id` field uses to claim the slot, and the placeholder
+// display name until the file loads.
+static const char *W_ID_NAMES[W_COUNT] = {
+    [W_PISTOL]  = "PISTOL",
+    [W_SMG]     = "SMG",
+    [W_SHOTGUN] = "SHOTGUN",
+    [W_RIFLE]   = "RIFLE",
+    [W_RAYGUN]  = "RAYGUN",
 };
 
 // ---- weapon model storage (moved from assets.c) -------------------------
 Model weaponModels[W_COUNT];
 bool  weaponModelLoaded[W_COUNT];
 
-WeaponModelTune weaponTune[W_COUNT] = {
-    [W_PISTOL]  = { .scale = 1.2f, .yawDeg = 90.0f, .offset = {0, 0, 0} },
-    [W_SMG]     = { .scale = 1.0f, .yawDeg =  0.0f, .offset = {0, 0, 0} },
-    [W_SHOTGUN] = { .scale = 1.0f, .yawDeg =  0.0f, .offset = {0, 0, 0} },
-    [W_RIFLE]   = { .scale = 1.0f, .yawDeg =  0.0f, .offset = {0, 0, 0} },
-    [W_RAYGUN]  = { .scale = 1.1f, .yawDeg =  0.0f, .offset = {0, 0, 0} },
-};
+WeaponModelTune weaponTune[W_COUNT];   // populated from model_* keys
+WeaponGrip      weaponGrip[W_COUNT];   // populated from vm_grip_* keys
 
 int Weapon_EffDamage(Player *p, WeaponSlot *s) {
     int d = WEAPONS[s->weaponIdx].damage;
@@ -214,14 +156,8 @@ void Weapon_Fire(Player *p) {
 
     if (ownerIdx == localPlayerIdx) {
         // Per-weapon haptic punch (camera shake + rumble — distinct from the
-        // aim-kick recoil applied above).
-        switch (s->weaponIdx) {
-            case W_SHOTGUN: Fx_PunchAndRumble(0.35f, 0.6f, 0.35f, 0.12f); break;
-            case W_RIFLE:   Fx_PunchAndRumble(0.22f, 0.45f, 0.30f, 0.08f); break;
-            case W_RAYGUN:  Fx_PunchAndRumble(0.28f, 0.30f, 0.55f, 0.10f); break;
-            case W_SMG:     Fx_PunchAndRumble(0.08f, 0.25f, 0.20f, 0.05f); break;
-            default:        Fx_PunchAndRumble(0.10f, 0.30f, 0.25f, 0.06f); break;
-        }
+        // aim-kick recoil applied above). Data-driven via the `haptic` key.
+        Fx_PunchAndRumble(w->hapticShake, w->hapticTime, w->rumbleLow, w->rumbleHigh);
     }
 }
 
@@ -321,20 +257,34 @@ void Weapon_Melee(Player *p) {
 //     dropoff         15.0 35.0 0.55       # start  end  minMul
 //     splash          3.0 70               # radius  peakDamage (linear falloff)
 //     model           pistol.obj           # path relative to the .weapon file
-//     model_scale     1.2
+//     model_scale     1.2                  # viewmodel framing (legacy path + DrawWeaponDisplay)
 //     model_yaw       90.0
+//     model_offset    0.05 0.09 0.0
+//     sfx             SHOT 0.55 1.10       # bank (SHOT|SHOTGUN|RAYGUN)  vol  pitch
+//     haptic          0.10 0.30 0.25 0.06  # shake  time  rumbleLow  rumbleHigh
+//     mbox_weight     1.0                  # mystery-box roll weight (0 = never)
+//     vm_grip_pos     0.04 -0.12 0.05      # arms-path grip nudge (+x right, +y muzzle, +z up)
+//     vm_grip_rot     0 0 0                # fine rotation (deg) after the base +90X
+//     vm_grip_scale   1.0                  # gun size relative to the arms
 //
-// Any field not present keeps its compiled-in default. The `id` field is
-// REQUIRED and must match one of the W_* enum names (without the prefix).
+// There are NO compiled-in defaults — a field not present in the file stays
+// ZERO (identity 1.0 for the scale keys), so every gameplay field should be
+// specified. The `id` field is REQUIRED and must match one of the W_* enum
+// names (without the prefix).
 
 static int IdNameToIdx(const char *s) {
     if (!s) return -1;
-    if (strcmp(s, "PISTOL")  == 0) return W_PISTOL;
-    if (strcmp(s, "SMG")     == 0) return W_SMG;
-    if (strcmp(s, "SHOTGUN") == 0) return W_SHOTGUN;
-    if (strcmp(s, "RIFLE")   == 0) return W_RIFLE;
-    if (strcmp(s, "RAYGUN")  == 0) return W_RAYGUN;
+    for (int i = 0; i < W_COUNT; i++)
+        if (strcmp(s, W_ID_NAMES[i]) == 0) return i;
     return -1;
+}
+
+static int SfxKindFromStr(const char *s, int fallback) {
+    if (!s) return fallback;
+    if (strcmp(s, "SHOT")    == 0) return WSFX_SHOT;
+    if (strcmp(s, "SHOTGUN") == 0) return WSFX_SHOTGUN;
+    if (strcmp(s, "RAYGUN")  == 0) return WSFX_RAYGUN;
+    return fallback;
 }
 
 static FireMode FireModeFromStr(const char *s, FireMode fallback) {
@@ -408,8 +358,9 @@ static int Weapons_ParseFile(const char *path) {
     int idx = -1;
     WeaponDef d = {0};   // accumulator — copied into WEAPONS[idx] only if we find a valid id
     WeaponModelTune tune = { .scale = 1.0f, .yawDeg = 0.0f, .offset = {0,0,0} };
+    WeaponGrip grip = { .scale = 1.0f };
     char modelFile[128] = {0};
-    bool tuneSet = false;
+    bool tuneSet = false, gripSet = false;
 
     char *line = text;
     int lineNo = 0;
@@ -435,9 +386,10 @@ static int Weapons_ParseFile(const char *path) {
                 free(text);
                 return -1;
             }
-            d = WEAPONS[idx];   // start from the compiled-in defaults
+            d = WEAPONS[idx];   // zeroed storage (+ idName) — file supplies everything
             tune = weaponTune[idx];
-            d.idName = WEAPONS[idx].idName;
+            grip = weaponGrip[idx];
+            d.idName = W_ID_NAMES[idx];
         }
         else if (idx < 0) {
             // any non-id key before id is a structural error
@@ -496,6 +448,36 @@ static int Weapons_ParseFile(const char *path) {
             ParseFloatTok(toks[3], &tune.offset.z);
             tuneSet = true;
         }
+        else if (strcmp(k, "sfx") == 0 && n >= 4) {
+            d.sfxKind = (WeaponSfxKind)SfxKindFromStr(toks[1], d.sfxKind);
+            ParseFloatTok(toks[2], &d.sfxVol);
+            ParseFloatTok(toks[3], &d.sfxPitch);
+        }
+        else if (strcmp(k, "haptic") == 0 && n >= 5) {
+            ParseFloatTok(toks[1], &d.hapticShake);
+            ParseFloatTok(toks[2], &d.hapticTime);
+            ParseFloatTok(toks[3], &d.rumbleLow);
+            ParseFloatTok(toks[4], &d.rumbleHigh);
+        }
+        else if (strcmp(k, "mbox_weight") == 0 && n >= 2) {
+            ParseFloatTok(toks[1], &d.mboxWeight);
+        }
+        else if (strcmp(k, "vm_grip_pos") == 0 && n >= 4) {
+            ParseFloatTok(toks[1], &grip.pos.x);
+            ParseFloatTok(toks[2], &grip.pos.y);
+            ParseFloatTok(toks[3], &grip.pos.z);
+            gripSet = true;
+        }
+        else if (strcmp(k, "vm_grip_rot") == 0 && n >= 4) {
+            ParseFloatTok(toks[1], &grip.rotDeg.x);
+            ParseFloatTok(toks[2], &grip.rotDeg.y);
+            ParseFloatTok(toks[3], &grip.rotDeg.z);
+            gripSet = true;
+        }
+        else if (strcmp(k, "vm_grip_scale") == 0 && n >= 2) {
+            ParseFloatTok(toks[1], &grip.scale);
+            gripSet = true;
+        }
         else {
             fprintf(stderr, "weapon: %s line %d: unknown key '%s'\n",
                     path, lineNo, k);
@@ -514,6 +496,7 @@ static int Weapons_ParseFile(const char *path) {
 
     WEAPONS[idx] = d;
     if (tuneSet) weaponTune[idx] = tune;
+    if (gripSet) weaponGrip[idx] = grip;
 
     // Load the model (relative to the .weapon file's directory).
     if (modelFile[0]) {
@@ -545,7 +528,18 @@ static int Weapons_ParseFile(const char *path) {
 }
 
 void Weapons_Load(void) {
-    for (int i = 0; i < W_COUNT; i++) weaponModelLoaded[i] = false;
+    // Reset to a blank slate: zero stats, identity scales, id token as the
+    // placeholder display name. Everything real comes from the files.
+    for (int i = 0; i < W_COUNT; i++) {
+        weaponModelLoaded[i] = false;
+        memset(&WEAPONS[i], 0, sizeof WEAPONS[i]);
+        WEAPONS[i].idName     = W_ID_NAMES[i];
+        WEAPONS[i].name       = W_ID_NAMES[i];
+        WEAPONS[i].packedName = W_ID_NAMES[i];
+        WEAPONS[i].tint       = WHITE;
+        weaponTune[i] = (WeaponModelTune){ .scale = 1.0f };
+        weaponGrip[i] = (WeaponGrip){ .scale = 1.0f };
+    }
 
     // Search the same prefix list as other assets so the binary runs from
     // either the build dir (data/weapons/) or the source tree (../data/...).
@@ -555,22 +549,28 @@ void Weapons_Load(void) {
         "./data/weapons",
     };
 
+    bool claimed[W_COUNT] = { false };
     int parsed = 0;
     for (size_t p = 0; p < sizeof prefixes / sizeof prefixes[0]; p++) {
         if (!DirectoryExists(prefixes[p])) continue;
         FilePathList files = LoadDirectoryFilesEx(prefixes[p], ".weapon", true);
         for (unsigned i = 0; i < files.count; i++) {
-            if (Weapons_ParseFile(files.paths[i]) >= 0) parsed++;
+            int idx = Weapons_ParseFile(files.paths[i]);
+            if (idx >= 0) { claimed[idx] = true; parsed++; }
         }
         UnloadDirectoryFiles(files);
         if (parsed > 0) break;     // first existing root wins
     }
 
-    if (parsed == 0) {
-        fprintf(stderr, "weapon: no .weapon files found, using compiled defaults\n");
-    } else {
-        fprintf(stderr, "weapon: parsed %d .weapon file(s)\n", parsed);
+    // No compiled-in fallbacks exist: any unclaimed slot is a broken weapon
+    // (zero damage / zero mag, never rolls in the box). Say so loudly.
+    for (int i = 0; i < W_COUNT; i++) {
+        if (!claimed[i])
+            fprintf(stderr, "weapon: ERROR: no .weapon file claimed id %s "
+                            "— weapon is unusable (data/weapons/ missing or broken)\n",
+                    W_ID_NAMES[i]);
     }
+    fprintf(stderr, "weapon: parsed %d .weapon file(s)\n", parsed);
 }
 
 void Weapons_Unload(void) {

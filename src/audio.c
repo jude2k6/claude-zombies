@@ -944,12 +944,16 @@ void Audio_Tick(Player *me) {
         WeaponSlot *cur = &me->inventory[me->currentSlot];
         SoundSlot *slot = &sfx_shot;
         float vol = 0.6f, pitch = 1.0f;
-        switch (cur->weaponIdx) {
-            case W_PISTOL:  slot = &sfx_shot;    vol = 0.55f; pitch = 1.10f; break;
-            case W_SMG:     slot = &sfx_shot;    vol = 0.55f; pitch = 1.25f; break;
-            case W_SHOTGUN: slot = &sfx_shotgun; vol = 0.85f; pitch = 0.95f; break;
-            case W_RIFLE:   slot = &sfx_shot;    vol = 0.75f; pitch = 0.85f; break;
-            case W_RAYGUN:  slot = &sfx_raygun;  vol = 0.75f; pitch = 1.00f; break;
+        // Bank + volume + pitch are data-driven (`sfx` key in the .weapon file).
+        if (cur->weaponIdx >= 0 && cur->weaponIdx < W_COUNT) {
+            const WeaponDef *w = &WEAPONS[cur->weaponIdx];
+            switch (w->sfxKind) {
+                case WSFX_SHOTGUN: slot = &sfx_shotgun; break;
+                case WSFX_RAYGUN:  slot = &sfx_raygun;  break;
+                default:           slot = &sfx_shot;    break;
+            }
+            if (w->sfxVol   > 0.0f) vol   = w->sfxVol;
+            if (w->sfxPitch > 0.0f) pitch = w->sfxPitch;
         }
         PlaySlot(slot, vol * duckMul, pitch);
     }

@@ -30,3 +30,11 @@ dropoff         18.0  40.0  0.45
 model           smg.obj
 model_scale     10.0
 model_yaw       0.0
+
+sfx             SHOT 0.55 1.25
+haptic          0.08 0.25 0.20 0.05
+mbox_weight     1.0
+
+vm_grip_pos     0 0 0
+vm_grip_rot     0 0 0
+vm_grip_scale   1.0

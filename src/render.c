@@ -25,16 +25,6 @@ static AnimModel zombieAnim;
 static AnimState zombieAnimState[MAX_ENEMIES];
 static int zClipWalk = -1, zClipAttack = -1, zClipDeath = -1;
 
-// ---- rigged first-person pistol viewmodel (glTF) -----------------------
-// One shared skinned M1911 viewmodel + a single render-local AnimState (only
-// the local player's held weapon drives it). Clip is chosen each frame from
-// player state (raise on swap, fire on shot, reload[_empty], sprint, idle).
-// When not loaded, the pistol falls back to the OBJ + procedural viewmodel.
-static AnimModel pistolVM;
-static AnimState pistolVMState;
-static int pvmIdle = -1, pvmFire = -1, pvmReload = -1, pvmReloadEmpty = -1,
-           pvmRaise = -1, pvmLower = -1, pvmSprint = -1;
-
 // ---- shared first-person ARMS viewmodel (glTF) -------------------------
 // One rigged pair of arms+hands (arms_vm.glb) used by every NON-pistol gun.
 // The gun is a separate model bolted onto the `hand.R` bone each frame, so a
@@ -91,26 +81,6 @@ void Render_LoadZombieAnim(void) {
 
 void Render_UnloadZombieAnim(void) {
     Anim_Unload(&zombieAnim);
-}
-
-// Load the rigged M1911 viewmodel; bind the skinned (lit + fogged) shader.
-// Call once after Assets_Load. No-op-safe: missing .glb leaves the pistol on
-// its OBJ + procedural viewmodel path.
-void Render_LoadPistolVM(void) {
-    if (!Anim_Load(&pistolVM, "data/weapons/pistol/pistol_vm.glb")) return;
-    if (worldSkinnedShaderLoaded) Anim_ApplyShader(&pistolVM, worldSkinnedShader);
-    pvmIdle        = Anim_FindClip(&pistolVM, "idle");
-    pvmFire        = Anim_FindClip(&pistolVM, "fire");
-    pvmReload      = Anim_FindClip(&pistolVM, "reload");
-    pvmReloadEmpty = Anim_FindClip(&pistolVM, "reload_empty");
-    pvmRaise       = Anim_FindClip(&pistolVM, "raise");
-    pvmLower       = Anim_FindClip(&pistolVM, "lower");
-    pvmSprint      = Anim_FindClip(&pistolVM, "sprint");
-    Anim_Play(&pistolVMState, pvmIdle, true, 1.0f);
-}
-
-void Render_UnloadPistolVM(void) {
-    Anim_Unload(&pistolVM);
 }
 
 // Load the shared first-person arms; bind the skinned shader. Call once after
@@ -1068,100 +1038,6 @@ void Render_World3D(Camera camera) {
         DrawFirstPersonViewmodel(camera);
         EndWorldShader();
     EndMode3D();
-}
-
-// Draws the held weapon attached to the camera so the player sees their gun
-// in the corner of the view. Must be called inside an active BeginMode3D
-// scope (Render_World3D handles that).
-//
-// Transform stack: vertex → (per-weapon yaw around model Y) → camera basis
-// (model +X → world right, +Y → up, -Z → forward) → translate to anchor.
-// weaponTune.yawDeg lets each weapon's authored "forward" axis be aligned
-// to the camera's forward without modifying the OBJ.
-// Rigged first-person viewmodel (M1911). Picks a clip from the local player's
-// weapon state and draws the skinned glTF in camera space. The .glb is
-// authored +Y = forward (muzzle), +Z = up, +X = right, origin at the grip.
-static void DrawPistolViewmodelGLB(Camera camera) {
-    Player *me = &players[localPlayerIdx];
-    int cs = me->currentSlot;
-    WeaponSlot *slot = &me->inventory[cs];
-    int wi = slot->weaponIdx;
-    float dt = GetFrameTime();
-
-    // ---- clip selection from player state ----
-    static int   prevSlot = -1, prevWi = -1;
-    static float prevFire = 0.0f, prevReload = 0.0f;
-    static bool  reloadEmpty = false;
-    bool swapEdge    = (cs != prevSlot || wi != prevWi);
-    bool fireEdge    = (slot->fireTimer  > 0.0f && prevFire   <= 0.0f);
-    bool reloadStart = (slot->reloadTimer > 0.0f && prevReload <= 0.0f);
-    bool reloading   = (slot->reloadTimer > 0.0f);
-    if (reloadStart) reloadEmpty = (slot->ammo == 0);
-    prevSlot = cs; prevWi = wi; prevFire = slot->fireTimer; prevReload = slot->reloadTimer;
-    bool sprinting = (me->sprintBlend > 0.6f) && !reloading;
-
-    AnimState *st = &pistolVMState;
-    if (swapEdge && pvmRaise >= 0) {
-        Anim_Play(st, pvmRaise, false, 1.0f);
-    } else if (reloadStart) {
-        int clip = (reloadEmpty && pvmReloadEmpty >= 0) ? pvmReloadEmpty : pvmReload;
-        float dur = Anim_ClipDuration(&pistolVM, clip);
-        float spd = (slot->reloadTimer > 0.05f) ? dur / slot->reloadTimer : 1.0f;
-        Anim_Play(st, clip, false, spd);
-    } else if (fireEdge && !reloading && pvmFire >= 0) {
-        Anim_Play(st, pvmFire, false, 1.0f);
-    } else {
-        bool busy = ((st->clip == pvmFire || st->clip == pvmRaise) && !st->finished)
-                 || (reloading && (st->clip == pvmReload || st->clip == pvmReloadEmpty));
-        if (!busy) {
-            int want = (sprinting && pvmSprint >= 0) ? pvmSprint : pvmIdle;
-            if (st->clip != want) Anim_Play(st, want, true, 1.0f);
-        }
-    }
-    Anim_Update(&pistolVM, st, dt);
-    Anim_Pose(&pistolVM, st);
-
-    // ---- camera-space transform (model X->right, Y->forward, Z->up) ----
-    Vector3 camFwd = Vector3Normalize(Vector3Subtract(camera.target, camera.position));
-    Vector3 camRight = Vector3Normalize(Vector3CrossProduct(camFwd, camera.up));
-    Vector3 camUp    = Vector3CrossProduct(camRight, camFwd);
-    // Cant the gun: muzzle slightly down + yawed so we see its left side
-    // (classic FP framing) instead of looking straight down the barrel.
-    const float PITCH = -0.09f, YAW = 0.11f;   // slight downward + side cant
-    Vector3 fwd = Vector3Normalize(Vector3Add(camFwd,
-                    Vector3Add(Vector3Scale(camUp, PITCH), Vector3Scale(camRight, -YAW))));
-    Vector3 right = Vector3Normalize(Vector3CrossProduct(fwd, camera.up));
-    Vector3 up    = Vector3CrossProduct(right, fwd);
-    const float VM_SCALE = 1.85f;
-    Vector3 anchor = camera.position;
-    anchor = Vector3Add(anchor, Vector3Scale(camFwd,   0.55f));
-    anchor = Vector3Add(anchor, Vector3Scale(camRight, 0.20f));
-    anchor = Vector3Add(anchor, Vector3Scale(camUp,   -0.24f));
-    Vector3 cx = Vector3Scale(right, VM_SCALE);
-    Vector3 cy = Vector3Scale(fwd,   VM_SCALE);
-    Vector3 cz = Vector3Scale(up,    VM_SCALE);
-    Matrix tx;
-    tx.m0 = cx.x; tx.m4 = cy.x; tx.m8  = cz.x; tx.m12 = anchor.x;
-    tx.m1 = cx.y; tx.m5 = cy.y; tx.m9  = cz.y; tx.m13 = anchor.y;
-    tx.m2 = cx.z; tx.m6 = cy.z; tx.m10 = cz.z; tx.m14 = anchor.z;
-    tx.m3 = 0;    tx.m7 = 0;    tx.m11 = 0;    tx.m15 = 1;
-    pistolVM.model.transform = tx;
-
-    // Flat lighting (as the OBJ path does) so the viewmodel doesn't swing
-    // dark<->bright as the camera turns; restore world lighting afterwards.
-    if (worldSkinnedShaderLoaded) {
-        Vector3 flatSun = { 0.25f, 0.26f, 0.30f };
-        Vector3 flatAmb = { 1.30f, 1.31f, 1.36f };
-        rlDrawRenderBatchActive();
-        SetShaderValue(worldSkinnedShader, worldSkinnedShader_sunColorLoc,     &flatSun, SHADER_UNIFORM_VEC3);
-        SetShaderValue(worldSkinnedShader, worldSkinnedShader_ambientColorLoc, &flatAmb, SHADER_UNIFORM_VEC3);
-        DrawModel(pistolVM.model, (Vector3){0,0,0}, 1.0f, WHITE);
-        rlDrawRenderBatchActive();
-        SetShaderValue(worldSkinnedShader, worldSkinnedShader_sunColorLoc,     &sunColor,     SHADER_UNIFORM_VEC3);
-        SetShaderValue(worldSkinnedShader, worldSkinnedShader_ambientColorLoc, &ambientColor, SHADER_UNIFORM_VEC3);
-    } else {
-        DrawModel(pistolVM.model, (Vector3){0,0,0}, 1.0f, WHITE);
-    }
 }
 
 // Per-weapon grip: where/how the gun sits in the right hand. The base

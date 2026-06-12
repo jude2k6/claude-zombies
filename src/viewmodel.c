@@ -8,6 +8,7 @@
 #include "raymath.h"
 #include "rlgl.h"
 #include <math.h>
+#include <stdio.h>
 
 // ---- shared first-person ARMS viewmodel (glTF) -------------------------
 // One rigged pair of arms+hands (arms_vm.glb) used by ALL guns. The gun is a
@@ -19,7 +20,14 @@
 static AnimModel armsVM;
 static AnimState armsVMState;
 static int avmIdle = -1, avmFire = -1, avmReload = -1, avmReloadEmpty = -1,
-           avmRaise = -1, avmLower = -1, avmSprint = -1, avmHandR = -1;
+           avmRaise = -1, avmLower = -1, avmSprint = -1, avmHandR = -1,
+           avmHandL = -1;
+
+// Grip-tuning aid: draw markers at the hand bones (red sphere = hand.R
+// origin + RGB axis ticks for its local X/Y/Z, blue sphere = hand.L).
+// Enabled by --screenshot-viewmodels so vm_grip_* values can be dialled
+// against the actual bone, not eyeballed mesh overlap.
+bool vmDebugMarkers = false;
 
 // Load the shared first-person arms; bind the skinned shader. Call once after
 // Assets_Load. No-op-safe: missing .glb leaves the 4 non-pistol guns on their
@@ -35,6 +43,7 @@ void Viewmodel_LoadArms(void) {
     avmLower       = Anim_FindClip(&armsVM, "lower");
     avmSprint      = Anim_FindClip(&armsVM, "sprint");
     avmHandR       = Anim_FindBone(&armsVM, "hand.R");
+    avmHandL       = Anim_FindBone(&armsVM, "hand.L");
     Anim_Play(&armsVMState, avmIdle, true, 1.0f);
 }
 
@@ -202,6 +211,44 @@ static void DrawArmsViewmodel(Camera camera, int wi) {
         SetShaderValue(worldShader, worldShader_ambientColorLoc, &ambientColor, SHADER_UNIFORM_VEC3);
     } else {
         DrawModel(gm, (Vector3){0,0,0}, 1.0f, WHITE);
+    }
+
+    // Grip-tuning markers, drawn LAST with depth testing off so they show
+    // through the hand/gun meshes (the bone origin is inside both).
+    // Red sphere + 3 cm axis ticks (orange=X, green=Y, sky=Z) = hand.R;
+    // blue sphere = hand.L.
+    if (vmDebugMarkers) {
+        // One-shot dump of the hand bones in ARMS-MODEL space so vm_grip_*
+        // values can be solved numerically (hand.L relative to hand.R's
+        // local frame = where the gun's forend must reach).
+        static bool dumped = false;
+        if (!dumped && avmHandL >= 0) {
+            dumped = true;
+            Matrix bL = Anim_BoneMatrix(&armsVM, st, avmHandL);
+            fprintf(stderr, "vmdbg handR rot rows: [%+.3f %+.3f %+.3f] [%+.3f %+.3f %+.3f] [%+.3f %+.3f %+.3f]\n",
+                    bone.m0, bone.m4, bone.m8,
+                    bone.m1, bone.m5, bone.m9,
+                    bone.m2, bone.m6, bone.m10);
+            fprintf(stderr, "vmdbg handR pos: %+.4f %+.4f %+.4f\n", bone.m12, bone.m13, bone.m14);
+            fprintf(stderr, "vmdbg handL pos: %+.4f %+.4f %+.4f\n", bL.m12, bL.m13, bL.m14);
+        }
+        rlDrawRenderBatchActive();
+        rlDisableDepthTest();
+        Matrix mR = MatrixMultiply(bone, root);
+        Vector3 pR = { mR.m12, mR.m13, mR.m14 };
+        DrawSphere(pR, 0.010f, RED);
+        Vector3 ax = Vector3Add(pR, Vector3Scale((Vector3){ mR.m0, mR.m1, mR.m2  }, 0.03f));
+        Vector3 ay = Vector3Add(pR, Vector3Scale((Vector3){ mR.m4, mR.m5, mR.m6  }, 0.03f));
+        Vector3 az = Vector3Add(pR, Vector3Scale((Vector3){ mR.m8, mR.m9, mR.m10 }, 0.03f));
+        DrawLine3D(pR, ax, ORANGE);
+        DrawLine3D(pR, ay, GREEN);
+        DrawLine3D(pR, az, SKYBLUE);
+        if (avmHandL >= 0) {
+            Matrix mL = MatrixMultiply(Anim_BoneMatrix(&armsVM, st, avmHandL), root);
+            DrawSphere((Vector3){ mL.m12, mL.m13, mL.m14 }, 0.010f, BLUE);
+        }
+        rlDrawRenderBatchActive();
+        rlEnableDepthTest();
     }
 }
 

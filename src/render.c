@@ -236,26 +236,32 @@ static void DrawWallZSeg(float z0, float z1, float fixedX, Color c) {
 }
 
 static void DrawArena(void) {
-    DrawTexturedFloor((Vector3){0,0,0}, ARENA_HALF*2, ARENA_HALF*2,
+    DrawTexturedFloor((Vector3){0,0,0}, arenaHalfX*2, arenaHalfZ*2,
                       TEX_FLOOR, WHITE, (Color){55,65,75,255});
-    DrawTexturedFloor((Vector3){0, -0.01f, 0}, ARENA_HALF*2 + 16, ARENA_HALF*2 + 16,
+    float groundW = (arenaHalfX > arenaHalfZ ? arenaHalfX : arenaHalfZ) * 2 + 16;
+    DrawTexturedFloor((Vector3){0, -0.01f, 0}, groundW, groundW,
                       TEX_GROUND, WHITE, (Color){30,35,40,255});
 
     Color wc = (Color){90,100,110,255};
-    float a = ARENA_HALF;
+    /* Perimeter walls — sides 0/1 are north/south (fixed z, vary x).
+       Sides 2/3 are east/west (fixed x, vary z). */
+    float aX = arenaHalfX;  /* half-extent along X */
+    float aZ = arenaHalfZ;  /* half-extent along Z */
     for (int side = 0; side < 4; side++) {
         float gapPos = 0; bool hasGap = false;
         for (int i = 0; i < windowCount; i++) {
-            if (side == 0 && windows[i].pos.z >  a - 0.5f) { gapPos = windows[i].pos.x; hasGap = true; }
-            if (side == 1 && windows[i].pos.z < -a + 0.5f) { gapPos = windows[i].pos.x; hasGap = true; }
-            if (side == 2 && windows[i].pos.x >  a - 0.5f) { gapPos = windows[i].pos.z; hasGap = true; }
-            if (side == 3 && windows[i].pos.x < -a + 0.5f) { gapPos = windows[i].pos.z; hasGap = true; }
+            if (side == 0 && windows[i].pos.z >  aZ - 0.5f) { gapPos = windows[i].pos.x; hasGap = true; }
+            if (side == 1 && windows[i].pos.z < -aZ + 0.5f) { gapPos = windows[i].pos.x; hasGap = true; }
+            if (side == 2 && windows[i].pos.x >  aX - 0.5f) { gapPos = windows[i].pos.z; hasGap = true; }
+            if (side == 3 && windows[i].pos.x < -aX + 0.5f) { gapPos = windows[i].pos.z; hasGap = true; }
         }
         float gMin = gapPos - WINDOW_WIDTH*0.5f, gMax = gapPos + WINDOW_WIDTH*0.5f;
-        if (side == 0) { if (hasGap) { DrawWallXSeg(-a, gMin,  a, wc); DrawWallXSeg(gMax, a,  a, wc); } else DrawWallXSeg(-a, a,  a, wc); }
-        else if (side == 1) { if (hasGap) { DrawWallXSeg(-a, gMin, -a, wc); DrawWallXSeg(gMax, a, -a, wc); } else DrawWallXSeg(-a, a, -a, wc); }
-        else if (side == 2) { if (hasGap) { DrawWallZSeg(-a, gMin,  a, wc); DrawWallZSeg(gMax, a,  a, wc); } else DrawWallZSeg(-a, a,  a, wc); }
-        else                 { if (hasGap) { DrawWallZSeg(-a, gMin, -a, wc); DrawWallZSeg(gMax, a, -a, wc); } else DrawWallZSeg(-a, a, -a, wc); }
+        /* sides 0/1: X-running wall at fixed z=+aZ or z=-aZ; runs from -aX to +aX */
+        if (side == 0) { if (hasGap) { DrawWallXSeg(-aX, gMin,  aZ, wc); DrawWallXSeg(gMax, aX,  aZ, wc); } else DrawWallXSeg(-aX, aX,  aZ, wc); }
+        else if (side == 1) { if (hasGap) { DrawWallXSeg(-aX, gMin, -aZ, wc); DrawWallXSeg(gMax, aX, -aZ, wc); } else DrawWallXSeg(-aX, aX, -aZ, wc); }
+        /* sides 2/3: Z-running wall at fixed x=+aX or x=-aX; runs from -aZ to +aZ */
+        else if (side == 2) { if (hasGap) { DrawWallZSeg(-aZ, gMin,  aX, wc); DrawWallZSeg(gMax, aZ,  aX, wc); } else DrawWallZSeg(-aZ, aZ,  aX, wc); }
+        else                 { if (hasGap) { DrawWallZSeg(-aZ, gMin, -aX, wc); DrawWallZSeg(gMax, aZ, -aX, wc); } else DrawWallZSeg(-aZ, aZ, -aX, wc); }
     }
 
     for (int i = 0; i < obstacleCount; i++) {

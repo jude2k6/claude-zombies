@@ -1,4 +1,5 @@
 #include "level.h"
+#include "mapdoc.h"
 #include "assets.h"
 #include "decals.h"
 #include "particles.h"
@@ -18,7 +19,7 @@ int         interiorWallCount = 0;
 bool        interiorWallNoClip[MAX_INTERIOR_WALLS];
 Door        doors[MAX_DOORS];
 int         doorCount = 0;
-WallBuy     wallBuys[8];
+WallBuy     wallBuys[MAX_WALLBUYS];
 int         wallBuyCount = 0;
 Window3D    windows[MAX_WINDOWS];
 int         windowCount = 0;
@@ -31,6 +32,11 @@ int         mapSpawnCount = 0;
 char        mapName[64] = "Default";
 MapProp     mapProps[MAX_MAP_PROPS];
 int         mapPropCount = 0;
+
+// Per-map arena half-extents (runtime; defaults 40 x 40).
+// X = left/right, Z = front/back.
+float arenaHalfX = ARENA_HALF_DEFAULT;
+float arenaHalfZ = ARENA_HALF_DEFAULT;
 
 float Level_RandRange(float a, float b) {
     return a + ((float)rand() / (float)RAND_MAX) * (b - a);
@@ -118,11 +124,12 @@ Vector3 Level_ResolveXZ(Vector3 from, Vector3 to, float radius, bool clampArena)
 
     Vector3 candidate = to;
     if (clampArena) {
-        float lim = ARENA_HALF - radius;
-        if (candidate.x >  lim) candidate.x =  lim;
-        if (candidate.x < -lim) candidate.x = -lim;
-        if (candidate.z >  lim) candidate.z =  lim;
-        if (candidate.z < -lim) candidate.z = -lim;
+        float limX = arenaHalfX - radius;
+        float limZ = arenaHalfZ - radius;
+        if (candidate.x >  limX) candidate.x =  limX;
+        if (candidate.x < -limX) candidate.x = -limX;
+        if (candidate.z >  limZ) candidate.z =  limZ;
+        if (candidate.z < -limZ) candidate.z = -limZ;
     }
 
     Vector3 stepX = (Vector3){ candidate.x, origin.y, origin.z };
@@ -180,7 +187,7 @@ bool Level_PathClearXZ(Vector3 from, Vector3 dir, float radius, float dist) {
 }
 
 // ============================================================================
-//  Map parsing
+//  Map instantiation (MapDoc -> game globals)
 // ============================================================================
 
 static int WeaponNameToIdx(const char *s) {
@@ -213,6 +220,8 @@ static void ClearLevel(void) {
     mapSpawnCount = 0;
     mapPropCount = 0;
     mapName[0] = 0;
+    arenaHalfX = ARENA_HALF_DEFAULT;
+    arenaHalfZ = ARENA_HALF_DEFAULT;
     pap = (PackAPunch){ .pos = {0,0,0}, .phase = PAP_IDLE, .slotInProgress = -1, .ownerPlayer = -1, .weaponIdx = -1 };
     mbox = (MysteryBox){ .placed = false, .pos = {0,0,0}, .state = MBOX_IDLE,
                          .timer = 0, .showingWeapon = 0, .finalWeapon = 0, .ownerPlayer = -1, .bob = 0 };
@@ -225,9 +234,8 @@ static void ClearLevel(void) {
 
 // ---- prop registry -----------------------------------------------------
 // Maps PROP names (used in map files) to engine PropId + a hand-tuned
-// collider half-extent.  When map adds `PROP <name> x z`, the parser
-// looks up the name here.  Add new props by extending both this table
-// and PropId.
+// collider half-extent.  When a map adds `PROP <name> x z`, the
+// instantiator looks up the name here.
 typedef struct {
     const char *name;
     int         propId;
@@ -248,78 +256,30 @@ static const PropDef *PropDefByName(const char *name) {
     return NULL;
 }
 
-// ---- parse helpers -----------------------------------------------------
-
-// Tokenise an in-place buffer into NUL-terminated whitespace-delimited
-// tokens.  Modifies `s` (replaces whitespace with NUL).  Returns the
-// number of tokens written into `out`, capped at `max`.
-static int Tokenise(char *s, char **out, int max) {
-    int n = 0;
-    while (*s) {
-        while (*s && isspace((unsigned char)*s)) *s++ = 0;
-        if (!*s) break;
-        if (n < max) out[n] = s;
-        n++;
-        while (*s && !isspace((unsigned char)*s)) s++;
-    }
-    return n;
+// ---- dir string -> Vector3 normal ------------------------------------------
+static Vector3 DirToNormal(const char dir[4]) {
+    if (strcmp(dir, "+x") == 0) return (Vector3){  1, 0,  0 };
+    if (strcmp(dir, "-x") == 0) return (Vector3){ -1, 0,  0 };
+    if (strcmp(dir, "+z") == 0) return (Vector3){  0, 0,  1 };
+    if (strcmp(dir, "-z") == 0) return (Vector3){  0, 0, -1 };
+    return (Vector3){ 0, 0, 0 };
 }
 
-static bool ParseFloat(const char *s, float *out) {
-    char *end = NULL;
-    float v = strtof(s, &end);
-    if (end == s || *end != 0) return false;
-    *out = v;
-    return true;
-}
-
-static bool ParseInt(const char *s, int *out) {
-    char *end = NULL;
-    long v = strtol(s, &end, 10);
-    if (end == s || *end != 0) return false;
-    *out = (int)v;
-    return true;
-}
-
-// `+x`, `-x`, `+z`, `-z` -> unit Vector3 (y = 0).  Returns false on
-// anything else.
-static bool ParseDir(const char *s, Vector3 *out) {
-    if (strcmp(s, "+x") == 0) { *out = (Vector3){  1, 0,  0 }; return true; }
-    if (strcmp(s, "-x") == 0) { *out = (Vector3){ -1, 0,  0 }; return true; }
-    if (strcmp(s, "+z") == 0) { *out = (Vector3){  0, 0,  1 }; return true; }
-    if (strcmp(s, "-z") == 0) { *out = (Vector3){  0, 0, -1 }; return true; }
-    return false;
-}
-
-// Per-window deferred door reference: window N wants door named `name`,
-// resolve to index after parse.  Cleared per parse.
-static struct {
-    int  windowIdx;
-    char name[24];
-} g_pendingDoorRef[MAX_WINDOWS];
-static int g_pendingDoorRefCount = 0;
-
-static int DoorIndexByName(const char *name) {
-    for (int i = 0; i < doorCount; i++)
-        if (doors[i].name[0] && strcmp(doors[i].name, name) == 0) return i;
-    return -1;
-}
+// ---- EmitWallSegment (shared by instantiator) ------------------------------
 
 // Emit an interior wall segment between (x1, z1) and (x2, z2).  No-op
 // if the two ends are equal (zero-length segment from a flush door).
-static bool EmitWallSegment(float x1, float z1, float x2, float z2,
-                            int lineNo, int *errCount, FILE *errs) {
+// Uses a fake lineNo of 0 when called from the instantiator (no file context).
+static bool EmitWallSegment(float x1, float z1, float x2, float z2) {
     if (fabsf(x1 - x2) < 0.001f && fabsf(z1 - z2) < 0.001f) return true;
     if (interiorWallCount >= MAX_INTERIOR_WALLS) {
-        fprintf(errs, "map: line %d: too many walls (MAX_INTERIOR_WALLS=%d)\n",
-                lineNo, MAX_INTERIOR_WALLS);
-        if (errCount) (*errCount)++;
+        fprintf(stderr, "map: too many walls (MAX_INTERIOR_WALLS=%d)\n",
+                MAX_INTERIOR_WALLS);
         return false;
     }
     Vector3 c = { (x1 + x2) * 0.5f, WALL_HEIGHT * 0.5f, (z1 + z2) * 0.5f };
     Vector3 s;
     if (fabsf(x1 - x2) < 0.001f) {
-        // Z-running wall
         s = (Vector3){ WALL_THICK, WALL_HEIGHT, fabsf(z2 - z1) };
     } else {
         s = (Vector3){ fabsf(x2 - x1), WALL_HEIGHT, WALL_THICK };
@@ -328,478 +288,244 @@ static bool EmitWallSegment(float x1, float z1, float x2, float z2,
     return true;
 }
 
-// ---- the parser --------------------------------------------------------
+// ---- look up a door index by name in the current game state ----------------
+static int DoorIndexByName(const char *name) {
+    for (int i = 0; i < doorCount; i++)
+        if (doors[i].name[0] && strcmp(doors[i].name, name) == 0) return i;
+    return -1;
+}
 
-// Implementation shared by Level_LoadFromFile and Level_Validate. In
-// validate mode we don't open a window or set globals; we just count
-// errors.
-static int ParseMapFile(const char *path, bool validateOnly) {
-    FILE *f = fopen(path, "r");
-    if (!f) {
-        fprintf(stderr, "map: cannot open %s\n", path);
-        return 1;
-    }
+// ============================================================================
+//  Level_InstantiateDoc — copy a MapDoc into the live game globals.
+//  Warns to stderr if any map cap is exceeded and clamps rather than
+//  corrupting memory.
+// ============================================================================
 
+void Level_InstantiateDoc(const MapDoc *doc) {
     ClearLevel();
-    g_pendingDoorRefCount = 0;
-    int errors = 0;
-    FILE *errs = stderr;
 
-    enum { BLK_NONE, BLK_ATMOS, BLK_ROOM } block = BLK_NONE;
-    char roomName[32] = {0};
+    // Name
+    strncpy(mapName, doc->name, sizeof mapName - 1);
+    mapName[sizeof mapName - 1] = '\0';
 
-    char raw[256];
-    int lineNo = 0;
-    while (fgets(raw, sizeof raw, f)) {
-        lineNo++;
-        // Strip comment.
-        char *hash = strchr(raw, '#');
-        if (hash) *hash = 0;
+    // Arena half-extents
+    arenaHalfX = doc->arenaHalfX;
+    arenaHalfZ = doc->arenaHalfZ;
 
-        char *toks[16];
-        int n = Tokenise(raw, toks, 16);
-        if (n == 0) continue;
-
-        const char *key = toks[0];
-
-        // --- block management ---
-        if (strcmp(key, "ATMOSPHERE") == 0) {
-            if (block != BLK_NONE) {
-                fprintf(errs, "map: line %d: ATMOSPHERE inside another block\n", lineNo);
-                errors++; continue;
-            }
-            block = BLK_ATMOS; continue;
-        }
-        if (strcmp(key, "ROOM") == 0) {
-            if (block != BLK_NONE) {
-                fprintf(errs, "map: line %d: ROOM inside another block\n", lineNo);
-                errors++; continue;
-            }
-            if (n >= 2) {
-                strncpy(roomName, toks[1], sizeof roomName - 1);
-                roomName[sizeof roomName - 1] = 0;
-            } else roomName[0] = 0;
-            block = BLK_ROOM; continue;
-        }
-        if (strcmp(key, "END") == 0) {
-            if (block == BLK_NONE) {
-                fprintf(errs, "map: line %d: END outside a block\n", lineNo);
-                errors++;
-            }
-            block = BLK_NONE;
-            roomName[0] = 0;
-            continue;
-        }
-
-        // --- atmosphere sub-keys ---
-        if (block == BLK_ATMOS) {
-            if (strcmp(key, "fog") == 0 && n == 6) {
-                float r, g, b, s, e;
-                if (!ParseFloat(toks[1],&r) || !ParseFloat(toks[2],&g) ||
-                    !ParseFloat(toks[3],&b) || !ParseFloat(toks[4],&s) ||
-                    !ParseFloat(toks[5],&e)) {
-                    fprintf(errs, "map: line %d: fog expects r g b start end\n", lineNo);
-                    errors++; continue;
-                }
-                if (!validateOnly) {
-                    fogColor = (Color){ (unsigned char)r, (unsigned char)g,
-                                        (unsigned char)b, 255 };
-                    fogStart = s;
-                    fogEnd   = e;
-                }
-            } else if (strcmp(key, "sky_tint") == 0 && n == 4) {
-                // Reserved; logged but no engine consumer yet.
-            } else if (strcmp(key, "music") == 0 && n == 2) {
-                // Reserved; logged but no audio impl yet.
-            } else {
-                fprintf(errs, "map: line %d: unknown atmosphere key '%s'\n", lineNo, key);
-                errors++;
-            }
-            continue;
-        }
-
-        // --- top-level / room-level entries ---
-        if (strcmp(key, "NAME") == 0) {
-            // Re-join tokens 1..N with single spaces.
-            mapName[0] = 0;
-            for (int i = 1; i < n; i++) {
-                if (i > 1) strncat(mapName, " ", sizeof mapName - strlen(mapName) - 1);
-                strncat(mapName, toks[i], sizeof mapName - strlen(mapName) - 1);
-            }
-            continue;
-        }
-
-        if (strcmp(key, "SPAWN") == 0) {
-            if (n != 3) {
-                fprintf(errs, "map: line %d: SPAWN expects x z\n", lineNo);
-                errors++; continue;
-            }
-            float x, z;
-            if (!ParseFloat(toks[1], &x) || !ParseFloat(toks[2], &z)) {
-                fprintf(errs, "map: line %d: SPAWN bad number\n", lineNo);
-                errors++; continue;
-            }
-            if (mapSpawnCount >= NET_MAX_PLAYERS) {
-                fprintf(errs, "map: line %d: too many spawns\n", lineNo);
-                errors++; continue;
-            }
-            mapSpawns[mapSpawnCount++] = (Vector3){ x, PLAYER_EYE, z };
-            continue;
-        }
-
-        if (strcmp(key, "WALL") == 0) {
-            // WALL x1 z1 x2 z2 [DOOR center width cost [AS name]]
-            if (n < 5) {
-                fprintf(errs, "map: line %d: WALL expects x1 z1 x2 z2\n", lineNo);
-                errors++; continue;
-            }
-            float x1, z1, x2, z2;
-            if (!ParseFloat(toks[1],&x1) || !ParseFloat(toks[2],&z1) ||
-                !ParseFloat(toks[3],&x2) || !ParseFloat(toks[4],&z2)) {
-                fprintf(errs, "map: line %d: WALL bad number\n", lineNo);
-                errors++; continue;
-            }
-            bool xRun = fabsf(z1 - z2) < 0.001f;
-            bool zRun = fabsf(x1 - x2) < 0.001f;
-            if (!xRun && !zRun) {
-                fprintf(errs, "map: line %d: WALL must be axis-aligned\n", lineNo);
-                errors++; continue;
-            }
-            // Normalise ordering so x1<=x2 (or z1<=z2).
-            if (xRun && x2 < x1) { float t=x1; x1=x2; x2=t; }
-            if (zRun && z2 < z1) { float t=z1; z1=z2; z2=t; }
-
-            // Look for DOOR clause.
-            int tIdx = 5;
-            if (tIdx < n && strcmp(toks[tIdx], "DOOR") == 0) {
-                if (n < tIdx + 4) {
-                    fprintf(errs, "map: line %d: DOOR expects center width cost\n", lineNo);
-                    errors++; continue;
-                }
-                float center, width;
-                int cost;
-                if (!ParseFloat(toks[tIdx+1], &center) ||
-                    !ParseFloat(toks[tIdx+2], &width) ||
-                    !ParseInt  (toks[tIdx+3], &cost)) {
-                    fprintf(errs, "map: line %d: DOOR bad number\n", lineNo);
-                    errors++; continue;
-                }
-                char doorName[24] = {0};
-                if (n >= tIdx + 6 && strcmp(toks[tIdx+4], "AS") == 0) {
-                    strncpy(doorName, toks[tIdx+5], sizeof doorName - 1);
-                }
-                if (doorCount >= MAX_DOORS) {
-                    fprintf(errs, "map: line %d: too many doors (MAX_DOORS=%d)\n",
-                            lineNo, MAX_DOORS);
-                    errors++; continue;
-                }
-                // Emit left wall, door, right wall, plus a "header" wall
-                // segment above the door so the opening above the 2.5m door
-                // is closed off instead of leaving a 2.5m gap to the ceiling.
-                float headerY  = DOOR_HEIGHT + (WALL_HEIGHT - DOOR_HEIGHT) * 0.5f;
-                float headerSY = WALL_HEIGHT - DOOR_HEIGHT;
-                if (xRun) {
-                    float dl = center - width * 0.5f;
-                    float dr = center + width * 0.5f;
-                    if (dl < x1 || dr > x2) {
-                        fprintf(errs, "map: line %d: DOOR extends past wall ends\n", lineNo);
-                        errors++; continue;
-                    }
-                    if (!EmitWallSegment(x1, z1, dl, z1, lineNo, &errors, errs)) continue;
-                    if (!EmitWallSegment(dr, z1, x2, z1, lineNo, &errors, errs)) continue;
-                    if (interiorWallCount < MAX_INTERIOR_WALLS) {
-                        interiorWallNoClip[interiorWallCount] = true;
-                        interiorWalls[interiorWallCount++] = (Box){
-                            { center, headerY, z1 },
-                            { width,  headerSY, WALL_THICK },
-                        };
-                    }
-                    Vector3 c = { center, DOOR_HEIGHT * 0.5f, z1 };
-                    Vector3 s = { width,  DOOR_HEIGHT,        WALL_THICK };
-                    Door d = { .box = { c, s }, .cost = cost, .opened = false };
-                    if (doorName[0]) strncpy(d.name, doorName, sizeof d.name - 1);
-                    doors[doorCount++] = d;
-                } else {
-                    float dl = center - width * 0.5f;
-                    float dr = center + width * 0.5f;
-                    if (dl < z1 || dr > z2) {
-                        fprintf(errs, "map: line %d: DOOR extends past wall ends\n", lineNo);
-                        errors++; continue;
-                    }
-                    if (!EmitWallSegment(x1, z1, x1, dl, lineNo, &errors, errs)) continue;
-                    if (!EmitWallSegment(x1, dr, x1, z2, lineNo, &errors, errs)) continue;
-                    if (interiorWallCount < MAX_INTERIOR_WALLS) {
-                        interiorWallNoClip[interiorWallCount] = true;
-                        interiorWalls[interiorWallCount++] = (Box){
-                            { x1,         headerY,  center },
-                            { WALL_THICK, headerSY, width  },
-                        };
-                    }
-                    Vector3 c = { x1,         DOOR_HEIGHT * 0.5f, center };
-                    Vector3 s = { WALL_THICK, DOOR_HEIGHT,        width  };
-                    Door d = { .box = { c, s }, .cost = cost, .opened = false };
-                    if (doorName[0]) strncpy(d.name, doorName, sizeof d.name - 1);
-                    doors[doorCount++] = d;
-                }
-            } else {
-                EmitWallSegment(x1, z1, x2, z2, lineNo, &errors, errs);
-            }
-            continue;
-        }
-
-        if (strcmp(key, "DOOR") == 0) {
-            fprintf(errs, "map: line %d: DOOR is only valid as part of a WALL line\n", lineNo);
-            errors++; continue;
-        }
-
-        if (strcmp(key, "OBSTACLE") == 0) {
-            // OBSTACLE x z sx sz [h]
-            if (n < 5) {
-                fprintf(errs, "map: line %d: OBSTACLE expects x z sx sz [h]\n", lineNo);
-                errors++; continue;
-            }
-            float x, z, sx, sz, h = 2.0f;
-            if (!ParseFloat(toks[1], &x)  || !ParseFloat(toks[2], &z) ||
-                !ParseFloat(toks[3], &sx) || !ParseFloat(toks[4], &sz)) {
-                fprintf(errs, "map: line %d: OBSTACLE bad number\n", lineNo);
-                errors++; continue;
-            }
-            if (n >= 6 && !ParseFloat(toks[5], &h)) {
-                fprintf(errs, "map: line %d: OBSTACLE bad height\n", lineNo);
-                errors++; continue;
-            }
-            if (obstacleCount >= MAX_OBSTACLES) {
-                fprintf(errs, "map: line %d: too many obstacles\n", lineNo);
-                errors++; continue;
-            }
-            obstacles[obstacleCount++] = (Box){
-                { x, h * 0.5f, z }, { sx, h, sz }
-            };
-            continue;
-        }
-
-        if (strcmp(key, "WALLBUY") == 0) {
-            // WALLBUY x z <dir> WEAPON
-            if (n != 5) {
-                fprintf(errs, "map: line %d: WALLBUY expects x z <dir> WEAPON\n", lineNo);
-                errors++; continue;
-            }
-            float x, z;
-            Vector3 normal;
-            if (!ParseFloat(toks[1], &x) || !ParseFloat(toks[2], &z) ||
-                !ParseDir  (toks[3], &normal)) {
-                fprintf(errs, "map: line %d: WALLBUY bad arg\n", lineNo);
-                errors++; continue;
-            }
-            int widx = WeaponNameToIdx(toks[4]);
-            if (widx < 0) {
-                fprintf(errs, "map: line %d: unknown weapon '%s'\n", lineNo, toks[4]);
-                errors++; continue;
-            }
-            if (wallBuyCount >= 8) {
-                fprintf(errs, "map: line %d: too many wall buys\n", lineNo);
-                errors++; continue;
-            }
-            wallBuys[wallBuyCount++] = (WallBuy){
-                .pos = (Vector3){ x, 2.0f, z },
-                .normal = normal,
-                .weaponIdx = widx,
-            };
-            continue;
-        }
-
-        if (strcmp(key, "PERK") == 0) {
-            if (n != 4) {
-                fprintf(errs, "map: line %d: PERK expects x z NAME\n", lineNo);
-                errors++; continue;
-            }
-            float x, z;
-            if (!ParseFloat(toks[1], &x) || !ParseFloat(toks[2], &z)) {
-                fprintf(errs, "map: line %d: PERK bad coord\n", lineNo);
-                errors++; continue;
-            }
-            int pidx = PerkNameToIdx(toks[3]);
-            if (pidx < 0) {
-                fprintf(errs, "map: line %d: unknown perk '%s'\n", lineNo, toks[3]);
-                errors++; continue;
-            }
-            if (perkMachineCount >= PERK_COUNT) {
-                fprintf(errs, "map: line %d: too many perk machines\n", lineNo);
-                errors++; continue;
-            }
-            perkMachines[perkMachineCount++] = (PerkMachine){ {x, 0, z}, pidx };
-            continue;
-        }
-
-        if (strcmp(key, "PAP") == 0) {
-            if (n != 3) {
-                fprintf(errs, "map: line %d: PAP expects x z\n", lineNo);
-                errors++; continue;
-            }
-            float x, z;
-            if (!ParseFloat(toks[1], &x) || !ParseFloat(toks[2], &z)) {
-                fprintf(errs, "map: line %d: PAP bad coord\n", lineNo);
-                errors++; continue;
-            }
-            pap = (PackAPunch){ .pos = {x, 0, z}, .phase = PAP_IDLE,
-                                .slotInProgress = -1, .ownerPlayer = -1, .weaponIdx = -1 };
-            continue;
-        }
-
-        if (strcmp(key, "MBOX") == 0) {
-            if (n != 3) {
-                fprintf(errs, "map: line %d: MBOX expects x z\n", lineNo);
-                errors++; continue;
-            }
-            float x, z;
-            if (!ParseFloat(toks[1], &x) || !ParseFloat(toks[2], &z)) {
-                fprintf(errs, "map: line %d: MBOX bad coord\n", lineNo);
-                errors++; continue;
-            }
-            mbox = (MysteryBox){ .placed = true, .pos = {x, 0.5f, z},
-                                 .state = MBOX_IDLE, .timer = 0,
-                                 .showingWeapon = 0, .finalWeapon = 0,
-                                 .ownerPlayer = -1, .bob = 0 };
-            continue;
-        }
-
-        if (strcmp(key, "WINDOW") == 0) {
-            // WINDOW x z <dir> [LOCKED_BY door_name]
-            if (n < 4) {
-                fprintf(errs, "map: line %d: WINDOW expects x z <dir>\n", lineNo);
-                errors++; continue;
-            }
-            float x, z;
-            Vector3 normal;
-            if (!ParseFloat(toks[1], &x) || !ParseFloat(toks[2], &z) ||
-                !ParseDir  (toks[3], &normal)) {
-                fprintf(errs, "map: line %d: WINDOW bad arg\n", lineNo);
-                errors++; continue;
-            }
-            int lockedBy = -1;
-            char pendingName[24] = {0};
-            if (n >= 6 && strcmp(toks[4], "LOCKED_BY") == 0) {
-                strncpy(pendingName, toks[5], sizeof pendingName - 1);
-            } else if (n != 4) {
-                fprintf(errs, "map: line %d: WINDOW trailing tokens\n", lineNo);
-                errors++; continue;
-            }
-            if (windowCount >= MAX_WINDOWS) {
-                fprintf(errs, "map: line %d: too many windows\n", lineNo);
-                errors++; continue;
-            }
-            Vector3 tangent = { -normal.z, 0, normal.x };
-            int widx = windowCount++;
-            windows[widx] = (Window3D){
-                .pos = (Vector3){ x, WALL_HEIGHT*0.5f, z },
-                .normal = normal, .tangent = tangent,
-                .boards = MAX_BOARDS_PER_WIN,
-                .repairProgress = 0, .repairPlayer = -1,
-                .lockedByDoor = lockedBy,
-            };
-            if (pendingName[0] && g_pendingDoorRefCount < MAX_WINDOWS) {
-                g_pendingDoorRef[g_pendingDoorRefCount].windowIdx = widx;
-                strncpy(g_pendingDoorRef[g_pendingDoorRefCount].name,
-                        pendingName, sizeof g_pendingDoorRef[0].name - 1);
-                g_pendingDoorRefCount++;
-            }
-            continue;
-        }
-
-        if (strcmp(key, "PROP") == 0) {
-            // PROP <name> x z [yaw <deg>] [scale <s>]
-            if (n < 4) {
-                fprintf(errs, "map: line %d: PROP expects <name> x z [yaw d] [scale s]\n", lineNo);
-                errors++; continue;
-            }
-            const PropDef *def = PropDefByName(toks[1]);
-            if (!def) {
-                fprintf(errs, "map: line %d: unknown PROP '%s'\n", lineNo, toks[1]);
-                errors++; continue;
-            }
-            float x, z;
-            if (!ParseFloat(toks[2], &x) || !ParseFloat(toks[3], &z)) {
-                fprintf(errs, "map: line %d: PROP bad coord\n", lineNo);
-                errors++; continue;
-            }
-            float yaw = 0.0f, scale = 1.0f;
-            int i = 4;
-            while (i + 1 < n) {
-                if (strcmp(toks[i], "yaw") == 0) {
-                    if (!ParseFloat(toks[i+1], &yaw)) {
-                        fprintf(errs, "map: line %d: PROP bad yaw\n", lineNo);
-                        errors++; break;
-                    }
-                } else if (strcmp(toks[i], "scale") == 0) {
-                    if (!ParseFloat(toks[i+1], &scale)) {
-                        fprintf(errs, "map: line %d: PROP bad scale\n", lineNo);
-                        errors++; break;
-                    }
-                } else {
-                    fprintf(errs, "map: line %d: PROP unknown option '%s'\n",
-                            lineNo, toks[i]);
-                    errors++; break;
-                }
-                i += 2;
-            }
-            if (mapPropCount >= MAX_MAP_PROPS) {
-                fprintf(errs, "map: line %d: too many PROPs\n", lineNo);
-                errors++; continue;
-            }
-            Vector3 he = def->halfExtent;
-            mapProps[mapPropCount++] = (MapProp){
-                .propId = def->propId,
-                .pos    = (Vector3){ x, 0, z },
-                .yawDeg = yaw,
-                .scale  = scale,
-                .collider = (Box){
-                    { x, def->footYOffset * scale, z },
-                    { he.x * 2 * scale, he.y * 2 * scale, he.z * 2 * scale },
-                },
-            };
-            continue;
-        }
-
-        fprintf(errs, "map: line %d: unknown key '%s'\n", lineNo, key);
-        errors++;
-    }
-    fclose(f);
-
-    if (block != BLK_NONE) {
-        fprintf(errs, "map: end of file inside an open block\n");
-        errors++;
+    // Atmosphere
+    if (doc->atmosphere.present) {
+        fogColor = (Color){
+            (unsigned char)doc->atmosphere.fogR,
+            (unsigned char)doc->atmosphere.fogG,
+            (unsigned char)doc->atmosphere.fogB,
+            255
+        };
+        fogStart = doc->atmosphere.fogStart;
+        fogEnd   = doc->atmosphere.fogEnd;
+        // sky_tint and music reserved — no game consumer yet
     }
 
-    // Resolve window LOCKED_BY refs now that all doors are known.
-    for (int i = 0; i < g_pendingDoorRefCount; i++) {
-        int dIdx = DoorIndexByName(g_pendingDoorRef[i].name);
-        if (dIdx < 0) {
-            fprintf(errs, "map: window references unknown door '%s'\n",
-                    g_pendingDoorRef[i].name);
-            errors++;
-        } else {
-            windows[g_pendingDoorRef[i].windowIdx].lockedByDoor = dIdx;
+    // Spawns — game array is sized NET_MAX_PLAYERS; warn if more in doc
+    for (int i = 0; i < doc->spawnCount; i++) {
+        if (mapSpawnCount >= NET_MAX_PLAYERS) {
+            fprintf(stderr, "map: warning: %d spawns in map, game cap is %d — ignoring extras\n",
+                    doc->spawnCount, NET_MAX_PLAYERS);
+            break;
         }
+        mapSpawns[mapSpawnCount++] = (Vector3){
+            doc->spawns[i].x, PLAYER_EYE, doc->spawns[i].z
+        };
     }
-
-    if (mapSpawnCount == 0) {
+    if (mapSpawnCount == 0)
         mapSpawns[mapSpawnCount++] = (Vector3){ 0, PLAYER_EYE, 0 };
+
+    // Walls & Doors — each MapDocWall may produce up to 3 interior wall
+    // segments and 1 door entry.
+    for (int wi = 0; wi < doc->wallCount; wi++) {
+        const MapDocWall *w = &doc->walls[wi];
+        bool xRun = fabsf(w->z1 - w->z2) < 0.001f;
+
+        if (w->door.present) {
+            if (doorCount >= MAX_DOORS) {
+                fprintf(stderr, "map: warning: too many doors (MAX_DOORS=%d) — skipping\n",
+                        MAX_DOORS);
+                continue;
+            }
+            float center = w->door.center;
+            float width  = w->door.width;
+            float dl = center - width * 0.5f;
+            float dr = center + width * 0.5f;
+            float headerY  = DOOR_HEIGHT + (WALL_HEIGHT - DOOR_HEIGHT) * 0.5f;
+            float headerSY = WALL_HEIGHT - DOOR_HEIGHT;
+
+            if (xRun) {
+                EmitWallSegment(w->x1, w->z1, dl, w->z1);
+                EmitWallSegment(dr, w->z1, w->x2, w->z1);
+                if (interiorWallCount < MAX_INTERIOR_WALLS) {
+                    interiorWallNoClip[interiorWallCount] = true;
+                    interiorWalls[interiorWallCount++] = (Box){
+                        { center, headerY, w->z1 },
+                        { width,  headerSY, WALL_THICK },
+                    };
+                }
+                Vector3 c = { center, DOOR_HEIGHT * 0.5f, w->z1 };
+                Vector3 s = { width,  DOOR_HEIGHT,        WALL_THICK };
+                Door d = { .box = { c, s }, .cost = w->door.cost, .opened = false };
+                if (w->door.name[0]) strncpy(d.name, w->door.name, sizeof d.name - 1);
+                doors[doorCount++] = d;
+            } else {
+                EmitWallSegment(w->x1, w->z1, w->x1, dl);
+                EmitWallSegment(w->x1, dr, w->x1, w->z2);
+                if (interiorWallCount < MAX_INTERIOR_WALLS) {
+                    interiorWallNoClip[interiorWallCount] = true;
+                    interiorWalls[interiorWallCount++] = (Box){
+                        { w->x1,      headerY,  center },
+                        { WALL_THICK, headerSY, width  },
+                    };
+                }
+                Vector3 c = { w->x1,      DOOR_HEIGHT * 0.5f, center };
+                Vector3 s = { WALL_THICK, DOOR_HEIGHT,        width  };
+                Door d = { .box = { c, s }, .cost = w->door.cost, .opened = false };
+                if (w->door.name[0]) strncpy(d.name, w->door.name, sizeof d.name - 1);
+                doors[doorCount++] = d;
+            }
+        } else {
+            EmitWallSegment(w->x1, w->z1, w->x2, w->z2);
+        }
     }
 
-    if (!validateOnly) {
-        fprintf(stderr, "map: loaded '%s' from %s (%d walls, %d doors, %d windows, %d props)\n",
-                mapName, path, interiorWallCount, doorCount, windowCount, mapPropCount);
+    // Windows — resolve LOCKED_BY after doors are built
+    for (int i = 0; i < doc->windowCount; i++) {
+        if (windowCount >= MAX_WINDOWS) {
+            fprintf(stderr, "map: warning: too many windows (MAX_WINDOWS=%d) — ignoring extras\n",
+                    MAX_WINDOWS);
+            break;
+        }
+        const MapDocWindow *dw = &doc->windows[i];
+        Vector3 normal  = DirToNormal(dw->dir);
+        Vector3 tangent = { -normal.z, 0, normal.x };
+        int lockedBy = -1;
+        if (dw->lockedBy[0]) {
+            lockedBy = DoorIndexByName(dw->lockedBy);
+            if (lockedBy < 0)
+                fprintf(stderr, "map: warning: window references unknown door '%s'\n",
+                        dw->lockedBy);
+        }
+        windows[windowCount++] = (Window3D){
+            .pos = (Vector3){ dw->x, WALL_HEIGHT * 0.5f, dw->z },
+            .normal = normal, .tangent = tangent,
+            .boards = MAX_BOARDS_PER_WIN,
+            .repairProgress = 0, .repairPlayer = -1,
+            .lockedByDoor = lockedBy,
+        };
     }
-    return errors;
+
+    // Obstacles
+    for (int i = 0; i < doc->obstacleCount; i++) {
+        if (obstacleCount >= MAX_OBSTACLES) {
+            fprintf(stderr, "map: warning: too many obstacles (MAX_OBSTACLES=%d) — ignoring extras\n",
+                    MAX_OBSTACLES);
+            break;
+        }
+        const MapDocObstacle *o = &doc->obstacles[i];
+        obstacles[obstacleCount++] = (Box){
+            { o->x, o->h * 0.5f, o->z }, { o->sx, o->h, o->sz }
+        };
+    }
+
+    // Wallbuys
+    for (int i = 0; i < doc->wallbuyCount; i++) {
+        if (wallBuyCount >= MAX_WALLBUYS) {
+            fprintf(stderr, "map: warning: too many wallbuys (MAX_WALLBUYS=%d) — ignoring extras\n",
+                    MAX_WALLBUYS);
+            break;
+        }
+        const MapDocWallbuy *wb = &doc->wallbuys[i];
+        int widx = WeaponNameToIdx(wb->weapon);
+        if (widx < 0) continue;
+        Vector3 normal = DirToNormal(wb->dir);
+        wallBuys[wallBuyCount++] = (WallBuy){
+            .pos = (Vector3){ wb->x, 2.0f, wb->z },
+            .normal = normal,
+            .weaponIdx = widx,
+        };
+    }
+
+    // Perks
+    for (int i = 0; i < doc->perkCount; i++) {
+        if (perkMachineCount >= PERK_COUNT) {
+            fprintf(stderr, "map: warning: too many perk machines (PERK_COUNT=%d) — ignoring extras\n",
+                    PERK_COUNT);
+            break;
+        }
+        const MapDocPerk *pk = &doc->perks[i];
+        int pidx = PerkNameToIdx(pk->perk);
+        if (pidx < 0) continue;
+        perkMachines[perkMachineCount++] = (PerkMachine){ {pk->x, 0, pk->z}, pidx };
+    }
+
+    // Pack-a-Punch
+    if (doc->hasPap) {
+        pap = (PackAPunch){
+            .pos = { doc->pap.x, 0, doc->pap.z },
+            .phase = PAP_IDLE, .slotInProgress = -1,
+            .ownerPlayer = -1, .weaponIdx = -1
+        };
+    }
+
+    // Mystery Box
+    if (doc->mbox.present) {
+        mbox = (MysteryBox){
+            .placed = true, .pos = { doc->mbox.x, 0.5f, doc->mbox.z },
+            .state = MBOX_IDLE, .timer = 0,
+            .showingWeapon = 0, .finalWeapon = 0,
+            .ownerPlayer = -1, .bob = 0
+        };
+    }
+
+    // Props
+    for (int i = 0; i < doc->propCount; i++) {
+        if (mapPropCount >= MAX_MAP_PROPS) {
+            fprintf(stderr, "map: warning: too many props (MAX_MAP_PROPS=%d) — ignoring extras\n",
+                    MAX_MAP_PROPS);
+            break;
+        }
+        const MapDocProp *pr = &doc->props[i];
+        const PropDef *def = PropDefByName(pr->name);
+        if (!def) {
+            fprintf(stderr, "map: warning: unknown prop '%s' — skipping\n", pr->name);
+            continue;
+        }
+        Vector3 he = def->halfExtent;
+        float   sc = pr->scale;
+        mapProps[mapPropCount++] = (MapProp){
+            .propId = def->propId,
+            .pos    = (Vector3){ pr->x, 0, pr->z },
+            .yawDeg = pr->yawDeg,
+            .scale  = sc,
+            .collider = (Box){
+                { pr->x, def->footYOffset * sc, pr->z },
+                { he.x * 2 * sc, he.y * 2 * sc, he.z * 2 * sc },
+            },
+        };
+    }
 }
 
 bool Level_LoadFromFile(const char *path) {
-    int errs = ParseMapFile(path, false);
-    return errs == 0 || (errs > 0 && interiorWallCount + doorCount + windowCount > 0);
+    MapDoc doc;
+    int errs = MapDoc_Parse(path, &doc, stderr);
+    if (errs == 0 || doc.wallCount + doc.obstacleCount + doc.windowCount > 0) {
+        Level_InstantiateDoc(&doc);
+        fprintf(stderr, "map: loaded '%s' from %s (%d walls, %d doors, %d windows, %d props)\n",
+                mapName, path, interiorWallCount, doorCount, windowCount, mapPropCount);
+        return true;
+    }
+    return false;
 }
 
 int Level_Validate(const char *path) {
-    int errs = ParseMapFile(path, true);
+    MapDoc doc;
+    int errs = MapDoc_Parse(path, &doc, stderr);
     if (errs == 0) fprintf(stderr, "map: %s — OK\n", path);
     else           fprintf(stderr, "map: %s — %d error(s)\n", path, errs);
     return errs;
@@ -831,19 +557,19 @@ void Level_LoadHardcodedFallback(void) {
 
     doors[doorCount++] = (Door){ .box = { {0, 2.5f, -20}, {6, 5, 1} }, .cost = 1500, .opened = false };
 
-    wallBuys[wallBuyCount++] = (WallBuy){ { 15.0f, 2.0f,  ARENA_HALF - 0.55f }, { 0,0,-1}, W_SHOTGUN };
-    wallBuys[wallBuyCount++] = (WallBuy){ { ARENA_HALF - 0.55f, 2.0f, -10.0f }, {-1,0, 0}, W_SMG };
-    wallBuys[wallBuyCount++] = (WallBuy){ {-15.0f, 2.0f, -ARENA_HALF + 0.55f }, { 0,0, 1}, W_RIFLE };
-    wallBuys[wallBuyCount++] = (WallBuy){ {-ARENA_HALF + 0.55f, 2.0f, 18.0f }, { 1,0, 0}, W_RAYGUN };
+    wallBuys[wallBuyCount++] = (WallBuy){ { 15.0f, 2.0f,  ARENA_HALF_DEFAULT - 0.55f }, { 0,0,-1}, W_SHOTGUN };
+    wallBuys[wallBuyCount++] = (WallBuy){ { ARENA_HALF_DEFAULT - 0.55f, 2.0f, -10.0f }, {-1,0, 0}, W_SMG };
+    wallBuys[wallBuyCount++] = (WallBuy){ {-15.0f, 2.0f, -ARENA_HALF_DEFAULT + 0.55f }, { 0,0, 1}, W_RIFLE };
+    wallBuys[wallBuyCount++] = (WallBuy){ {-ARENA_HALF_DEFAULT + 0.55f, 2.0f, 18.0f }, { 1,0, 0}, W_RAYGUN };
 
     Window3D ws[] = {
-        { .pos = { -18.0f, WALL_HEIGHT*0.5f,  ARENA_HALF }, .normal = { 0, 0, -1 }, .tangent = { 1, 0, 0 },
+        { .pos = { -18.0f, WALL_HEIGHT*0.5f,  ARENA_HALF_DEFAULT }, .normal = { 0, 0, -1 }, .tangent = { 1, 0, 0 },
           .boards = MAX_BOARDS_PER_WIN, .repairPlayer = -1, .lockedByDoor = -1 },
-        { .pos = { ARENA_HALF, WALL_HEIGHT*0.5f, 18.0f }, .normal = { -1, 0, 0 }, .tangent = { 0, 0, 1 },
+        { .pos = { ARENA_HALF_DEFAULT, WALL_HEIGHT*0.5f, 18.0f }, .normal = { -1, 0, 0 }, .tangent = { 0, 0, 1 },
           .boards = MAX_BOARDS_PER_WIN, .repairPlayer = -1, .lockedByDoor = -1 },
-        { .pos = { 18.0f, WALL_HEIGHT*0.5f, -ARENA_HALF }, .normal = { 0, 0, 1 }, .tangent = { 1, 0, 0 },
+        { .pos = { 18.0f, WALL_HEIGHT*0.5f, -ARENA_HALF_DEFAULT }, .normal = { 0, 0, 1 }, .tangent = { 1, 0, 0 },
           .boards = MAX_BOARDS_PER_WIN, .repairPlayer = -1, .lockedByDoor = 0 },
-        { .pos = { -ARENA_HALF, WALL_HEIGHT*0.5f, -8.0f }, .normal = { 1, 0, 0 }, .tangent = { 0, 0, 1 },
+        { .pos = { -ARENA_HALF_DEFAULT, WALL_HEIGHT*0.5f, -8.0f }, .normal = { 1, 0, 0 }, .tangent = { 0, 0, 1 },
           .boards = MAX_BOARDS_PER_WIN, .repairPlayer = -1, .lockedByDoor = -1 },
     };
     for (size_t i = 0; i < sizeof ws / sizeof ws[0]; i++) windows[windowCount++] = ws[i];

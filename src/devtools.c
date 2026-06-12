@@ -3,6 +3,7 @@
 #include "raymath.h"
 #include "types.h"
 #include "level.h"
+#include "mapdoc.h"
 #include "player.h"
 #include "weapons.h"
 #include "entities.h"
@@ -24,6 +25,51 @@ static int Dev_Validate(int argc, char **argv) {
     SetTraceLogLevel(LOG_ERROR);
     int errs = Level_Validate(argv[2]);
     return errs > 0 ? 1 : 0;
+}
+
+// ---- --map-roundtrip -------------------------------------------------------
+// Headless: parse -> save to tmp -> parse again -> compare.
+// Exits 0 on PASS, 1 on FAIL or I/O error.
+
+static int Dev_MapRoundtrip(int argc, char **argv) {
+    if (argc < 3) { fprintf(stderr, "usage: --map-roundtrip <file.map>\n"); return 1; }
+    const char *path = argv[2];
+
+    /* Step 1: parse original */
+    MapDoc doc1;
+    int e1 = MapDoc_Parse(path, &doc1, stderr);
+    if (e1 > 0) {
+        fprintf(stderr, "roundtrip: original parse had %d error(s) — FAIL\n", e1);
+        return 1;
+    }
+    fprintf(stderr, "roundtrip: parsed  '%s'  OK\n", path);
+
+    /* Step 2: save to temp file */
+    char tmpPath[512];
+    snprintf(tmpPath, sizeof tmpPath, "%s.roundtrip_tmp", path);
+    if (MapDoc_Save(tmpPath, &doc1) != 0) {
+        fprintf(stderr, "roundtrip: could not write temp file '%s' — FAIL\n", tmpPath);
+        return 1;
+    }
+    fprintf(stderr, "roundtrip: saved   '%s'\n", tmpPath);
+
+    /* Step 3: re-parse the saved file */
+    MapDoc doc2;
+    int e2 = MapDoc_Parse(tmpPath, &doc2, stderr);
+    remove(tmpPath);
+    if (e2 > 0) {
+        fprintf(stderr, "roundtrip: re-parse had %d error(s) — FAIL\n", e2);
+        return 1;
+    }
+    fprintf(stderr, "roundtrip: re-parsed OK\n");
+
+    /* Step 4: compare */
+    if (!MapDoc_Equal(&doc1, &doc2)) {
+        fprintf(stderr, "roundtrip: documents differ — FAIL\n");
+        return 1;
+    }
+    fprintf(stderr, "roundtrip: %s — PASS\n", path);
+    return 0;
 }
 
 // ---- --screenshot-viewmodels -----------------------------------------------
@@ -587,6 +633,10 @@ bool Devtools_HandleCLI(int argc, char **argv, int *exitCode) {
     }
     if (argc >= 3 && strcmp(argv[1], "--anim-test") == 0) {
         *exitCode = Dev_AnimTest(argc, argv);
+        return true;
+    }
+    if (argc >= 3 && strcmp(argv[1], "--map-roundtrip") == 0) {
+        *exitCode = Dev_MapRoundtrip(argc, argv);
         return true;
     }
     return false;

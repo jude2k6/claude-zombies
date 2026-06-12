@@ -2,6 +2,7 @@
 #define SHOOTER_LEVEL_H
 
 #include "types.h"
+#include "mapdoc.h"
 
 extern Box         obstacles[MAX_OBSTACLES];
 extern int         obstacleCount;
@@ -10,7 +11,7 @@ extern int         interiorWallCount;
 extern bool        interiorWallNoClip[MAX_INTERIOR_WALLS];
 extern Door        doors[MAX_DOORS];
 extern int         doorCount;
-extern WallBuy     wallBuys[8];
+extern WallBuy     wallBuys[MAX_WALLBUYS];
 extern int         wallBuyCount;
 extern Window3D    windows[MAX_WINDOWS];
 extern int         windowCount;
@@ -24,8 +25,13 @@ extern char        mapName[64];
 extern MapProp     mapProps[MAX_MAP_PROPS];
 extern int         mapPropCount;
 
+/* Per-map arena half-extents (runtime; default 40 x 40). */
+extern float arenaHalfX;
+extern float arenaHalfZ;
+
 void  Level_Build(void);
 bool  Level_LoadFromFile(const char *path);
+void  Level_InstantiateDoc(const MapDoc *doc);  // doc -> game globals
 void  Level_LoadHardcodedFallback(void);
 void  Level_Reset(void);     // close doors, refill boards, clear PaP
 

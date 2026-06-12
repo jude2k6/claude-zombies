@@ -44,6 +44,7 @@ FetchContent_MakeAvailable(enet)
 add_executable(shooter
     src/main.c
     src/net.c
+    src/mapdoc.c
     src/level.c
     src/player.c
     src/weapons.c

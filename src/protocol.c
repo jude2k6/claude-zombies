@@ -82,7 +82,7 @@ typedef struct {
     int8_t   papSlotInProgress;
     int8_t   papOwnerPlayer;
     int8_t   papWeaponIdx;
-    uint8_t  doorsOpened;
+    uint16_t doorsOpened;  /* bitmask, one bit per door; widened for MAX_DOORS 16 */
     float    doublePointsTimer;
     float    instaKillTimer;
     // Mystery Box
@@ -202,8 +202,8 @@ void Protocol_HostBroadcastSnapshot(void) {
     hdr->papOwnerPlayer = (int8_t)pap.ownerPlayer;
     hdr->papWeaponIdx = (int8_t)pap.weaponIdx;
     {
-        uint8_t mask = 0;
-        for (int i = 0; i < doorCount && i < 8; i++) if (doors[i].opened) mask |= (uint8_t)(1u << i);
+        uint16_t mask = 0;
+        for (int i = 0; i < doorCount && i < 16; i++) if (doors[i].opened) mask |= (uint16_t)(1u << i);
         hdr->doorsOpened = mask;
     }
     hdr->doublePointsTimer = doublePointsTimer;
@@ -301,7 +301,7 @@ void Protocol_ClientApplySnapshot(uint8_t *data, size_t len) {
     pap.slotInProgress = hdr->papSlotInProgress;
     pap.ownerPlayer = hdr->papOwnerPlayer;
     pap.weaponIdx = hdr->papWeaponIdx;
-    for (int i = 0; i < doorCount && i < 8; i++) doors[i].opened = (hdr->doorsOpened & (1u << i)) != 0;
+    for (int i = 0; i < doorCount && i < 16; i++) doors[i].opened = (hdr->doorsOpened & (1u << i)) != 0;
     doublePointsTimer = hdr->doublePointsTimer;
     instaKillTimer    = hdr->instaKillTimer;
     mbox.state         = hdr->mboxState;

@@ -14,7 +14,10 @@
 #define WINDOW_W_DEFAULT 1280
 #define WINDOW_H_DEFAULT 720
 
-#define ARENA_HALF         40.0f
+/* ARENA_HALF is no longer a compile-time constant; runtime values are
+   arenaHalfX / arenaHalfZ in level.c (extern'd in level.h).
+   Keep this fallback define only for Level_LoadHardcodedFallback. */
+#define ARENA_HALF_DEFAULT 40.0f
 #define WALL_HEIGHT         5.0f
 #define WALL_THICK          1.0f
 #define DOOR_HEIGHT         2.5f   // height of door + matching wall opening
@@ -49,10 +52,11 @@
 #define MAX_DECALS         96
 #define MAX_THROWABLES     16
 
-#define MAX_OBSTACLES      24
-#define MAX_INTERIOR_WALLS 32   // header walls above doors count too
-#define MAX_DOORS           8
-#define MAX_MAP_PROPS      32
+#define MAX_OBSTACLES      64
+#define MAX_INTERIOR_WALLS 64   // header walls above doors count too
+#define MAX_DOORS          16
+#define MAX_WALLBUYS       16
+#define MAX_MAP_PROPS      64
 
 #define INV_SLOTS           2
 #define INTERACT_DIST       3.0f
@@ -67,7 +71,7 @@
 
 #define PAP_COST           5000
 
-#define MAX_WINDOWS         4
+#define MAX_WINDOWS        16
 #define MAX_BOARDS_PER_WIN  5
 #define WINDOW_WIDTH        4.0f
 

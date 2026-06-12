@@ -143,11 +143,12 @@ void Enemies_Separate(void) {
             }
         }
     }
-    float lim = ARENA_HALF - ENEMY_RADIUS;
+    float limX = arenaHalfX - ENEMY_RADIUS;
+    float limZ = arenaHalfZ - ENEMY_RADIUS;
     for (int i = 0; i < MAX_ENEMIES; i++) {
         if (!enemies[i].alive || enemies[i].state != ZS_INSIDE) continue;
-        enemies[i].pos.x = Clamp(enemies[i].pos.x, -lim, lim);
-        enemies[i].pos.z = Clamp(enemies[i].pos.z, -lim, lim);
+        enemies[i].pos.x = Clamp(enemies[i].pos.x, -limX, limX);
+        enemies[i].pos.z = Clamp(enemies[i].pos.z, -limZ, limZ);
     }
 }
 
@@ -605,7 +606,7 @@ void Bullets_Update(float dt) {
             // No hit this step — advance and life-out on arena escape.
             bullets[i].pos = b;
             float ax = fabsf(b.x), az = fabsf(b.z);
-            if (ax > ARENA_HALF + 4.0f || az > ARENA_HALF + 4.0f)
+            if (ax > arenaHalfX + 4.0f || az > arenaHalfZ + 4.0f)
                 bullets[i].alive = false;
             continue;
         }

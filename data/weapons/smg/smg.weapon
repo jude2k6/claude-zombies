@@ -35,6 +35,6 @@ sfx             SHOT 0.55 1.25
 haptic          0.08 0.25 0.20 0.05
 mbox_weight     1.0
 
-vm_grip_pos     0 0 -0.04
+vm_grip_pos     0 0.18 -0.02
 vm_grip_rot     0 0 0
 vm_grip_scale   1.0

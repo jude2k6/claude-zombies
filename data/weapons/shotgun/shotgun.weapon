@@ -36,6 +36,6 @@ sfx             SHOTGUN 0.85 0.95
 haptic          0.35 0.60 0.35 0.12
 mbox_weight     1.0
 
-vm_grip_pos     0 0 -0.04
+vm_grip_pos     0 0.15 -0.08
 vm_grip_rot     0 0 0
 vm_grip_scale   1.0

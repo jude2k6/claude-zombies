@@ -40,6 +40,6 @@ haptic          0.28 0.30 0.55 0.10
 # Wonder weapon: half the box odds of a primary (~11% of rolls).
 mbox_weight     0.5
 
-vm_grip_pos     0 0 -0.04
+vm_grip_pos     0 0.07 0
 vm_grip_rot     0 0 0
 vm_grip_scale   0.65

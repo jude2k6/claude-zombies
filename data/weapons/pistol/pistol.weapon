@@ -44,9 +44,9 @@ mbox_weight     1.0
 # Arms-viewmodel grip (hand.R bone seating). pos is bone-local metres after
 # the base +90X rotation: +x right, +y toward muzzle, +z up. Tune via
 # --screenshot-viewmodels.
-vm_grip_pos     0 0 -0.05
+vm_grip_pos     0 0.09 -0.01
 vm_grip_rot     0 0 0
-vm_grip_scale   1.0
+vm_grip_scale   0.6
 
 # Arms-viewmodel idle hold: support hand cups the gun hand.
 vm_pose         PISTOL

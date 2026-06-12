@@ -656,6 +656,77 @@ int MapDoc_Save(const char *path, const MapDoc *doc) {
 static bool FEq(float a, float b) { return Fabsf(a - b) < 1e-3f; }
 static bool SEq(const char *a, const char *b) { return strcmp(a, b) == 0; }
 
+/* Entity order is not semantically meaningful (MapDoc_Save canonicalises it:
+ * ungrouped first, then per-room), so each per-type comparison below is a
+ * greedy unordered match: every element of a must pair with a distinct,
+ * field-equal element of b. Room order IS preserved by Save, so roomIdx
+ * values remain directly comparable. */
+
+static bool SpawnEq(const MapDocSpawn *x, const MapDocSpawn *y) {
+    return FEq(x->x, y->x) && FEq(x->z, y->z) && x->roomIdx == y->roomIdx;
+}
+static bool WallEq(const MapDocWall *x, const MapDocWall *y) {
+    if (!FEq(x->x1, y->x1) || !FEq(x->z1, y->z1)) return false;
+    if (!FEq(x->x2, y->x2) || !FEq(x->z2, y->z2)) return false;
+    if (x->roomIdx != y->roomIdx) return false;
+    if (x->door.present != y->door.present) return false;
+    if (x->door.present) {
+        if (!FEq(x->door.center, y->door.center)) return false;
+        if (!FEq(x->door.width,  y->door.width))  return false;
+        if (x->door.cost != y->door.cost) return false;
+        if (!SEq(x->door.name, y->door.name)) return false;
+    }
+    return true;
+}
+static bool WindowEq(const MapDocWindow *x, const MapDocWindow *y) {
+    return FEq(x->x, y->x) && FEq(x->z, y->z) && x->roomIdx == y->roomIdx &&
+           SEq(x->dir, y->dir) && SEq(x->lockedBy, y->lockedBy);
+}
+static bool ObstacleEq(const MapDocObstacle *x, const MapDocObstacle *y) {
+    return FEq(x->x, y->x) && FEq(x->z, y->z) && x->roomIdx == y->roomIdx &&
+           FEq(x->sx, y->sx) && FEq(x->sz, y->sz) && FEq(x->h, y->h);
+}
+static bool WallbuyEq(const MapDocWallbuy *x, const MapDocWallbuy *y) {
+    return FEq(x->x, y->x) && FEq(x->z, y->z) && x->roomIdx == y->roomIdx &&
+           SEq(x->dir, y->dir) && SEq(x->weapon, y->weapon);
+}
+static bool PerkEq(const MapDocPerk *x, const MapDocPerk *y) {
+    return FEq(x->x, y->x) && FEq(x->z, y->z) && x->roomIdx == y->roomIdx &&
+           SEq(x->perk, y->perk);
+}
+static bool PropEq(const MapDocProp *x, const MapDocProp *y) {
+    return SEq(x->name, y->name) && x->roomIdx == y->roomIdx &&
+           FEq(x->x, y->x) && FEq(x->z, y->z) &&
+           FEq(x->yawDeg, y->yawDeg) && FEq(x->scale, y->scale);
+}
+
+/* Greedy unordered set-match over parallel arrays of `count` elements of
+ * `size` bytes, using `eq` as the pairing predicate. */
+static bool UnorderedMatch(const void *arrA, const void *arrB, int count,
+                           size_t size, bool (*eq)(const void *, const void *)) {
+    bool used[MAPDOC_MAX_WALLS] = { false };   /* largest cap */
+    for (int i = 0; i < count; i++) {
+        const void *ea = (const char *)arrA + (size_t)i * size;
+        bool found = false;
+        for (int j = 0; j < count; j++) {
+            if (used[j]) continue;
+            const void *eb = (const char *)arrB + (size_t)j * size;
+            if (eq(ea, eb)) { used[j] = true; found = true; break; }
+        }
+        if (!found) return false;
+    }
+    return true;
+}
+
+/* Thin void* adapters for UnorderedMatch. */
+static bool SpawnEqV(const void *a, const void *b)    { return SpawnEq(a, b); }
+static bool WallEqV(const void *a, const void *b)     { return WallEq(a, b); }
+static bool WindowEqV(const void *a, const void *b)   { return WindowEq(a, b); }
+static bool ObstacleEqV(const void *a, const void *b) { return ObstacleEq(a, b); }
+static bool WallbuyEqV(const void *a, const void *b)  { return WallbuyEq(a, b); }
+static bool PerkEqV(const void *a, const void *b)     { return PerkEq(a, b); }
+static bool PropEqV(const void *a, const void *b)     { return PropEq(a, b); }
+
 bool MapDoc_Equal(const MapDoc *a, const MapDoc *b) {
     if (!SEq(a->name, b->name)) return false;
     if (!FEq(a->arenaHalfX, b->arenaHalfX)) return false;
@@ -671,63 +742,30 @@ bool MapDoc_Equal(const MapDoc *a, const MapDoc *b) {
         if (!FEq(a->atmosphere.fogEnd, b->atmosphere.fogEnd)) return false;
     }
 
-    /* spawns */
+    /* entities: unordered per-type match (Save canonicalises order) */
     if (a->spawnCount != b->spawnCount) return false;
-    for (int i = 0; i < a->spawnCount; i++) {
-        if (!FEq(a->spawns[i].x, b->spawns[i].x)) return false;
-        if (!FEq(a->spawns[i].z, b->spawns[i].z)) return false;
-        if (a->spawns[i].roomIdx != b->spawns[i].roomIdx) return false;
-    }
+    if (!UnorderedMatch(a->spawns, b->spawns, a->spawnCount,
+                        sizeof a->spawns[0], SpawnEqV)) return false;
 
-    /* walls */
     if (a->wallCount != b->wallCount) return false;
-    for (int i = 0; i < a->wallCount; i++) {
-        const MapDocWall *wa = &a->walls[i], *wb = &b->walls[i];
-        if (!FEq(wa->x1, wb->x1) || !FEq(wa->z1, wb->z1)) return false;
-        if (!FEq(wa->x2, wb->x2) || !FEq(wa->z2, wb->z2)) return false;
-        if (wa->door.present != wb->door.present) return false;
-        if (wa->door.present) {
-            if (!FEq(wa->door.center, wb->door.center)) return false;
-            if (!FEq(wa->door.width,  wb->door.width))  return false;
-            if (wa->door.cost != wb->door.cost) return false;
-            if (!SEq(wa->door.name, wb->door.name)) return false;
-        }
-    }
+    if (!UnorderedMatch(a->walls, b->walls, a->wallCount,
+                        sizeof a->walls[0], WallEqV)) return false;
 
-    /* windows */
     if (a->windowCount != b->windowCount) return false;
-    for (int i = 0; i < a->windowCount; i++) {
-        const MapDocWindow *wa = &a->windows[i], *wb = &b->windows[i];
-        if (!FEq(wa->x, wb->x) || !FEq(wa->z, wb->z)) return false;
-        if (!SEq(wa->dir, wb->dir)) return false;
-        if (!SEq(wa->lockedBy, wb->lockedBy)) return false;
-    }
+    if (!UnorderedMatch(a->windows, b->windows, a->windowCount,
+                        sizeof a->windows[0], WindowEqV)) return false;
 
-    /* obstacles */
     if (a->obstacleCount != b->obstacleCount) return false;
-    for (int i = 0; i < a->obstacleCount; i++) {
-        const MapDocObstacle *oa = &a->obstacles[i], *ob = &b->obstacles[i];
-        if (!FEq(oa->x, ob->x) || !FEq(oa->z, ob->z)) return false;
-        if (!FEq(oa->sx, ob->sx) || !FEq(oa->sz, ob->sz)) return false;
-        if (!FEq(oa->h, ob->h)) return false;
-    }
+    if (!UnorderedMatch(a->obstacles, b->obstacles, a->obstacleCount,
+                        sizeof a->obstacles[0], ObstacleEqV)) return false;
 
-    /* wallbuys */
     if (a->wallbuyCount != b->wallbuyCount) return false;
-    for (int i = 0; i < a->wallbuyCount; i++) {
-        if (!FEq(a->wallbuys[i].x, b->wallbuys[i].x)) return false;
-        if (!FEq(a->wallbuys[i].z, b->wallbuys[i].z)) return false;
-        if (!SEq(a->wallbuys[i].dir, b->wallbuys[i].dir)) return false;
-        if (!SEq(a->wallbuys[i].weapon, b->wallbuys[i].weapon)) return false;
-    }
+    if (!UnorderedMatch(a->wallbuys, b->wallbuys, a->wallbuyCount,
+                        sizeof a->wallbuys[0], WallbuyEqV)) return false;
 
-    /* perks */
     if (a->perkCount != b->perkCount) return false;
-    for (int i = 0; i < a->perkCount; i++) {
-        if (!FEq(a->perks[i].x, b->perks[i].x)) return false;
-        if (!FEq(a->perks[i].z, b->perks[i].z)) return false;
-        if (!SEq(a->perks[i].perk, b->perks[i].perk)) return false;
-    }
+    if (!UnorderedMatch(a->perks, b->perks, a->perkCount,
+                        sizeof a->perks[0], PerkEqV)) return false;
 
     /* pap */
     if (a->hasPap != b->hasPap) return false;
@@ -743,13 +781,8 @@ bool MapDoc_Equal(const MapDoc *a, const MapDoc *b) {
 
     /* props */
     if (a->propCount != b->propCount) return false;
-    for (int i = 0; i < a->propCount; i++) {
-        if (!SEq(a->props[i].name, b->props[i].name)) return false;
-        if (!FEq(a->props[i].x, b->props[i].x)) return false;
-        if (!FEq(a->props[i].z, b->props[i].z)) return false;
-        if (!FEq(a->props[i].yawDeg, b->props[i].yawDeg)) return false;
-        if (!FEq(a->props[i].scale, b->props[i].scale)) return false;
-    }
+    if (!UnorderedMatch(a->props, b->props, a->propCount,
+                        sizeof a->props[0], PropEqV)) return false;
 
     /* rooms (names and count) */
     if (a->roomCount != b->roomCount) return false;

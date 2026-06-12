@@ -6,9 +6,11 @@
 
 extern Box         obstacles[MAX_OBSTACLES];
 extern int         obstacleCount;
+extern int         obstacleTexHandle[MAX_OBSTACLES];     /* -1 = no override */
 extern Box         interiorWalls[MAX_INTERIOR_WALLS];
 extern int         interiorWallCount;
 extern bool        interiorWallNoClip[MAX_INTERIOR_WALLS];
+extern int         interiorWallTexHandle[MAX_INTERIOR_WALLS]; /* -1 = no override */
 extern Door        doors[MAX_DOORS];
 extern int         doorCount;
 extern WallBuy     wallBuys[MAX_WALLBUYS];

@@ -117,4 +117,29 @@ void Assets_Unload(void);  // call before CloseWindow
 // default. Called after Assets_Load and after any later LoadModel.
 void Assets_ApplyWorldShader(void);
 
+// ---- name-keyed texture cache -------------------------------------------
+// Look up (or load on first request) a texture by base name.  The file
+// data/textures/<name>.png is probed via the same prefix list as the slot
+// textures.  Returns a non-negative handle on success; -1 if the file is
+// missing or fails to load (one stderr line is printed).  Handles deduplicate:
+// calling with the same name twice returns the same handle.
+// Cache capacity: TEX_CACHE_SIZE entries.  Flush with Assets_FlushNameCache
+// (call before loading a new map so stale GL textures are released on the
+// main thread before GL context teardown).
+#define TEX_CACHE_SIZE  32
+int       Assets_GetTextureByName(const char *name);
+Texture2D *Assets_CachedTexture(int handle);  // NULL if handle invalid
+void      Assets_FlushNameCache(void);        // unload all cached textures
+
+// ---- per-map texture slot overrides -------------------------------------
+// Indexed by TextureId (0..TEX_COUNT-1).  -1 = use the boot slot texture.
+// Set by Level_InstantiateDoc from the map's TEXTURES block; cleared by
+// Assets_FlushNameCache (called at the start of Level_InstantiateDoc).
+extern int mapTexOverrides[TEX_COUNT];
+
+// Resolve a TextureId to the Texture2D* to use, applying override then
+// boot-slot fallback.  Returns NULL only when neither is loaded (flat
+// colour fallback stays in the caller).
+Texture2D *Assets_ResolveTexture(TextureId tid);
+
 #endif

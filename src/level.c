@@ -11,12 +11,14 @@
 
 Box         obstacles[MAX_OBSTACLES];
 int         obstacleCount = 0;
+int         obstacleTexHandle[MAX_OBSTACLES];
 Box         interiorWalls[MAX_INTERIOR_WALLS];
 int         interiorWallCount = 0;
 // Per-wall flag: header/lintel segments above door openings are drawn and
 // block bullets (the 3D segment test is Y-aware) but must NOT block XZ
 // movement, or the doorway is walled off whether the door is open or shut.
 bool        interiorWallNoClip[MAX_INTERIOR_WALLS];
+int         interiorWallTexHandle[MAX_INTERIOR_WALLS];
 Door        doors[MAX_DOORS];
 int         doorCount = 0;
 WallBuy     wallBuys[MAX_WALLBUYS];
@@ -211,8 +213,10 @@ static int PerkNameToIdx(const char *s) {
 
 static void ClearLevel(void) {
     obstacleCount = 0;
+    for (int i = 0; i < MAX_OBSTACLES; i++) obstacleTexHandle[i] = -1;
     interiorWallCount = 0;
     memset(interiorWallNoClip, 0, sizeof interiorWallNoClip);
+    for (int i = 0; i < MAX_INTERIOR_WALLS; i++) interiorWallTexHandle[i] = -1;
     doorCount = 0;
     wallBuyCount = 0;
     windowCount = 0;
@@ -302,6 +306,11 @@ static int DoorIndexByName(const char *name) {
 // ============================================================================
 
 void Level_InstantiateDoc(const MapDoc *doc) {
+    // Flush the name-keyed texture cache and override table before rebuilding.
+    // Must happen before ClearLevel (which also resets texture handle arrays)
+    // so the GL unload happens while the GL context is valid.
+    Assets_FlushNameCache();
+
     ClearLevel();
 
     // Name
@@ -311,6 +320,21 @@ void Level_InstantiateDoc(const MapDoc *doc) {
     // Arena half-extents
     arenaHalfX = doc->arenaHalfX;
     arenaHalfZ = doc->arenaHalfZ;
+
+    // Per-map texture slot overrides from TEXTURES block.
+    if (doc->textures.present) {
+        const struct { const char *name; TextureId tid; } slots[] = {
+            { doc->textures.floor,    TEX_FLOOR    },
+            { doc->textures.ground,   TEX_GROUND   },
+            { doc->textures.wall_ext, TEX_WALL_EXT },
+            { doc->textures.wall_int, TEX_WALL_INT },
+            { doc->textures.ceiling,  TEX_CEILING  },
+        };
+        for (size_t i = 0; i < sizeof slots / sizeof slots[0]; i++) {
+            if (slots[i].name[0])
+                mapTexOverrides[slots[i].tid] = Assets_GetTextureByName(slots[i].name);
+        }
+    }
 
     // Atmosphere
     if (doc->atmosphere.present) {
@@ -344,6 +368,15 @@ void Level_InstantiateDoc(const MapDoc *doc) {
     for (int wi = 0; wi < doc->wallCount; wi++) {
         const MapDocWall *w = &doc->walls[wi];
         bool xRun = fabsf(w->z1 - w->z2) < 0.001f;
+
+        // Resolve per-wall TEX name to a cache handle (-1 if unset/missing).
+        int wallTex = -1;
+        if (w->texName[0])
+            wallTex = Assets_GetTextureByName(w->texName);
+
+        // Remember the first wall segment index so we can stamp all segments
+        // produced by this doc wall with the same texture handle.
+        int firstSeg = interiorWallCount;
 
         if (w->door.present) {
             if (doorCount >= MAX_DOORS) {
@@ -392,6 +425,10 @@ void Level_InstantiateDoc(const MapDoc *doc) {
         } else {
             EmitWallSegment(w->x1, w->z1, w->x2, w->z2);
         }
+
+        // Stamp all newly added segments with this wall's texture handle.
+        for (int si = firstSeg; si < interiorWallCount; si++)
+            interiorWallTexHandle[si] = wallTex;
     }
 
     // Windows — resolve LOCKED_BY after doors are built
@@ -428,9 +465,10 @@ void Level_InstantiateDoc(const MapDoc *doc) {
             break;
         }
         const MapDocObstacle *o = &doc->obstacles[i];
-        obstacles[obstacleCount++] = (Box){
-            { o->x, o->h * 0.5f, o->z }, { o->sx, o->h, o->sz }
-        };
+        int obIdx = obstacleCount++;
+        obstacles[obIdx] = (Box){ { o->x, o->h * 0.5f, o->z }, { o->sx, o->h, o->sz } };
+        obstacleTexHandle[obIdx] = (o->texName[0])
+            ? Assets_GetTextureByName(o->texName) : -1;
     }
 
     // Wallbuys

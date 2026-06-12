@@ -147,9 +147,11 @@ static void EndTileVariation(void) {
 // Draw a textured axis-aligned box.  Each face's UVs span the face's
 // world-space size divided by TILE_SIZE, so the texture tiles
 // continuously across walls of any length.
-static void DrawTexturedBox(Vector3 c, Vector3 s, TextureId tid,
-                            Color tint, Color fallback) {
-    if (!textureLoaded[tid]) {
+// `tex` — explicit Texture2D* to use; NULL triggers fallback.
+// `fallback` — flat colour used when tex == NULL.
+static void DrawTexturedBoxTex(Vector3 c, Vector3 s, Texture2D *tex,
+                               Color tint, Color fallback) {
+    if (!tex) {
         DrawCubeV(c, s, fallback);
         DrawCubeWiresV(c, s, BLACK);
         return;
@@ -160,7 +162,7 @@ static void DrawTexturedBox(Vector3 c, Vector3 s, TextureId tid,
     float uz = s.z / TILE_SIZE;
 
     BeginTileVariation();
-    rlSetTexture(textures[tid].id);
+    rlSetTexture(tex->id);
     rlBegin(RL_QUADS);
     rlColor4ub(tint.r, tint.g, tint.b, tint.a);
 
@@ -194,11 +196,18 @@ static void DrawTexturedBox(Vector3 c, Vector3 s, TextureId tid,
     EndTileVariation();
 }
 
+// Convenience: resolve TextureId through the per-map override chain, then draw.
+static void DrawTexturedBox(Vector3 c, Vector3 s, TextureId tid,
+                            Color tint, Color fallback) {
+    DrawTexturedBoxTex(c, s, Assets_ResolveTexture(tid), tint, fallback);
+}
+
 // Textured XZ plane centred at `center` of size `sizeX × sizeZ`, top
 // face pointing +Y.  Used for the arena floor and outside ground.
-static void DrawTexturedFloor(Vector3 center, float sizeX, float sizeZ,
-                              TextureId tid, Color tint, Color fallback) {
-    if (!textureLoaded[tid]) {
+// `tex` — explicit Texture2D*; NULL triggers flat colour fallback.
+static void DrawTexturedFloorTex(Vector3 center, float sizeX, float sizeZ,
+                                 Texture2D *tex, Color tint, Color fallback) {
+    if (!tex) {
         DrawPlane(center, (Vector2){sizeX, sizeZ}, fallback);
         return;
     }
@@ -207,7 +216,7 @@ static void DrawTexturedFloor(Vector3 center, float sizeX, float sizeZ,
     float v = sizeZ / TILE_SIZE;
 
     BeginTileVariation();
-    rlSetTexture(textures[tid].id);
+    rlSetTexture(tex->id);
     rlBegin(RL_QUADS);
     rlColor4ub(tint.r, tint.g, tint.b, tint.a);
     rlNormal3f(0, 1, 0);
@@ -218,6 +227,12 @@ static void DrawTexturedFloor(Vector3 center, float sizeX, float sizeZ,
     rlEnd();
     rlSetTexture(0);
     EndTileVariation();
+}
+
+// Convenience: resolve TextureId through the per-map override chain, then draw.
+static void DrawTexturedFloor(Vector3 center, float sizeX, float sizeZ,
+                              TextureId tid, Color tint, Color fallback) {
+    DrawTexturedFloorTex(center, sizeX, sizeZ, Assets_ResolveTexture(tid), tint, fallback);
 }
 
 static void DrawWallXSeg(float x0, float x1, float fixedZ, Color c) {
@@ -265,6 +280,18 @@ static void DrawArena(void) {
     }
 
     for (int i = 0; i < obstacleCount; i++) {
+        // Per-surface TEX override: if set, draw the obstacle as a textured box
+        // regardless of whether the crate model is loaded.  This lets map authors
+        // give each obstacle a distinct look without a dedicated OBJ.
+        int h = obstacleTexHandle[i];
+        if (h >= 0) {
+            Texture2D *tex = Assets_CachedTexture(h);
+            if (tex) {
+                DrawTexturedBoxTex(obstacles[i].center, obstacles[i].size,
+                                   tex, WHITE, (Color){120,90,70,255});
+                continue;
+            }
+        }
         if (propModelLoaded[PROP_OBSTACLE_CRATE]) {
             // crate.obj is unit-cube; scale to the obstacle's box size.
             DrawPropEx(PROP_OBSTACLE_CRATE,
@@ -296,8 +323,15 @@ static void DrawMapProps(void) {
 
 static void DrawInteriorWalls(void) {
     for (int i = 0; i < interiorWallCount; i++) {
-        DrawTexturedBox(interiorWalls[i].center, interiorWalls[i].size,
-                        TEX_WALL_INT, WHITE, (Color){80, 90, 100, 255});
+        // Per-surface handle takes priority, then map-slot override, then boot slot.
+        Texture2D *tex = NULL;
+        int h = interiorWallTexHandle[i];
+        if (h >= 0)
+            tex = Assets_CachedTexture(h);
+        if (!tex)
+            tex = Assets_ResolveTexture(TEX_WALL_INT);
+        DrawTexturedBoxTex(interiorWalls[i].center, interiorWalls[i].size,
+                           tex, WHITE, (Color){80, 90, 100, 255});
     }
 }
 

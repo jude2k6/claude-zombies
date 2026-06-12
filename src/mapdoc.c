@@ -86,7 +86,7 @@ int MapDoc_Parse(const char *path, MapDoc *out, FILE *errs) {
     out->arenaHalfZ = 40.0f;
 
     int errors = 0;
-    enum { BLK_NONE, BLK_ATMOS, BLK_ROOM } block = BLK_NONE;
+    enum { BLK_NONE, BLK_ATMOS, BLK_ROOM, BLK_TEX } block = BLK_NONE;
     int  curRoomIdx = -1;
 
     /* deferred window→door name resolution */
@@ -114,6 +114,13 @@ int MapDoc_Parse(const char *path, MapDoc *out, FILE *errs) {
             }
             block = BLK_ATMOS; continue;
         }
+        if (strcmp(key, "TEXTURES") == 0) {
+            if (block != BLK_NONE) {
+                fprintf(errs, "map: line %d: TEXTURES inside another block\n", lineNo);
+                errors++; continue;
+            }
+            block = BLK_TEX; continue;
+        }
         if (strcmp(key, "ROOM") == 0) {
             if (block != BLK_NONE) {
                 fprintf(errs, "map: line %d: ROOM inside another block\n", lineNo);
@@ -133,6 +140,28 @@ int MapDoc_Parse(const char *path, MapDoc *out, FILE *errs) {
             }
             block = BLK_NONE;
             curRoomIdx = -1;
+            continue;
+        }
+
+        /* --- textures sub-keys --- */
+        if (block == BLK_TEX) {
+            if (n < 2) {
+                fprintf(errs, "map: line %d: TEXTURES key expects a texture name\n", lineNo);
+                errors++; continue;
+            }
+            out->textures.present = true;
+            char *dst = NULL;
+            if      (strcmp(key, "floor")    == 0) dst = out->textures.floor;
+            else if (strcmp(key, "ground")   == 0) dst = out->textures.ground;
+            else if (strcmp(key, "wall_ext") == 0) dst = out->textures.wall_ext;
+            else if (strcmp(key, "wall_int") == 0) dst = out->textures.wall_int;
+            else if (strcmp(key, "ceiling")  == 0) dst = out->textures.ceiling;
+            else {
+                fprintf(errs, "map: line %d: unknown TEXTURES key '%s'\n", lineNo, key);
+                errors++; continue;
+            }
+            strncpy(dst, toks[1], MAPDOC_TEX_NAME_LEN - 1);
+            dst[MAPDOC_TEX_NAME_LEN - 1] = '\0';
             continue;
         }
 
@@ -272,8 +301,17 @@ int MapDoc_Parse(const char *path, MapDoc *out, FILE *errs) {
                 w.door.center  = center;
                 w.door.width   = width;
                 w.door.cost    = cost;
-                if (n >= ti + 6 && strcmp(toks[ti+4], "AS") == 0)
-                    strncpy(w.door.name, toks[ti+5], MAPDOC_DOOR_NAME_LEN - 1);
+                ti += 4;   /* advance past DOOR center width cost */
+                if (ti + 1 < n && strcmp(toks[ti], "AS") == 0) {
+                    strncpy(w.door.name, toks[ti+1], MAPDOC_DOOR_NAME_LEN - 1);
+                    ti += 2;
+                }
+            }
+            /* optional TEX clause (after DOOR ... [AS name]) */
+            if (ti + 1 < n && strcmp(toks[ti], "TEX") == 0) {
+                strncpy(w.texName, toks[ti+1], MAPDOC_TEX_NAME_LEN - 1);
+                w.texName[MAPDOC_TEX_NAME_LEN - 1] = '\0';
+                ti += 2;
             }
             out->walls[out->wallCount++] = w;
             continue;
@@ -295,17 +333,29 @@ int MapDoc_Parse(const char *path, MapDoc *out, FILE *errs) {
                 fprintf(errs, "map: line %d: OBSTACLE bad number\n", lineNo);
                 errors++; continue;
             }
-            if (n >= 6 && !ParseFloat(toks[5], &h)) {
-                fprintf(errs, "map: line %d: OBSTACLE bad height\n", lineNo);
-                errors++; continue;
+            int oi = 5;  /* next token index after mandatory args */
+            if (oi < n) {
+                float htmp;
+                if (ParseFloat(toks[oi], &htmp)) { h = htmp; oi++; }
             }
             if (out->obstacleCount >= MAPDOC_MAX_OBSTACLES) {
                 fprintf(errs, "map: line %d: too many obstacles (max %d)\n",
                         lineNo, MAPDOC_MAX_OBSTACLES);
                 errors++; continue;
             }
-            out->obstacles[out->obstacleCount++] =
-                (MapDocObstacle){ x, z, sx, sz, h, curRoomIdx };
+            MapDocObstacle ob;
+            memset(&ob, 0, sizeof ob);
+            ob.x = x; ob.z = z; ob.sx = sx; ob.sz = sz; ob.h = h;
+            ob.roomIdx = curRoomIdx;
+            /* optional TEX clause */
+            if (oi + 1 < n && strcmp(toks[oi], "TEX") == 0) {
+                strncpy(ob.texName, toks[oi+1], MAPDOC_TEX_NAME_LEN - 1);
+                ob.texName[MAPDOC_TEX_NAME_LEN - 1] = '\0';
+            } else if (oi < n && strcmp(toks[oi], "TEX") == 0) {
+                fprintf(errs, "map: line %d: TEX expects a texture name\n", lineNo);
+                errors++; continue;
+            }
+            out->obstacles[out->obstacleCount++] = ob;
             continue;
         }
 
@@ -550,22 +600,27 @@ static void EmitEntities(FILE *f, const MapDoc *doc, int roomIdx) {
                     w->door.center, w->door.width, w->door.cost);
             if (w->door.name[0])
                 fprintf(f, "  AS %s", w->door.name);
-            fprintf(f, "\n");
         } else {
-            fprintf(f, "%sWALL %.4g %.4g  %.4g %.4g\n",
+            fprintf(f, "%sWALL %.4g %.4g  %.4g %.4g",
                     ind, w->x1, w->z1, w->x2, w->z2);
         }
+        if (w->texName[0])
+            fprintf(f, "  TEX %s", w->texName);
+        fprintf(f, "\n");
     }
 
     for (int i = 0; i < doc->obstacleCount; i++) {
         const MapDocObstacle *o = &doc->obstacles[i];
         if (o->roomIdx != roomIdx) continue;
         if (Fabsf(o->h - 2.0f) < 0.001f)
-            fprintf(f, "%sOBSTACLE %.4g %.4g  %.4g %.4g\n",
+            fprintf(f, "%sOBSTACLE %.4g %.4g  %.4g %.4g",
                     ind, o->x, o->z, o->sx, o->sz);
         else
-            fprintf(f, "%sOBSTACLE %.4g %.4g  %.4g %.4g %.4g\n",
+            fprintf(f, "%sOBSTACLE %.4g %.4g  %.4g %.4g %.4g",
                     ind, o->x, o->z, o->sx, o->sz, o->h);
+        if (o->texName[0])
+            fprintf(f, "  TEX %s", o->texName);
+        fprintf(f, "\n");
     }
 
     for (int i = 0; i < doc->windowCount; i++) {
@@ -635,6 +690,17 @@ int MapDoc_Save(const char *path, const MapDoc *doc) {
         fprintf(f, "END\n\n");
     }
 
+    /* TEXTURES (only emit when at least one slot is set) */
+    if (doc->textures.present) {
+        fprintf(f, "TEXTURES\n");
+        if (doc->textures.floor[0])    fprintf(f, "    floor     %s\n", doc->textures.floor);
+        if (doc->textures.ground[0])   fprintf(f, "    ground    %s\n", doc->textures.ground);
+        if (doc->textures.wall_ext[0]) fprintf(f, "    wall_ext  %s\n", doc->textures.wall_ext);
+        if (doc->textures.wall_int[0]) fprintf(f, "    wall_int  %s\n", doc->textures.wall_int);
+        if (doc->textures.ceiling[0])  fprintf(f, "    ceiling   %s\n", doc->textures.ceiling);
+        fprintf(f, "END\n\n");
+    }
+
     /* ungrouped entities (roomIdx == -1) */
     fprintf(f, "# --- ungrouped ---\n");
     EmitEntities(f, doc, -1);
@@ -676,6 +742,7 @@ static bool WallEq(const MapDocWall *x, const MapDocWall *y) {
         if (x->door.cost != y->door.cost) return false;
         if (!SEq(x->door.name, y->door.name)) return false;
     }
+    if (!SEq(x->texName, y->texName)) return false;
     return true;
 }
 static bool WindowEq(const MapDocWindow *x, const MapDocWindow *y) {
@@ -684,7 +751,8 @@ static bool WindowEq(const MapDocWindow *x, const MapDocWindow *y) {
 }
 static bool ObstacleEq(const MapDocObstacle *x, const MapDocObstacle *y) {
     return FEq(x->x, y->x) && FEq(x->z, y->z) && x->roomIdx == y->roomIdx &&
-           FEq(x->sx, y->sx) && FEq(x->sz, y->sz) && FEq(x->h, y->h);
+           FEq(x->sx, y->sx) && FEq(x->sz, y->sz) && FEq(x->h, y->h) &&
+           SEq(x->texName, y->texName);
 }
 static bool WallbuyEq(const MapDocWallbuy *x, const MapDocWallbuy *y) {
     return FEq(x->x, y->x) && FEq(x->z, y->z) && x->roomIdx == y->roomIdx &&
@@ -740,6 +808,16 @@ bool MapDoc_Equal(const MapDoc *a, const MapDoc *b) {
         if (!FEq(a->atmosphere.fogB, b->atmosphere.fogB)) return false;
         if (!FEq(a->atmosphere.fogStart, b->atmosphere.fogStart)) return false;
         if (!FEq(a->atmosphere.fogEnd, b->atmosphere.fogEnd)) return false;
+    }
+
+    /* textures */
+    if (a->textures.present != b->textures.present) return false;
+    if (a->textures.present) {
+        if (!SEq(a->textures.floor,    b->textures.floor))    return false;
+        if (!SEq(a->textures.ground,   b->textures.ground))   return false;
+        if (!SEq(a->textures.wall_ext, b->textures.wall_ext)) return false;
+        if (!SEq(a->textures.wall_int, b->textures.wall_int)) return false;
+        if (!SEq(a->textures.ceiling,  b->textures.ceiling))  return false;
     }
 
     /* entities: unordered per-type match (Save canonicalises order) */

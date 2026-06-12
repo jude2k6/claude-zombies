@@ -302,4 +302,99 @@ void Assets_Unload(void) {
         UnloadShader(postfxShader);
         postfxShaderLoaded = false;
     }
+    Assets_FlushNameCache();
+}
+
+// ---- name-keyed texture cache -------------------------------------------
+
+typedef struct {
+    char      name[64];
+    Texture2D tex;
+    bool      loaded;
+} TexCacheEntry;
+
+static TexCacheEntry texCache[TEX_CACHE_SIZE];
+static int           texCacheCount = 0;
+
+int mapTexOverrides[TEX_COUNT];  // -1 = use boot slot
+
+static void InitMapTexOverrides(void) {
+    for (int i = 0; i < TEX_COUNT; i++) mapTexOverrides[i] = -1;
+}
+
+__attribute__((constructor))
+static void TexCacheInit(void) {
+    texCacheCount = 0;
+    InitMapTexOverrides();
+}
+
+void Assets_FlushNameCache(void) {
+    for (int i = 0; i < texCacheCount; i++) {
+        if (texCache[i].loaded) {
+            UnloadTexture(texCache[i].tex);
+            texCache[i].loaded = false;
+        }
+        texCache[i].name[0] = '\0';
+    }
+    texCacheCount = 0;
+    InitMapTexOverrides();
+}
+
+int Assets_GetTextureByName(const char *name) {
+    if (!name || name[0] == '\0') return -1;
+    // Dedup: return existing handle if already loaded.
+    for (int i = 0; i < texCacheCount; i++) {
+        if (strcmp(texCache[i].name, name) == 0)
+            return texCache[i].loaded ? i : -1;
+    }
+    // Capacity check.
+    if (texCacheCount >= TEX_CACHE_SIZE) {
+        fprintf(stderr, "texture cache: full (%d slots), cannot load '%s'\n",
+                TEX_CACHE_SIZE, name);
+        return -1;
+    }
+    // Try to load.
+    const char *prefixes[] = {
+        "data/textures/",
+        "../data/textures/",
+        "./data/textures/",
+    };
+    int slot = texCacheCount++;
+    strncpy(texCache[slot].name, name, sizeof texCache[slot].name - 1);
+    texCache[slot].name[sizeof texCache[slot].name - 1] = '\0';
+    texCache[slot].loaded = false;
+
+    for (size_t p = 0; p < sizeof prefixes / sizeof prefixes[0]; p++) {
+        char path[512];
+        snprintf(path, sizeof path, "%s%s.png", prefixes[p], name);
+        if (!FileExists(path)) continue;
+        texCache[slot].tex = LoadTexture(path);
+        if (texCache[slot].tex.id == 0) continue;
+        SetTextureWrap(texCache[slot].tex, TEXTURE_WRAP_REPEAT);
+        GenTextureMipmaps(&texCache[slot].tex);
+        SetTextureFilter(texCache[slot].tex, TEXTURE_FILTER_TRILINEAR);
+        texCache[slot].loaded = true;
+        fprintf(stderr, "texture: cached '%s' from %s (%dx%d)\n",
+                name, path, texCache[slot].tex.width, texCache[slot].tex.height);
+        return slot;
+    }
+    fprintf(stderr, "texture: '%s.png' not found in data/textures/\n", name);
+    return -1;
+}
+
+Texture2D *Assets_CachedTexture(int handle) {
+    if (handle < 0 || handle >= texCacheCount) return NULL;
+    if (!texCache[handle].loaded) return NULL;
+    return &texCache[handle].tex;
+}
+
+Texture2D *Assets_ResolveTexture(TextureId tid) {
+    if (tid < 0 || tid >= TEX_COUNT) return NULL;
+    int ovr = mapTexOverrides[tid];
+    if (ovr >= 0) {
+        Texture2D *t = Assets_CachedTexture(ovr);
+        if (t) return t;
+    }
+    if (textureLoaded[tid]) return &textures[tid];
+    return NULL;
 }

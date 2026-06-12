@@ -29,6 +29,19 @@
 #define MAPDOC_DOOR_NAME_LEN  24
 #define MAPDOC_PROP_NAME_LEN  32
 
+/* ---- texture name length (shared by TEX slots and per-surface names) ---- */
+#define MAPDOC_TEX_NAME_LEN  64
+
+/* Per-map TEXTURES block — all keys optional, empty string = unset. */
+typedef struct {
+    bool present;
+    char floor   [MAPDOC_TEX_NAME_LEN];  /* "" = use boot slot */
+    char ground  [MAPDOC_TEX_NAME_LEN];
+    char wall_ext[MAPDOC_TEX_NAME_LEN];
+    char wall_int[MAPDOC_TEX_NAME_LEN];
+    char ceiling [MAPDOC_TEX_NAME_LEN];
+} MapDocTextures;
+
 /* ---- sub-structs ---- */
 
 typedef struct {
@@ -49,6 +62,8 @@ typedef struct {
     float        x1, z1, x2, z2;
     MapDocDoorSpec door;
     int          roomIdx;  /* -1 = not inside any ROOM block */
+    /* optional TEX override; "" = unset */
+    char         texName[MAPDOC_TEX_NAME_LEN];
 } MapDocWall;
 
 typedef struct {
@@ -63,6 +78,8 @@ typedef struct {
 typedef struct {
     float x, z, sx, sz, h;
     int   roomIdx;
+    /* optional TEX override; "" = unset */
+    char  texName[MAPDOC_TEX_NAME_LEN];
 } MapDocObstacle;
 
 typedef struct {
@@ -123,6 +140,7 @@ typedef struct {
     float arenaHalfZ;
 
     MapDocAtmosphere atmosphere;
+    MapDocTextures   textures;  /* per-map texture slot overrides */
 
     /* Room name table.  Entities reference rooms by index (-1 = none). */
     int  roomCount;

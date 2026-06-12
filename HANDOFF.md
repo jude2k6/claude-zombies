@@ -50,10 +50,18 @@ Weapon-system pass (2026-06-12, latest — commit ef1afe2):
      numerically (new `vmDebugMarkers` dump): in hand.R's local frame,
      hand.L sits at (-0.02, +0.21, -0.02) — exactly a foregrip hold along
      the bore, so the guns need NO rotation (the OBJ orientation is
-     correct; do NOT add `vm_grip_rot` to fight the pose). The only
-     systematic error was the wrist→palm drop: every gun seats at
-     `vm_grip_pos 0 0 -0.04` (pistol `-0.05`, raygun keeps
-     `vm_grip_scale 0.65`).
+     correct; do NOT add `vm_grip_rot` to fight the pose).
+  3. The OBJ origins are NOT at the modelled grips — they sit near each
+     gun's trigger/receiver, so the hands held the wrong part of every
+     gun. Solved from the OBJ underside depth profiles (deb9a0e): each
+     `vm_grip_pos` slides the gun so the actual grip lands in hand.R —
+     pistol +0.09, smg +0.18 (grip is BEHIND the mag), shotgun +0.15
+     (stock wrist), rifle +0.12 (wrist), raygun +0.07 along the bore,
+     heights per gun, all including the ~4 cm wrist→palm drop.
+  Also: **pistol.obj is authored ~2.5× real size** (0.54 m vs a real
+  M1911's 0.22 m) — `vm_grip_scale 0.6` hides that in first person, but
+  world draws (wallbuy/mbox/PaP `DrawWeaponDisplay`) still show it
+  oversized; re-exporting the OBJ at real scale is the proper fix (TODO).
   `--screenshot-viewmodels` now draws **grip markers**: red sphere + RGB
   axis ticks = hand.R origin, blue sphere = hand.L, drawn depth-off so
   they show through meshes, plus a one-shot stderr dump of both bone
@@ -768,11 +776,12 @@ data/
     note the gun's override is darker (it's gunmetal, not skin).
   - **Grips are data-driven + re-seated (ef1afe2, abf709e).** Seating lives
     in the `vm_grip_pos/rot/scale` keys of each `.weapon` file
-    (`weaponGrip[]` is just storage). The gun OBJs are origin-at-grip and
-    the arms idle pose is a true foregrip hold along the bore, so the seat
-    is pure translation: `vm_grip_pos 0 0 -0.04` (pistol `-0.05`, raygun
-    `vm_grip_scale 0.65`) — the -4 cm is the hand bone's wrist-origin →
-    visible-palm drop. The old a8b1cfb `gunGrip[]` numbers were tuned
+    (`weaponGrip[]` is just storage). The arms idle pose is a true foregrip
+    hold along the bore, so the seat is pure translation — but the OBJ
+    origins are NOT at the grips, so each gun has a per-gun `vm_grip_pos`
+    that slides the modelled grip into the hand (see the .weapon files;
+    derived from the OBJ underside depth profiles + the ~4 cm hand-bone
+    wrist→palm drop). The old a8b1cfb `gunGrip[]` numbers were tuned
     against a mid-raise screenshot pose (single-frame devtool bug, fixed) —
     don't resurrect them, and don't add rotations. The arms model is
     authored at real metric; one `VM_SCALE` (0.62) sizes the whole

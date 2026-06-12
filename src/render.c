@@ -838,7 +838,8 @@ static void DrawThrowables(void) {
         // Stun: matte black puck with cyan band.
         if (t->kind == TH_FRAG) {
             float urge = (FRAG_FUSE - t->fuse) / FRAG_FUSE;   // 0..1
-            if (urge < 0.0f) urge = 0.0f; if (urge > 1.0f) urge = 1.0f;
+            if (urge < 0.0f) urge = 0.0f;
+            if (urge > 1.0f) urge = 1.0f;
             float pulse = 0.5f + 0.5f * sinf((float)GetTime() * (6.0f + 18.0f * urge));
             unsigned char gr = (unsigned char)(160 + (unsigned)(95 * pulse * urge));
             DrawSphere(t->pos, THROWABLE_RADIUS * 1.2f, (Color){40, 60, 40, 255});

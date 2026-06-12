@@ -71,6 +71,18 @@ target_include_directories(shooter PRIVATE
 )
 target_link_libraries(shooter PRIVATE raylib enet)
 
+# ---- warning flags (shooter only, not FetchContent deps) -------------------
+if(NOT MSVC)
+    target_compile_options(shooter PRIVATE -Wall -Wextra -Wno-unused-parameter)
+endif()
+
+# ---- AddressSanitizer / UBSan (opt-in) -------------------------------------
+option(SHOOTER_ASAN "Build with AddressSanitizer/UBSan" OFF)
+if(SHOOTER_ASAN AND NOT MSVC)
+    target_compile_options(shooter PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+    target_link_options(shooter PRIVATE -fsanitize=address,undefined)
+endif()
+
 # ---- data files ------------------------------------------------------------
 # Copy data/ next to the executable at build time so map files load from a
 # relative path. Re-runs whenever something under data/ changes.

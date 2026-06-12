@@ -45,6 +45,12 @@ typedef struct {
     uint8_t  targetWindow;
     float    bobPhase;
     float    stunTimer;
+    // Death / attack timers added in proto v9.  Quantised to 0.01 s per tick
+    // (uint8_t → max 2.55 s; enough for the 1.34 s death window and 0.61 s
+    // attack timer).  0 means not in that state.
+    uint8_t  dyingTimer8;     // dyingTimer  * 100, rounded
+    uint8_t  attackTimer8;    // simAttackTimer * 100, rounded
+    uint8_t  isDead;          // 1 if alive==false (corpse in death window)
 } SerEnemy;
 
 typedef struct {
@@ -212,7 +218,10 @@ void Protocol_HostBroadcastSnapshot(void) {
     size_t off = sizeof *hdr;
     uint16_t ne = 0;
     for (int i = 0; i < MAX_ENEMIES && off + sizeof(SerEnemy) <= sizeof snapshotBuf; i++) {
-        if (!enemies[i].alive) continue;
+        // Include alive enemies AND dying corpses (alive==false but dyingTimer>0).
+        if (!enemies[i].alive && enemies[i].dyingTimer <= 0) continue;
+        float dt8f = enemies[i].dyingTimer    * 100.0f;
+        float at8f = enemies[i].simAttackTimer * 100.0f;
         SerEnemy se = {
             .px = enemies[i].pos.x, .py = enemies[i].pos.y, .pz = enemies[i].pos.z,
             .hp = (int16_t)enemies[i].hp, .maxHp = (int16_t)enemies[i].maxHp,
@@ -220,6 +229,9 @@ void Protocol_HostBroadcastSnapshot(void) {
             .targetWindow = (uint8_t)enemies[i].targetWindow,
             .bobPhase = enemies[i].bobPhase,
             .stunTimer = enemies[i].stunTimer,
+            .dyingTimer8  = (uint8_t)(dt8f > 255.0f ? 255 : (int)dt8f),
+            .attackTimer8 = (uint8_t)(at8f > 255.0f ? 255 : (int)at8f),
+            .isDead       = enemies[i].alive ? 0 : 1,
         };
         memcpy(snapshotBuf + off, &se, sizeof se);
         off += sizeof se; ne++;
@@ -302,7 +314,10 @@ void Protocol_ClientApplySnapshot(uint8_t *data, size_t len) {
         DeserializePlayer(&players[i], &hdr->players[i], i == localPlayerIdx);
 
     size_t off = sizeof *hdr;
-    for (int i = 0; i < MAX_ENEMIES; i++) enemies[i].alive = false;
+    for (int i = 0; i < MAX_ENEMIES; i++) {
+        enemies[i].alive      = false;
+        enemies[i].dyingTimer = 0;
+    }
     for (int i = 0; i < hdr->numEnemies && off + sizeof(SerEnemy) <= len && i < MAX_ENEMIES; i++) {
         SerEnemy se;
         memcpy(&se, data + off, sizeof se); off += sizeof se;
@@ -313,7 +328,9 @@ void Protocol_ClientApplySnapshot(uint8_t *data, size_t len) {
         enemies[i].targetWindow = se.targetWindow;
         enemies[i].bobPhase = se.bobPhase;
         enemies[i].stunTimer = se.stunTimer;
-        enemies[i].alive = true;
+        enemies[i].dyingTimer     = se.dyingTimer8  / 100.0f;
+        enemies[i].simAttackTimer = se.attackTimer8 / 100.0f;
+        enemies[i].alive = (se.isDead == 0);
     }
     for (int i = 0; i < MAX_BULLETS; i++) bullets[i].alive = false;
     for (int i = 0; i < hdr->numBullets && off + sizeof(SerBullet) <= len && i < MAX_BULLETS; i++) {

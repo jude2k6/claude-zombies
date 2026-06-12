@@ -273,6 +273,7 @@ void Weapon_Melee(Player *p) {
         if (dot < 0.3f) continue;   // ~70deg forward arc
         enemies[i].hp -= MELEE_DAMAGE;
         if (enemies[i].hp <= 0) {
+            enemies[i].dyingTimer = ENEMY_DEATH_WINDOW;
             enemies[i].alive = false;
             enemiesAlive--;
             if (ownerIdx >= 0 && ownerIdx < NET_MAX_PLAYERS && players[ownerIdx].active) {

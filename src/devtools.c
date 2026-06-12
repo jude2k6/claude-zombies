@@ -336,6 +336,81 @@ static int Dev_AnimTest(int argc, char **argv) {
     return 0;
 }
 
+// ---- --screenshot-zombies --------------------------------------------------
+// Spawns three enemies (walk / attack / dying) and screenshots them so the
+// death clip pose and attack clip can be visually verified. Mirrors
+// --screenshot-coop: loads assets, sets up dummy state, runs N frames to
+// advance the animation, then writes zombies_*.png.
+
+static int Dev_ScreenshotZombies(void) {
+    SetTraceLogLevel(LOG_WARNING);
+    SetConfigFlags(FLAG_MSAA_4X_HINT);
+    InitWindow(1280, 720, "Zombie anim screenshot");
+    SetTargetFPS(60);
+    Weapons_Load();
+    Assets_Load();
+    Assets_ApplyWorldShader();
+    Render_LoadZombieAnim();
+    Level_Build();
+
+    localPlayerIdx = 0;
+    for (int i = 0; i < NET_MAX_PLAYERS; i++) memset(&players[i], 0, sizeof players[i]);
+    players[0].active = true; players[0].alive = true;
+    players[0].pos = (Vector3){ 0, PLAYER_EYE, 9 };   // behind camera (not drawn)
+
+    // Clear all enemy slots.
+    for (int i = 0; i < MAX_ENEMIES; i++) memset(&enemies[i], 0, sizeof enemies[i]);
+
+    // Slot 0: walking zombie (alive, no timers).
+    enemies[0].alive = true;
+    enemies[0].pos   = (Vector3){ -2.5f, ENEMY_HEIGHT * 0.5f, 0 };
+    enemies[0].type  = ZT_NORMAL;
+    enemies[0].speed = 1.8f;
+    enemies[0].targetPlayer = 0;
+
+    // Slot 1: attacking zombie (alive, simAttackTimer set mid-clip).
+    enemies[1].alive          = true;
+    enemies[1].pos            = (Vector3){  0.0f, ENEMY_HEIGHT * 0.5f, 0 };
+    enemies[1].type           = ZT_NORMAL;
+    enemies[1].speed          = 1.8f;
+    enemies[1].simAttackTimer = ENEMY_ATTACK_TIMER * 0.5f;
+    enemies[1].targetPlayer   = 0;
+
+    // Slot 2: dying zombie (alive=false, dyingTimer set ~halfway through).
+    enemies[2].alive      = false;
+    enemies[2].dyingTimer = ENEMY_DEATH_WINDOW * 0.5f;
+    enemies[2].pos        = (Vector3){  2.5f, ENEMY_HEIGHT * 0.5f, 0 };
+    enemies[2].type       = ZT_NORMAL;
+    enemies[2].speed      = 1.8f;
+    enemies[2].targetPlayer = 0;
+
+    // Camera looks down -Z at the three zombies.
+    Camera cam = {
+        .position   = (Vector3){ 0, 2.2f, 5.5f },
+        .target     = (Vector3){ 0, 0.9f, 0 },
+        .up         = (Vector3){ 0, 1, 0 },
+        .fovy       = 55.0f,
+        .projection = CAMERA_PERSPECTIVE,
+    };
+
+    // Run enough frames to advance the animation states then screenshot.
+    // 45 frames at 60 fps gives the clips time to reach a mid-pose.
+    const int WARMUP = 45;
+    for (int f = 0; f < WARMUP; f++) {
+        BeginDrawing();
+        ClearBackground((Color){ 60, 65, 75, 255 });
+        Render_World3D(cam);
+        EndDrawing();
+    }
+    TakeScreenshot("zombies_states.png");
+    fprintf(stderr, "wrote zombies_states.png  (left=walk, centre=attack, right=dying)\n");
+
+    Render_UnloadZombieAnim();
+    Assets_Unload(); Weapons_Unload();
+    CloseWindow();
+    return 0;
+}
+
 // ---- dispatcher ------------------------------------------------------------
 
 bool Devtools_HandleCLI(int argc, char **argv, int *exitCode) {
@@ -353,6 +428,10 @@ bool Devtools_HandleCLI(int argc, char **argv, int *exitCode) {
     }
     if (argc >= 2 && strcmp(argv[1], "--screenshot-pap") == 0) {
         *exitCode = Dev_ScreenshotPaP();
+        return true;
+    }
+    if (argc >= 2 && strcmp(argv[1], "--screenshot-zombies") == 0) {
+        *exitCode = Dev_ScreenshotZombies();
         return true;
     }
     if (argc >= 3 && strcmp(argv[1], "--anim-test") == 0) {

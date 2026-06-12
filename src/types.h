@@ -33,6 +33,12 @@
 #define ENEMY_DAMAGE        50     // CoD: ~2 hits down at 100 HP, ~5 with Juggernog (250)
 #define ENEMY_BOARD_ATK     2.4f
 
+// Death animation window: keep the corpse for the full death clip duration
+// so the rigged 'death' one-shot finishes before the slot is freed.
+#define ENEMY_DEATH_WINDOW  1.34f  // seconds (matches zombie.glb 'death' clip)
+// Sim attack timer: set on each player bite; render plays 'attack_a' while > 0.
+#define ENEMY_ATTACK_TIMER  0.61f  // seconds (matches zombie.glb 'attack_a' clip)
+
 // Health regeneration (CoD-style). After REGEN_DELAY seconds without taking
 // damage, an upright player regenerates REGEN_RATE HP/sec back to their max.
 #define REGEN_DELAY         4.0f
@@ -269,6 +275,15 @@ typedef struct {
     // (TH_STUN). Local-only — not serialized; clients infer from a
     // visual hint instead.
     float        stunTimer;
+    // Death window: set to ENEMY_DEATH_WINDOW at the kill moment. While > 0
+    // the slot is occupied by a falling corpse (alive=false, no AI, no
+    // collision, not counted toward round/spawns). Decremented each tick;
+    // when it reaches 0 the slot is fully free. Serialized so clients play
+    // the death clip in sync.
+    float        dyingTimer;
+    // Sim attack timer: set to ENEMY_ATTACK_TIMER when the zombie bites a
+    // player. Render plays the 'attack_a' one-shot while > 0. Serialized.
+    float        simAttackTimer;
 } Enemy;
 
 typedef struct {

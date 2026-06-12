@@ -152,11 +152,19 @@ void Enemies_Separate(void) {
 
 void Enemies_Update(float dt) {
     for (int i = 0; i < MAX_ENEMIES; i++) {
-        if (!enemies[i].alive) continue;
+        // Tick dying corpses: decrement the window and free the slot when done.
+        if (!enemies[i].alive) {
+            if (enemies[i].dyingTimer > 0) {
+                enemies[i].dyingTimer -= dt;
+                if (enemies[i].dyingTimer < 0) enemies[i].dyingTimer = 0;
+            }
+            continue;
+        }
         Enemy *e = &enemies[i];
         e->bobPhase += dt * 4.0f;
-        if (e->touchTimer > 0) e->touchTimer -= dt;
-        if (e->stunTimer  > 0) e->stunTimer  -= dt;
+        if (e->touchTimer     > 0) e->touchTimer     -= dt;
+        if (e->stunTimer      > 0) e->stunTimer      -= dt;
+        if (e->simAttackTimer > 0) e->simAttackTimer -= dt;
 
         if (e->state == ZS_OUTSIDE) {
             Window3D *w = &windows[e->targetWindow];
@@ -393,6 +401,8 @@ void Enemies_Update(float dt) {
                         Fx_PunchAndRumble(kickAmt, 0.55f, 0.55f, 0.15f);
                     }
                 }
+                // Flag the attack animation for the renderer (and clients).
+                e->simAttackTimer = ENEMY_ATTACK_TIMER;
                 e->touchTimer = ccd;
             }
         }
@@ -652,6 +662,7 @@ void Bullets_Update(float dt) {
                 players[op].shotsHit++;
                 if (headHit) players[op].headshots++;
                 if (en->hp <= 0) {
+                    en->dyingTimer = ENEMY_DEATH_WINDOW;
                     en->alive = false;
                     enemiesAlive--;
                     players[op].points += killPts;
@@ -659,6 +670,7 @@ void Bullets_Update(float dt) {
                     PowerUps_TryDrop(en->pos);
                 }
             } else if (en->hp <= 0) {
+                en->dyingTimer = ENEMY_DEATH_WINDOW;
                 en->alive = false;
                 enemiesAlive--;
                 PowerUps_TryDrop(en->pos);
@@ -693,6 +705,7 @@ void Bullets_Update(float dt) {
                     players[splashOwner].points += hitHitPts;
                 }
                 if (enemies[e].hp <= 0) {
+                    enemies[e].dyingTimer = ENEMY_DEATH_WINDOW;
                     enemies[e].alive = false;
                     enemiesAlive--;
                     if (splashOwner >= 0 && splashOwner < NET_MAX_PLAYERS && players[splashOwner].active) {
@@ -773,6 +786,7 @@ void Throwables_Detonate(Throwable *t) {
                 players[op].points += hitPts;
             }
             if (enemies[e].hp <= 0) {
+                enemies[e].dyingTimer = ENEMY_DEATH_WINDOW;
                 enemies[e].alive = false;
                 enemiesAlive--;
                 if (op >= 0 && op < NET_MAX_PLAYERS && players[op].active) {
@@ -913,6 +927,7 @@ void PowerUps_Apply(PowerUpType type) {
         case PU_NUKE:
             for (int i = 0; i < MAX_ENEMIES; i++) {
                 if (!enemies[i].alive) continue;
+                enemies[i].dyingTimer = ENEMY_DEATH_WINDOW;
                 enemies[i].alive = false;
                 enemiesAlive--;
             }

@@ -575,17 +575,25 @@ static void DrawEnemy(Enemy *e) {
     Vector3 feet = { e->pos.x, e->pos.y - ENEMY_HEIGHT * 0.5f, e->pos.z };
 
     // Rigged, animated zombie (preferred): one shared skinned glTF posed
-    // per-instance via a render-local AnimState. Walk loops; swap to a
-    // one-shot attack swipe when in melee range of the target.
+    // per-instance via a render-local AnimState.
+    //   - dying (dyingTimer > 0): play 'death' one-shot, freeze on last frame.
+    //   - sim attack (simAttackTimer > 0): play 'attack_a' one-shot.
+    //   - otherwise: loop 'walk' at speed-scaled playback rate.
     if (zombieAnim.loaded && zClipWalk >= 0) {
         int idx = (int)(e - enemies);
         AnimState *st = &zombieAnimState[idx];
-        bool inMelee = (distToTarget < ENEMY_RADIUS + 0.7f);
+        bool dying = (e->dyingTimer > 0 && !e->alive);
 
-        if (inMelee && zClipAttack >= 0) {
+        if (dying && zClipDeath >= 0) {
+            // Start the death clip once; let it run to completion and hold.
+            if (st->clip != zClipDeath)
+                Anim_Play(st, zClipDeath, false, 1.0f);
+            // Once finished, keep time pinned at the last frame (corpse pose).
+        } else if (!dying && e->simAttackTimer > 0 && zClipAttack >= 0) {
+            // Sim-driven attack: start the one-shot if not already playing.
             if (st->clip != zClipAttack || st->finished)
                 Anim_Play(st, zClipAttack, false, 1.2f);
-        } else {
+        } else if (!dying) {
             // Playback rate tracks how fast this zombie is moving so the
             // shamble reads faster for runners / slower while stunned.
             float pb = e->speed > 0.05f ? Clamp(e->speed / 1.3f, 0.45f, 2.4f)
@@ -998,7 +1006,9 @@ void Render_World3D(Camera camera) {
             if (i == localPlayerIdx && !noclipMode) continue;
             DrawOtherPlayer(i);
         }
-        for (int i = 0; i < MAX_ENEMIES; i++) if (enemies[i].alive) DrawEnemy(&enemies[i]);
+        for (int i = 0; i < MAX_ENEMIES; i++) {
+            if (enemies[i].alive || enemies[i].dyingTimer > 0) DrawEnemy(&enemies[i]);
+        }
         Decals_Draw();
         DrawTracers(camera);
         Viewmodel_DrawFirstPerson(camera);

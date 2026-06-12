@@ -55,7 +55,7 @@
 #define ROUND_RESPAWN_DELAY 1.0f
 
 #define HIT_POINTS         10
-#define KILL_POINTS        50
+#define KILL_POINTS        60
 #define BOARD_REPAIR_PTS   10
 #define BOARD_REPAIR_TIME   0.5f
 

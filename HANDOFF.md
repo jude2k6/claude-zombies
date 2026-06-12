@@ -40,16 +40,25 @@ Weapon-system pass (2026-06-12, latest — commit ef1afe2):
   ride `arms_vm.glb` + hand.R bolting. The legacy gun-only floating-OBJ
   path remains ONLY as the arms-missing fallback (`model_scale`/`model_yaw`/
   `model_offset` keys still feed it + `DrawWeaponDisplay`).
-- **Hand placement root-caused and fixed.** `--screenshot-viewmodels` used
-  to capture a SINGLE frame per weapon — i.e. frame 1 of the `raise` clip —
-  so the old `gunGrip[]` values had been tuned against a mid-raise pose and
-  were systematically wrong in the settled idle. The devtool now renders
-  75 settle frames (~1.25 s at 60 fps) before each capture. Since the gun
-  OBJs are authored origin-at-grip, the correct seat is `vm_grip_pos 0 0 0`
-  for every gun (raygun keeps `vm_grip_scale 0.65`). Do NOT "re-tune" grip
-  rotations to fight the idle pose — the OBJ orientation is correct; if a
-  future gun needs a nudge it's a small `vm_grip_pos` edit + rerun (no
-  recompile — `.weapon` files are parsed at boot).
+- **Hand placement root-caused and fixed** (ef1afe2 + abf709e). Two stacked
+  bugs:
+  1. `--screenshot-viewmodels` captured a SINGLE frame per weapon — frame 1
+     of the `raise` clip — so the old `gunGrip[]` values had been tuned
+     against a mid-raise pose and were systematically wrong in the settled
+     idle. The devtool now renders 75 settle frames (~1.25 s) per capture.
+  2. The hand BONE origin is at the wrist, not the visible palm. Solved
+     numerically (new `vmDebugMarkers` dump): in hand.R's local frame,
+     hand.L sits at (-0.02, +0.21, -0.02) — exactly a foregrip hold along
+     the bore, so the guns need NO rotation (the OBJ orientation is
+     correct; do NOT add `vm_grip_rot` to fight the pose). The only
+     systematic error was the wrist→palm drop: every gun seats at
+     `vm_grip_pos 0 0 -0.04` (pistol `-0.05`, raygun keeps
+     `vm_grip_scale 0.65`).
+  `--screenshot-viewmodels` now draws **grip markers**: red sphere + RGB
+  axis ticks = hand.R origin, blue sphere = hand.L, drawn depth-off so
+  they show through meshes, plus a one-shot stderr dump of both bone
+  transforms in arms-model space (`vmdbg` lines). Tuning a new gun =
+  edit `vm_grip_*`, rerun, no recompile.
 
 Feature pass (2026-06-12, earlier — commits a8b1cfb, c4170d6, 2cf6c3b, b362902):
 
@@ -757,15 +766,18 @@ data/
     (`worldSkinnedShader`); the gun is a rigid OBJ (`worldShader`). Each gets its
     own flat sun/ambient override (restored after) so neither colour-swings —
     note the gun's override is darker (it's gunmetal, not skin).
-  - **Grips are data-driven + re-seated (ef1afe2).** Seating lives in the
-    `vm_grip_pos/rot/scale` keys of each `.weapon` file (`weaponGrip[]` is
-    just storage). Because the gun OBJs are authored origin-at-grip, every
-    gun seats at `vm_grip_pos 0 0 0` (raygun `vm_grip_scale 0.65`). The old
-    a8b1cfb `gunGrip[]` numbers were tuned against a mid-raise screenshot
-    pose (single-frame devtool bug, fixed) — don't resurrect them. The arms
-    model is authored at real metric; one `VM_SCALE` (0.62) sizes the whole
-    assembly. New gun = edit keys, rerun `--screenshot-viewmodels`, no
-    recompile.
+  - **Grips are data-driven + re-seated (ef1afe2, abf709e).** Seating lives
+    in the `vm_grip_pos/rot/scale` keys of each `.weapon` file
+    (`weaponGrip[]` is just storage). The gun OBJs are origin-at-grip and
+    the arms idle pose is a true foregrip hold along the bore, so the seat
+    is pure translation: `vm_grip_pos 0 0 -0.04` (pistol `-0.05`, raygun
+    `vm_grip_scale 0.65`) — the -4 cm is the hand bone's wrist-origin →
+    visible-palm drop. The old a8b1cfb `gunGrip[]` numbers were tuned
+    against a mid-raise screenshot pose (single-frame devtool bug, fixed) —
+    don't resurrect them, and don't add rotations. The arms model is
+    authored at real metric; one `VM_SCALE` (0.62) sizes the whole
+    assembly. New gun = edit keys, rerun `--screenshot-viewmodels` (grip
+    markers: red = hand.R + axes, blue = hand.L), no recompile.
   - **Falls back gracefully.** If `arms_vm.glb` is missing or has no `hand.R`
     bone, `Viewmodel_DrawFirstPerson` drops through to the legacy procedural
     gun-only OBJ viewmodel for those 4 guns — nothing crashes.

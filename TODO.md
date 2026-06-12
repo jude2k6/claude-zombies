@@ -142,7 +142,11 @@ connectivity auditor). Remaining work is authoring + per-entity wiring:
       `vm_grip_pos/rot/scale`. M1911 unified onto the shared arms path;
       hand placement root-caused (grips had been tuned against a mid-raise
       pose — the screenshot devtool captured frame 1 of `raise`; it now
-      settles 75 frames first) and re-seated at `vm_grip_pos 0 0 0`.
+      settles 75 frames first) and re-seated. Second-pass fix (abf709e):
+      hand bone origin = wrist, not palm — all guns drop 4 cm
+      (`vm_grip_pos 0 0 -0.04`, pistol -0.05); both gloves verified on
+      every gun via the new hand-bone grip markers in
+      `--screenshot-viewmodels` (red = hand.R + axes, blue = hand.L).
   - [ ] **In-game feel check of the re-seated grips** — verify in actual
         play (ADS, sprint, reload) and fine-tune per-gun `vm_grip_pos` in
         the `.weapon` files if any gun rides oddly. Box odds change to

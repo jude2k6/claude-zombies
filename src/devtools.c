@@ -11,6 +11,7 @@
 #include "anim.h"
 #include "render.h"
 #include "viewmodel.h"
+#include "particles.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -411,6 +412,80 @@ static int Dev_ScreenshotZombies(void) {
     return 0;
 }
 
+// ---- --screenshot-particles ------------------------------------------------
+// Spawns muzzle-flash, blood-mist, and explosion bursts at fixed world
+// positions; renders 3 frames at increasing ages → particles_0.png … 2.
+// Visual check: additive glow visible for flash/explosion, dark-red puffs
+// for blood, particles spread/fade over the three frames.
+//
+// Because Render_World3D calls Particles_Update each frame and the short-lived
+// flash particles die in <0.1 s, we re-spawn fresh bursts for each screenshot
+// (so each image captures the "just spawned" state), then walk forward a few
+// frames to show spread/fade progression.
+
+static int Dev_ScreenshotParticles(void) {
+    SetTraceLogLevel(LOG_WARNING);
+    SetConfigFlags(FLAG_MSAA_4X_HINT);
+    InitWindow(1280, 720, "Particle screenshot");
+    SetTargetFPS(60);
+    Weapons_Load();
+    Assets_Load();
+    Assets_ApplyWorldShader();
+    Level_Build();
+
+    localPlayerIdx = 0;
+    for (int i = 0; i < NET_MAX_PLAYERS; i++) memset(&players[i], 0, sizeof players[i]);
+    players[0].active = true; players[0].alive = true;
+    players[0].pos = (Vector3){ 0, PLAYER_EYE, 9 };
+
+    // Camera positioned to show all three effects at a closer range so the
+    // billboard particles subtend enough pixels to be clearly visible.
+    Camera cam = {
+        .position   = (Vector3){ 0, 1.8f, 3.5f },
+        .target     = (Vector3){ 0, 1.0f, 0 },
+        .up         = (Vector3){ 0, 1, 0 },
+        .fovy       = 80.0f,
+        .projection = CAMERA_PERSPECTIVE,
+    };
+
+    // Drain the large first-frame GetFrameTime spike (window init takes ~0.5s
+    // and that dt would kill all particles in one update). Run enough dummy
+    // frames (with no particles in the pool) to normalise dt back to ~16 ms.
+    Particles_Reset();
+    for (int f = 0; f < 10; f++) {
+        BeginDrawing(); ClearBackground((Color){ 50, 52, 62, 255 });
+        Render_World3D(cam); EndDrawing();
+    }
+
+    // Each screenshot: spawn fresh, advance N frames, take screenshot on the
+    // final frame by calling TakeScreenshot *before* EndDrawing (raylib captures
+    // it at EndDrawing time). Frame counts chosen so all three ages show visibly
+    // different states of the explosion sparks (longest-lived effect).
+    // flash life ~0.04-0.10 s, blood ~0.20-0.45 s, explosion ~0.25-0.80 s.
+    int advances[3] = { 1, 4, 18 };
+    for (int s = 0; s < 3; s++) {
+        Particles_Reset();
+        Particles_MuzzleFlash((Vector3){ -1.8f, 1.4f, 0.0f }, (Vector3){ 0, 0, -1 });
+        Particles_CasingEject((Vector3){ -1.8f, 1.4f, 0.0f }, (Vector3){ 1, 0, 0 });
+        Particles_BloodMist((Vector3){  0.0f, 1.2f, 0.0f }, (Vector3){ 0, 0, 1 }, true);
+        Particles_Explosion((Vector3){  1.8f, 0.1f, 0.0f });
+
+        char fn[64]; snprintf(fn, sizeof fn, "particles_%d.png", s);
+        for (int f = 0; f < advances[s]; f++) {
+            BeginDrawing();
+            ClearBackground((Color){ 50, 52, 62, 255 });
+            Render_World3D(cam);
+            if (f == advances[s] - 1) TakeScreenshot(fn);
+            EndDrawing();
+        }
+        fprintf(stderr, "wrote %s  (%d frame(s) in)\n", fn, advances[s]);
+    }
+
+    Assets_Unload(); Weapons_Unload();
+    CloseWindow();
+    return 0;
+}
+
 // ---- dispatcher ------------------------------------------------------------
 
 bool Devtools_HandleCLI(int argc, char **argv, int *exitCode) {
@@ -432,6 +507,10 @@ bool Devtools_HandleCLI(int argc, char **argv, int *exitCode) {
     }
     if (argc >= 2 && strcmp(argv[1], "--screenshot-zombies") == 0) {
         *exitCode = Dev_ScreenshotZombies();
+        return true;
+    }
+    if (argc >= 2 && strcmp(argv[1], "--screenshot-particles") == 0) {
+        *exitCode = Dev_ScreenshotParticles();
         return true;
     }
     if (argc >= 3 && strcmp(argv[1], "--anim-test") == 0) {

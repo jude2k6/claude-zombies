@@ -3,6 +3,7 @@
 #include "level.h"
 #include "interact.h"
 #include "fx.h"
+#include "particles.h"
 #include "raymath.h"
 #include <math.h>
 #include <stdio.h>
@@ -156,7 +157,6 @@ Vector3 Weapon_SpreadDir(Vector3 base, float degrees) {
 // Forward decl for bullet spawn
 extern void Bullets_Spawn(Vector3 origin, Vector3 dir, float speed, float life,
                           int damage, int weaponIdx, int ownerPlayer);
-extern float muzzleFlashLocal;  // defined in render.c, ticked by HUD/main
 
 void Weapon_Fire(Player *p) {
     if (!p->alive) return;
@@ -194,6 +194,10 @@ void Weapon_Fire(Player *p) {
         Vector3 d = Weapon_SpreadDir(dir, spread);
         Bullets_Spawn(origin, d, w->bulletSpeed, w->bulletLife, dmg, s->weaponIdx, ownerIdx);
     }
+    // Muzzle flash sparks + casing eject at the bullet's origin.
+    Particles_MuzzleFlash(origin, dir);
+    Particles_CasingEject(origin, right);
+
     s->ammo--;
     s->fireTimer = Weapon_EffFireCD(p, s);
     p->shotsFired += w->pellets;
@@ -209,7 +213,6 @@ void Weapon_Fire(Player *p) {
     }
 
     if (ownerIdx == localPlayerIdx) {
-        muzzleFlashLocal = 0.05f;
         // Per-weapon haptic punch (camera shake + rumble — distinct from the
         // aim-kick recoil applied above).
         switch (s->weaponIdx) {

@@ -63,6 +63,7 @@ add_executable(shooter
     src/settings.c
     src/assets.c
     src/decals.c
+    src/particles.c
     src/anim.c
 )
 target_include_directories(shooter PRIVATE

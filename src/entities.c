@@ -4,6 +4,7 @@
 #include "weapons.h"
 #include "fx.h"
 #include "decals.h"
+#include "particles.h"
 #include "raymath.h"
 #include <math.h>
 #include <stdlib.h>
@@ -679,6 +680,7 @@ void Bullets_Update(float dt) {
             Vector3 vn = Vector3Normalize(Vector3Negate(bullets[i].vel));
             float sz = 0.18f + (rand() % 100) / 100.0f * 0.10f;
             Decals_Spawn(DECAL_BLOOD, hitPos, vn, sz);
+            Particles_BloodMist(hitPos, vn, headHit);
         } else {
             float sz = 0.10f + (rand() % 100) / 100.0f * 0.05f;
             Decals_Spawn(DECAL_IMPACT, hitPos, hitNormal, sz);
@@ -798,6 +800,9 @@ void Throwables_Detonate(Throwable *t) {
             Vector3 vn = (Vector3){ -dx/(d+1e-4f), -dy/(d+1e-4f), -dz/(d+1e-4f) };
             Decals_Spawn(DECAL_BLOOD, enemies[e].pos, vn, 0.22f);
         }
+        // Explosion particle burst at the detonation point.
+        Particles_Explosion(t->pos);
+
         // Camera kick for any nearby local player
         if (localPlayerIdx >= 0 && players[localPlayerIdx].active) {
             float dx = players[localPlayerIdx].pos.x - t->pos.x;

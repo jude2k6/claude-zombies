@@ -8,13 +8,12 @@
 #include "interact.h"
 #include "assets.h"
 #include "decals.h"
+#include "particles.h"
 #include "anim.h"
 #include "raymath.h"
 #include "rlgl.h"
 #include <math.h>
 #include <stdio.h>
-
-float muzzleFlashLocal = 0.0f;
 
 // ---- shared rigged zombie (glTF skeletal animation) --------------------
 // One shared skinned model + clips; each enemy slot carries a lightweight,
@@ -1011,8 +1010,15 @@ void Render_World3D(Camera camera) {
         }
         Decals_Draw();
         DrawTracers(camera);
-        Viewmodel_DrawFirstPerson(camera);
+        // Particles: drawn inside BeginMode3D but outside the world shader so
+        // their blend modes (additive / alpha) aren't affected by the fog program.
+        // Same discipline as decals/tracers: rlDisableDepthMask during draw,
+        // restored after. Particles_Update is called here so it drives off the
+        // render-frame dt, consistent with every other visual-only effect.
         EndWorldShader();
+        Particles_Update(GetFrameTime());
+        Particles_Draw(camera);
+        Viewmodel_DrawFirstPerson(camera);
     EndMode3D();
 }
 

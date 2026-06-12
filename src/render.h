@@ -3,8 +3,6 @@
 
 #include "types.h"
 
-extern float muzzleFlashLocal;     // ticked by main loop
-
 void Render_LoadZombieAnim(void);
 void Render_UnloadZombieAnim(void);
 void Render_LoadPlayerAnim(void);

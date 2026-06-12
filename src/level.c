@@ -1,6 +1,7 @@
 #include "level.h"
 #include "assets.h"
 #include "decals.h"
+#include "particles.h"
 #include "raymath.h"
 #include <stdlib.h>
 #include <stdio.h>
@@ -890,4 +891,5 @@ void Level_Reset(void) {
     mbox.timer = 0;
     mbox.ownerPlayer = -1;
     Decals_ClearAll();
+    Particles_Reset();
 }

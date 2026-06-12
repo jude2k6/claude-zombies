@@ -1,5 +1,4 @@
 #include "hud.h"
-#include "render.h"     // muzzleFlashLocal
 #include "weapons.h"
 #include "perks.h"
 #include "player.h"
@@ -408,8 +407,7 @@ void Hud_Draw(int sw, int sh, Player *me, Interact ix) {
     HudUpdateFeedback(me, GetFrameTime());
 
     int cx = sw / 2, cy = sh / 2;
-    Color cross = (muzzleFlashLocal > 0) ? YELLOW : RAYWHITE;
-    HudDrawCrosshair(cx, cy, me, cross);
+    HudDrawCrosshair(cx, cy, me, RAYWHITE);
     HudDrawHitMarker(cx, cy);
     HudDrawDamageDir(cx, cy, me);
 

@@ -24,6 +24,7 @@
 #include "fx.h"
 #include "audio.h"
 #include "decals.h"
+#include "particles.h"
 #include "assets.h"
 #include "anim.h"
 
@@ -187,6 +188,7 @@ int main(int argc, char **argv) {
     Render_LoadPlayerAnim();   // rigged third-person soldier for co-op teammates
     Settings_Load();
     Decals_Init();
+    Particles_Reset();
     if (fullscreen && !IsWindowFullscreen()) Menu_ToggleFullscreenSafe();
     Level_Build();
     Menu_ScanMaps();
@@ -325,7 +327,6 @@ int main(int argc, char **argv) {
             }
 
             ix = Interact_FindFor(me);
-            if (muzzleFlashLocal > 0) muzzleFlashLocal -= dt;
         }
 
         Fx_Tick(dt);

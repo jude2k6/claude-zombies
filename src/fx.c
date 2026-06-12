@@ -32,8 +32,10 @@ void Fx_Punch(float trauma) {
 
 void Fx_Rumble(float low, float high, float seconds) {
     if (!Pad_Connected()) return;
-    if (low  < 0) low  = 0; if (low  > 1) low  = 1;
-    if (high < 0) high = 0; if (high > 1) high = 1;
+    if (low  < 0) low  = 0;
+    if (low  > 1) low  = 1;
+    if (high < 0) high = 0;
+    if (high > 1) high = 1;
     SetGamepadVibration(PAD_ID, low, high, seconds);
 }
 

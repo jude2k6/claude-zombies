@@ -9,6 +9,14 @@
 #include <string.h>
 #include <stdlib.h>
 
+// strdup is POSIX, not C11 — local copy so strict -std=c11 builds work.
+static char *xstrdup(const char *s) {
+    size_t n = strlen(s) + 1;
+    char *p = malloc(n);
+    if (p) memcpy(p, s, n);
+    return p;
+}
+
 // ---- WEAPONS[] storage --------------------------------------------------
 // Mutable so Weapons_Load() can populate / override entries from .weapon
 // files. Compiled-in defaults below act as fallbacks for any slot whose
@@ -434,8 +442,8 @@ static int Weapons_ParseFile(const char *path) {
             free(text);
             return -1;
         }
-        else if (strcmp(k, "name") == 0 && n >= 2)        { d.name       = strdup(toks[1]); }
-        else if (strcmp(k, "packed_name") == 0 && n >= 2) { d.packedName = strdup(toks[1]); }
+        else if (strcmp(k, "name") == 0 && n >= 2)        { d.name       = xstrdup(toks[1]); }
+        else if (strcmp(k, "packed_name") == 0 && n >= 2) { d.packedName = xstrdup(toks[1]); }
         else if (strcmp(k, "category") == 0 && n >= 2)    { d.category = CategoryFromStr(toks[1], d.category); }
         else if (strcmp(k, "fire_mode") == 0 && n >= 2)   { d.fireMode = FireModeFromStr(toks[1], d.fireMode); }
         else if (strcmp(k, "damage") == 0 && n >= 2)      ParseIntTok(toks[1], &d.damage);

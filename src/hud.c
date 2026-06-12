@@ -252,12 +252,14 @@ static void HudDrawRoundSplash(int sw, int sh) {
     if (hudRoundSplashTimer <= 0) return;
     float t = hudRoundSplashTimer / 2.6f;          // 1 → 0
     float fadeIn  = 1.0f - (t - 0.6f) / 0.4f;      // first 0.4s fade-in
-    if (fadeIn > 1) fadeIn = 1; if (fadeIn < 0) fadeIn = 0;
+    if (fadeIn > 1) fadeIn = 1;
+    if (fadeIn < 0) fadeIn = 0;
     float fadeOut = (t < 0.4f) ? (t / 0.4f) : 1.0f; // last 0.4s fade-out
     float a = fadeIn * fadeOut;
     // Letters drop in from above; settle by mid-life.
     float settleP = 1.0f - t;
-    if (settleP > 1) settleP = 1; if (settleP < 0) settleP = 0;
+    if (settleP > 1) settleP = 1;
+    if (settleP < 0) settleP = 0;
     float ease = 1.0f - (1.0f - settleP) * (1.0f - settleP);
     int dropY = (int)((1.0f - ease) * -160.0f);
 

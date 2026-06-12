@@ -62,7 +62,7 @@ static float frand(void) { return (float)rand() / (float)RAND_MAX * 2.0f - 1.0f;
 static void Lowpass(Wave *w, float cutoffHz) {
     float a = cutoffHz / (cutoffHz + SAMPLE_RATE);
     float y = 0;
-    for (int i = 0; i < w->frameCount; i++) {
+    for (unsigned int i = 0; i < w->frameCount; i++) {
         float x = ((short *)w->data)[i] / 32000.0f;
         y = y + a * (x - y);
         WritePCM(w, i, y);
@@ -349,7 +349,6 @@ void Audio_Tick(Player *me) {
     // Per-local-player diff state. Static so it lives across frames.
     static int       lastShotsFired = -1, lastShotsHit = -1, lastHeadshots = -1, lastKills = -1;
     static int       lastHp = -1, lastPoints = -1, lastPerks = -1;
-    static int       lastCurrentSlot = -1;
     static float     lastReloadTimer = 0.0f;
     static GamePhase lastPhase = GS_PRE_GAME;
     static int       lastMBoxState = -1;
@@ -361,7 +360,6 @@ void Audio_Tick(Player *me) {
         lastShotsFired = me->shotsFired; lastShotsHit = me->shotsHit;
         lastHeadshots = me->headshots;   lastKills = me->kills;
         lastHp = me->hp;                 lastPoints = me->points;
-        lastCurrentSlot = me->currentSlot;
         lastReloadTimer = me->inventory[me->currentSlot].reloadTimer;
         lastPhase = gamePhase;           lastMBoxState = mbox.state;
         lastDoublePoints = doublePointsTimer; lastInstakill = instaKillTimer;
@@ -454,5 +452,4 @@ void Audio_Tick(Player *me) {
     lastKills       = me->kills;
     lastHp          = me->hp;
     lastPoints      = me->points;
-    lastCurrentSlot = me->currentSlot;
 }

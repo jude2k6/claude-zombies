@@ -4,6 +4,80 @@ Live punch list, ordered by impact-per-effort. The architecture for almost
 every item below is already in place — these are mostly authoring + small
 shader / system additions.
 
+## Architecture cleanup (code audit 2026-06-12)
+
+The module layout itself (one TU per responsibility sharing `types.h`,
+host-authoritative sim, model-first render with fallbacks) is sound — keep
+it. What follows is the drift + hygiene found auditing the code against
+HANDOFF/README, ordered by priority.
+
+### Dead code & waste
+- [ ] **Remove the dead pistol-glb viewmodel path.** `render.c:
+      DrawPistolViewmodelGLB` has been unreferenced since the 2026-06-03
+      "take the arms away" change, but `Render_LoadPistolVM()` is STILL
+      called at boot (`main.c:505`) and in `--screenshot-viewmodels`
+      (`main.c:186`) — it loads `pistol_vm.glb` + applies the skinned
+      shader for a model that is never drawn. Delete the function, the
+      `pistolVM`/`pistolVMState`/`pvm*` statics, `Render_{Load,Unload}
+      PistolVM` (render.h too), and the three main.c call sites. Keep the
+      `.glb` on disk — it's authored content that may come back.
+- [ ] **Drop `data/models/weapons/{revolver,sniper}.{obj,mtl}`** — legacy
+      Quaternius holdouts, wired to nothing.
+
+### Warnings & safety nets
+- [ ] **Enable `-Wall -Wextra` for GCC/Clang** — CMakeLists only sets MSVC
+      `/W3`; HANDOFF even leans on "no -Wall so no warning" to excuse dead
+      code. The current backlog is tiny: 5× misleading-indentation
+      one-line clamps (`fx.c:35-36`, `hud.c:255,260`, `render.c:902`),
+      1 sign-compare (`audio.c:65`), 1 unused-but-set
+      (`audio.c:352 lastCurrentSlot`). Fix those, then add the flags.
+- [ ] **`strdup` under strict C11** (`weapons.c:437`) — implicit decl →
+      int-to-pointer truncation if anyone builds with `-std=c11` proper
+      (we currently survive on CMake's gnu11 default). Use a tiny local
+      `xstrdup` or `#define _POSIX_C_SOURCE 200809L`.
+- [ ] **Add an ASan build option** — the raylib OBJ patch removed the old
+      "ASan can't be enabled" blocker. `option(SHOOTER_ASAN OFF)` +
+      `-fsanitize=address,undefined` on Debug.
+- [ ] **CI + parser tests** — tracked under Infrastructure below; listed
+      here because it's the backstop that keeps all of this honest.
+
+### Oversized translation units (mechanical splits, no behaviour change)
+- [ ] **`render.c` (1582 lines) → carve out `viewmodel.c`.** The whole
+      first-person system — `DrawFirstPersonViewmodel`, `DrawArmsViewmodel`,
+      `ViewmodelMotion`, `gunGrip[]`, the arms/pistol VM loaders + statics,
+      `muzzleFlashLocal` — is ~550 self-contained lines with a clean seam
+      (load/unload + one draw(camera) entry point).
+- [ ] **`main.c` (752 lines — HANDOFF still claims ~360) → `devtools.c`.**
+      The 4 CLI modes (`--screenshot-viewmodels` / `--screenshot-coop` /
+      `--screenshot-pap` / `--anim-test`) are ~330 lines of debug harness
+      inside `main()`. One `bool Devtools_HandleCLI(int argc, char **argv)`
+      and main.c is "just the game loop" again.
+- [ ] **`entities.c` (953 lines) — optional.** It's really 4 systems
+      (enemies AI, bullets, throwables, powerups) in one file, but they're
+      stable; split only if it starts churning.
+
+### Layering (sim → presentation)
+- [ ] **Don't deepen the `entities.c`/`game.c` → `Decals_*`/`Fx_*` calls.**
+      The host sim currently writes presentation state directly (blood
+      decals, camera shake from inside `Bullets_Update`). `audio.c` already
+      models the right pattern (snapshot-delta event detection). A full
+      event-queue refactor isn't worth it yet (there's no headless-server
+      build to protect), but new sim code should not reach into
+      render/hud/assets — and the Mid-term "MP-correct recoil" item is the
+      same family of fix.
+
+### Doc drift (HANDOFF/README vs code — align one side)
+- [ ] HANDOFF "Current state" still says the arms-VM pass is *uncommitted*;
+      it landed in `6c794a7`. It also predates the two Pack-a-Punch commits
+      (`3619151`, `39dc856`). Refresh the header section.
+- [ ] HANDOFF "Map engine limits" says `MAX_INTERIOR_WALLS=16`; `types.h`
+      says **32**.
+- [ ] Scoring mismatch: HANDOFF/README/TODO all say 60 body kill / 100
+      headshot kill, but the code is `KILL_POINTS 50` + 40 headshot bonus
+      = **50 / 90** (`entities.c:648`). Decide which was the CoD balance
+      pass's intent and fix the other side.
+- [ ] README's dev-CLI list is missing `--screenshot-pap`.
+
 ## Next up (highest impact-per-effort)
 
 ### Animation & assets (engine pipeline is IN — assets next)
@@ -70,8 +144,10 @@ connectivity auditor). Remaining work is authoring + per-entity wiring:
         spawns dummy teammates in locomotion/reload/downed/dead/revive states
         and writes `coop_*.png` so the third-person model can be verified
         without a real multiplayer game.
-- [ ] **Machine polish** (PaP chamber, mystery-box lid, perk dispense) —
-      optional, low priority; currently code/shader-faked.
+- [~] **Machine polish** — PaP done 2026-06-04 (authored CoD-style cabinet
+      with lit chamber + procedural shutter/sparks, `--screenshot-pap`);
+      mystery-box lid + perk dispense still code/shader-faked. Optional,
+      low priority.
 
 ### Weapons polish (architecture is in)
 - [x] **Verify the 5 new viewmodels in first-person** — done via
@@ -145,7 +221,9 @@ connectivity auditor). Remaining work is authoring + per-entity wiring:
       `wall_brick.png`, `wall_plaster.png`, `ceiling_wood.png` (last is
       reserved, no current map draws a ceiling). 512² seamless PNGs;
       engine, mipmaps, wrap mode, tile UVs all already wired.
-- [ ] `pap_chamber.obj` (chamber animates separately — deferred)
+- [x] ~~`pap_chamber.obj`~~ — superseded: the 2026-06-04 `pap_machine.obj`
+      bakes the chamber into the cabinet; the shutter stays procedural by
+      design (aligned to the model's mouth at y≈1.99).
 
 ### Infrastructure
 - [ ] **`tests/map_parser_test.c`** with bad/good fixtures fed through

@@ -206,8 +206,11 @@ first-person viewmodel to a PNG), `--screenshot-coop` (renders dummy
 teammates in every animation state — locomotion/reload/downed/dead/revive —
 so the third-person player model can be checked without a multiplayer game),
 `--screenshot-pap` (renders the Pack-a-Punch machine with the chamber open
-and a weapon inside), and `--anim-test <file.glb> [clip]` (renders a skinned
-glTF model across an animation clip to verify it).
+and a weapon inside), `--screenshot-zombies` (renders each zombie type in
+idle/attack/dying states), `--screenshot-particles` (renders the particle
+effects — muzzle flash, casings, blood, explosion), and
+`--anim-test <file.glb> [clip]` (renders a skinned glTF model across an
+animation clip to verify it).
 
 ## License
 

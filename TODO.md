@@ -102,11 +102,11 @@ connectivity auditor). Remaining work is authoring + per-entity wiring:
         `viewmodel.c:DrawArmsViewmodel`; the equipped gun OBJ is bolted onto the
         `hand.R` bone each frame (new `Anim_FindBone` / `Anim_BoneMatrix`), so
         only the arms need a skin, not a combined glb per gun. Same clip state
-        machine as the pistol VM. **Remaining: tune the per-gun
-        `gunGrip[W_COUNT]` table** (pos/rotDeg/scale, currently all-zero
-        placeholders) via `--screenshot-viewmodels` so each grip sits in the
-        hand and the muzzle points forward. `W_PISTOL` uses the gun-only OBJ
-        path. See HANDOFF "shared arms viewmodel" gotcha.
+        machine as the pistol VM. **gunGrip[] tuned 2026-06-12 (a8b1cfb)** —
+        all 4 guns sit in the hands, verified via `--screenshot-viewmodels`.
+        `W_PISTOL` uses the gun-only OBJ path. Still open: authoring per-gun
+        vm clips (fire blowback etc. currently come from the shared arms
+        clips). See HANDOFF "shared arms viewmodel" gotcha.
 - [x] **Player third-person model** (`data/models/player.glb`) — authored +
       validated + WIRED. Rig-first soldier on the shared 17-bone humanoid family
       (same bone names as `zombie.glb`): skin-modifier stick-figure body in
@@ -153,14 +153,14 @@ connectivity auditor). Remaining work is authoring + per-entity wiring:
       orientation-tracked. The lunge is now anticipated, not "I died
       fast." (Crawler tell is its squished no-head silhouette;
       boss tell is the magenta stripe + 1.7×1.5 scale.)
-- [ ] **Per-type audio tells** — distinct groan / hiss / roar per
-      zombie type via raylib's positional audio attenuation. Covered
-      below in audio section.
+- [x] **Per-type audio tells** — done (c4170d6): groan / growl / hiss /
+      roar per type + melee snarl, positional. See audio section.
 
 ### Rendering
-- [ ] **Particle system** — pooled additive-blend particles for muzzle
-      flash (replaces the HUD-tint hack), casing eject, blood mist on
-      zombie hits. ~256-particle pool, simple vel + gravity + lifetime.
+- [x] **Particle system** — done (b362902): `src/particles.{c,h}`,
+      256-slot pool, muzzle flash + casing eject (Weapon_Fire), blood
+      mist on hits, frag explosion burst. HUD-tint muzzle hack removed.
+      `--screenshot-particles` dev mode verifies.
 - [ ] **Post-FX render target** — wrap `Render_World3D` in a
       `RenderTexture2D`; final fullscreen quad does bloom on bright
       pixels (PaP, raygun, muzzle), vignette, hit-flash red overlay,
@@ -187,14 +187,20 @@ connectivity auditor). Remaining work is authoring + per-entity wiring:
         bottom-left loadout row after the perk badges (redesigned
         2026-06-02); current-weapon line shows a `PRIMARY` / `SPECIAL` tag.
 
-### Audio (still the thinnest area)
-- [ ] **Per-map music** — `ATMOSPHERE { music name }` already parses;
-      load `data/audio/<name>.ogg` on map load, loop quietly.
-- [ ] **3D positional zombie groans** via raylib's audio attenuation.
-      Layer in per-type variants (runner growl, crawler hiss, boss roar).
-- [ ] **Footstep + reload SFX** — game is jarringly quiet outside of
-      gunfire.
-- [ ] **Bleedout vignette + heartbeat audio** when downed.
+### Audio (full pass done 2026-06-12, c4170d6)
+- [x] **Per-map music** — done: streams `data/audio/<name>.ogg` from the
+      map's `ATMOSPHERE { music name }` at low volume; silent skip if the
+      file is absent. No .ogg ships yet — authoring the loops is the
+      remaining (content, not code) work.
+- [x] **3D positional zombie groans** — done: per-type vocals (groan /
+      growl / hiss / roar + melee snarl), squared rolloff to 20 m,
+      camera-relative pan, max 2 new voices per tick.
+- [x] **Footstep + reload SFX** — done: 3 footstep variants with
+      sprint/walk/crouch cadence; 2-stage reload (mag-out, mag-in at 55%
+      of reload time).
+- [~] **Bleedout vignette + heartbeat audio** when downed — heartbeat
+      done (lub-dub ramps 1.30 s → 0.55 s, other SFX ducked); the
+      *vignette* half needs the post-FX render target (see Rendering).
 
 ### Map format / engine integration
 - [ ] **`LIGHTS x y z r g b range`** in `.map` — per-map placed lights;

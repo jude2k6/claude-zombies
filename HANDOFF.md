@@ -14,6 +14,40 @@ Repo: `git@github.com:jude2k6/claude-zombies.git` · branch: `main`.
 
 ## Current state (2026-06-12)
 
+Feature pass (2026-06-12, later — commits a8b1cfb, c4170d6, 2cf6c3b, b362902):
+
+- **gunGrip[] tuned** (a8b1cfb): all 4 non-pistol guns now sit correctly in
+  the shared arms (SMG/shotgun/rifle pos-only nudges, raygun scale 0.65).
+  Verified via `--screenshot-viewmodels`.
+- **Full audio pass** (c4170d6, all inside `audio.{c,h}` via snapshot-delta):
+  3-variant procedural footsteps (cadence from move/sprint blend; remote
+  players positional), two-stage mag-out/mag-in reload SFX (mag-in at 55% of
+  reload time), per-type positional zombie vocals (groan/growl/hiss/roar +
+  melee snarl, 2-per-tick budget, squared rolloff + camera pan), downed
+  heartbeat accelerating with bleedout (other SFX ducked to 0.28), and
+  per-map music — on mapName change audio.c re-parses the map's ATMOSPHERE
+  music name and streams `data/audio/<name>.ogg` looped at 0.25 if present
+  (silent skip when absent; no .ogg ships yet).
+- **Zombie death window + sim attack flag** (2cf6c3b): all 6 kill sites set
+  `dyingTimer` (1.34 s = death clip) so the corpse plays the authored
+  `death` clip before the slot frees; bites set `simAttackTimer` (0.61 s)
+  so `attack_a` is sim-driven, not proximity-guessed. Serialized in
+  `SerEnemy` (timers quantized to 0.01 s) — **`NET_PROTO_VERSION` is now
+  9**. Corpses don't block round end, spawns, bullets, or audio vox. New
+  `--screenshot-zombies` dev mode shows walk/attack/death poses.
+- **Pooled particle system** (b362902): new `src/particles.{c,h}` — 256-slot
+  pool (decal-ring pattern), additive billboards for muzzle flash/sparks/
+  explosion + alpha for blood mist/casings/smoke. Hooks: `Weapon_Fire`
+  (flash + casing at muzzle origin), `Bullets_Update` enemy hit (blood,
+  extra on headshot), `Throwables_Detonate` (frag burst). Drawn in
+  `Render_World3D` after `EndWorldShader`. **The `muzzleFlashLocal`
+  HUD-tint hack is fully removed** (render.h/render.c/weapons.c/main.c/
+  hud.c). New `--screenshot-particles` dev mode.
+
+NOT done from the rendering wishlist: the post-FX render target (bloom/
+vignette/hit-flash/low-HP pulse) — next up; was cut when the session ran
+out of budget.
+
 Architecture-cleanup pass (2026-06-12, commits 772606f–c23bab9):
 
 - **Dead pistol-glb path removed** (772606f): `DrawPistolViewmodelGLB`, the
@@ -108,11 +142,8 @@ Prior sub-pass (2026-06-03) — now committed (6c794a7):
   takes the gun-only OBJ path; the other four take this arms path
   when `armsVM.loaded`, else fall through to the legacy gun-only floating OBJ
   viewmodel. Loaded/unloaded via `Viewmodel_LoadArms()`/`Viewmodel_UnloadArms()`
-  in `main.c` (boot + `--screenshot-viewmodels`). **The per-gun grips are NOT
-  tuned yet** — the `gunGrip[W_COUNT]` table at the top of `viewmodel.c` is all
-  `{pos {0,0,0}, rotDeg {0,0,0}, scale 1.0}` placeholders. Each gun needs its
-  `pos`/`rotDeg`/`scale` dialed in via `--screenshot-viewmodels` so the muzzle
-  and grip sit right in the hand. See the arms-viewmodel gotcha below.
+  in `main.c` (boot + `--screenshot-viewmodels`). The per-gun `gunGrip[W_COUNT]`
+  table was tuned 2026-06-12 (a8b1cfb). See the arms-viewmodel gotcha below.
 
 Prior pass (2026-06-02) — committed to `main`, not pushed:
 
@@ -432,7 +463,7 @@ are new), `CMakeLists.txt`, `data/maps/*.map`, and new files under
 `data/models/` + `data/shaders/`. `TODO.md` and `HANDOFF.md` are also
 updated.
 
-`NET_PROTO_VERSION` is **8** (`src/net.h`). Bump it whenever you change
+`NET_PROTO_VERSION` is **9** (`src/net.h`). Bump it whenever you change
 anything in `SerPlayer` / `SerEnemy` / `SerThrowable` / `PktSnapshotHeader`.
 
 ## Build / run
@@ -609,11 +640,13 @@ data/
     path — the crawler/boss really want their own meshes per `ANIMATIONS.md`.
     The yellow runner stripe + magenta boss stripe + runner red-eye tell are
     still drawn as overlays on top of the rigged model.
-  - **No death/attack from the sim yet.** Enemies just flip `alive=false` on
-    kill, so the `death` clip never plays in-game and `attack_a` is triggered
-    purely by render-side proximity. Wiring a real death window (keep the
-    corpse ~1.3s while the clip plays) + a sim attack flag is the natural
-    follow-up; the clips already exist.
+  - **Death/attack ARE sim-driven now (2026-06-12, 2cf6c3b).** Kills set
+    `Enemy.dyingTimer` (1.34 s window; corpse drawn while it runs, plays the
+    `death` clip, then the slot frees) and bites set `Enemy.simAttackTimer`
+    (0.61 s) driving `attack_a`. Both serialized in `SerEnemy`
+    (NET_PROTO_VERSION 9). Dying corpses are skipped by AI/bullets/collision/
+    round-end counting/audio vox — if you add a new kill site, set
+    `dyingTimer` before flipping `alive=false` (see the 6 existing sites).
 - **Knee direction (2026-06-02).** Both `player.glb` and `zombie.glb` originally
   shipped with **backwards knees** — the `shin` bone was flexed with a POSITIVE
   local-X rotation, which swings the foot forward (knee juts back). Correct is
@@ -678,13 +711,12 @@ data/
     (`worldSkinnedShader`); the gun is a rigid OBJ (`worldShader`). Each gets its
     own flat sun/ambient override (restored after) so neither colour-swings —
     note the gun's override is darker (it's gunmetal, not skin).
-  - **Grips are unfinished.** `gunGrip[]` (in `viewmodel.c`) ships as all-zero
-    placeholders, so right now the gun renders at the raw hand-bone origin with
-    only the base +90° orientation — it will look misplaced until each entry is
-    tuned. Tune with `--screenshot-viewmodels` (it renders every weapon's
-    viewmodel); adjust `pos`/`rotDeg`/`scale` per gun until the grip sits in the
-    hand and the muzzle points forward. The arms model itself is authored at real
-    metric; one `VM_SCALE` (0.62) sizes the whole assembly.
+  - **Grips are tuned (2026-06-12, a8b1cfb).** `gunGrip[]` in `viewmodel.c`:
+    SMG {0.04,-0.12,0.05}, shotgun {0.03,-0.14,0.05}, rifle {0.03,-0.18,0.04}
+    (all scale 1.0, no rot), raygun {0.08,-0.10,0.04} scale 0.65. If a new gun
+    is added, dial its entry the same way via `--screenshot-viewmodels`. The
+    arms model is authored at real metric; one `VM_SCALE` (0.62) sizes the
+    whole assembly.
   - **Falls back gracefully.** If `arms_vm.glb` is missing or has no `hand.R`
     bone, `Viewmodel_DrawFirstPerson` drops through to the legacy procedural
     gun-only OBJ viewmodel for those 4 guns — nothing crashes.
@@ -806,27 +838,22 @@ See `TODO.md` for the full live list. Impact-ordered short version:
    (`walk`/`attack_a`/`death`) built rig-first via the
    `blender-game-asset` skill, then wire an `AnimState` onto `Enemy` and
    swap its `DrawProp` for `Anim_Draw`. This is the proof-of-pipeline.
-2. **Roll animation out** — fill zombie clips + per-type overrides. The
-   weapon viewmodels and the player third-person model are now wired; the
-   open item there is **tuning the per-gun `gunGrip[]` table** in
-   `viewmodel.c` (shared arms + bone-bolted gun for the 4 non-pistol guns —
-   currently placeholder zeros) and authoring the rest of the zombie/per-type
-   clips. Clip lists in `data/ANIMATIONS.md`.
-3. **Per-type zombie audio tells** — distinct groan/hiss/roar via
-   raylib positional audio; the visual tells (runner red-eye wind-up,
-   boss stripe) already exist.
-4. **Particle system** — pooled additive-blend for muzzle flash,
-   casing eject, blood mist. Replaces the HUD-tint muzzle hack.
-5. **Post-FX render target** — bloom + vignette + hit-flash red +
-   low-HP heartbeat. Unlocks every subsequent "feel" upgrade.
-6. **Per-map music** — `ATMOSPHERE { music name }` already parses; load
-   `data/audio/<name>.ogg` on map load.
-7. **`LIGHTS x y z r g b range`** in `.map` + `sky_tint` plumbing.
-8. **Textures (5)** — `floor_concrete.png`, `ground_dirt.png`,
+2. **Roll animation out** — fill the remaining zombie clips + per-type
+   variants (runner `lunge`, crawler `crawl`, boss `steamroll`); the
+   gunGrip table is tuned and death/attack are sim-driven now. Clip
+   lists in `data/ANIMATIONS.md`.
+3. **Post-FX render target** — bloom + vignette + hit-flash red +
+   low-HP heartbeat pulse. The one rendering wishlist item NOT done in
+   the 2026-06-12 pass; unlocks every subsequent "feel" upgrade.
+4. **Author music + ambience .oggs** — the per-map music *engine* path
+   is in (audio.c streams `data/audio/<name>.ogg` if present); no audio
+   files ship yet. nacht.map references `nacht_loop`.
+5. **`LIGHTS x y z r g b range`** in `.map` + `sky_tint` plumbing.
+6. **Textures (5)** — `floor_concrete.png`, `ground_dirt.png`,
    `wall_brick.png`, `wall_plaster.png`, `ceiling_wood.png`.
-9. **Frustum culling for props** — bounding-sphere test before each
+7. **Frustum culling for props** — bounding-sphere test before each
    `DrawProp`. Matters once more props ship.
-10. **`tests/map_parser_test.c`** + CI step running `--validate` on
+8. **`tests/map_parser_test.c`** + CI step running `--validate` on
     every shipped map.
 
 Tune-on-playtest flags from the 2026-06-02 balance pass: boss melee

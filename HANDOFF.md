@@ -14,7 +14,44 @@ Repo: `git@github.com:jude2k6/claude-zombies.git` · branch: `main`.
 
 ## Current state (2026-06-12)
 
-Feature pass (2026-06-12, later — commits a8b1cfb, c4170d6, 2cf6c3b, b362902):
+Weapon-system pass (2026-06-12, latest — commit ef1afe2):
+
+- **Weapons are now FULLY data-driven.** `WEAPONS[]` / `weaponTune[]` /
+  `weaponGrip[]` (new) are plain zeroed storage; the `.weapon` files are the
+  **single source of truth** — the old "edit BOTH" rule is dead, there are no
+  compiled-in stats to keep in sync. `Weapons_Load` seeds identity values
+  (scale 1.0, id token as placeholder name) and prints a loud
+  `weapon: ERROR: no .weapon file claimed id <X>` per unclaimed slot (that
+  weapon is then unusable — zero damage/mag, never rolls in the box).
+  New `.weapon` keys (all migrated out of C switches):
+  - `sfx SHOT|SHOTGUN|RAYGUN vol pitch` — fire-SFX bank routing (was a
+    `switch (weaponIdx)` in audio.c)
+  - `haptic shake time rumbleLow rumbleHigh` — fire punch/rumble (was a
+    switch in `Weapon_Fire`)
+  - `mbox_weight w` — weighted Mystery Box roll (raygun ships at 0.5 ≈ 11%
+    odds vs the old uniform 20%; 0 = never rolls; uniform fallback if all 0)
+  - `vm_grip_pos / vm_grip_rot / vm_grip_scale` — arms-path gun seating
+    (was the hardcoded `gunGrip[]` table in viewmodel.c)
+  A "what it takes to add a 6th weapon" checklist comment now sits on the
+  W_* enum in types.h (enum slot, fallback anchors, 3 id-token tables,
+  NET_PROTO_VERSION bump, authored folder).
+- **M1911 unified onto the shared arms viewmodel path.** The
+  `wi != W_PISTOL` gate in `Viewmodel_DrawFirstPerson` is gone; all 5 guns
+  ride `arms_vm.glb` + hand.R bolting. The legacy gun-only floating-OBJ
+  path remains ONLY as the arms-missing fallback (`model_scale`/`model_yaw`/
+  `model_offset` keys still feed it + `DrawWeaponDisplay`).
+- **Hand placement root-caused and fixed.** `--screenshot-viewmodels` used
+  to capture a SINGLE frame per weapon — i.e. frame 1 of the `raise` clip —
+  so the old `gunGrip[]` values had been tuned against a mid-raise pose and
+  were systematically wrong in the settled idle. The devtool now renders
+  75 settle frames (~1.25 s at 60 fps) before each capture. Since the gun
+  OBJs are authored origin-at-grip, the correct seat is `vm_grip_pos 0 0 0`
+  for every gun (raygun keeps `vm_grip_scale 0.65`). Do NOT "re-tune" grip
+  rotations to fight the idle pose — the OBJ orientation is correct; if a
+  future gun needs a nudge it's a small `vm_grip_pos` edit + rerun (no
+  recompile — `.weapon` files are parsed at boot).
+
+Feature pass (2026-06-12, earlier — commits a8b1cfb, c4170d6, 2cf6c3b, b362902):
 
 - **gunGrip[] tuned** (a8b1cfb): all 4 non-pistol guns now sit correctly in
   the shared arms (SMG/shotgun/rifle pos-only nudges, raygun scale 0.65).
@@ -506,7 +543,7 @@ is one translation unit per responsibility, sharing `types.h`:
 | `assets.{c,h}`    | `propModels[]`, `textures[]`, `worldShader`, `skyShader`, fog globals, `TILE_SIZE`. (Weapon storage moved out — see `weapons.{c,h}`.) |
 | `level.{c,h}`     | Map tokeniser + parser, `Level_Validate`, `obstacles/walls/doors/windows/mapProps`, `Level_Reset`, `UnstickXZ`, `Level_PathClearXZ` (AI lookahead), `PROP_DEFS[]` |
 | `player.{c,h}`    | `players[]`, look/move, sprint/crouch, stamina, sprintBlend, push-out |
-| `weapons.{c,h}`   | `WEAPONS[]` (mutable, populated by `Weapons_Load` from `.weapon` files), `weaponModels[]`, `weaponTune[]`, fire/reload/melee, fire-mode + recoil + dropoff |
+| `weapons.{c,h}`   | `WEAPONS[]`/`weaponTune[]`/`weaponGrip[]` (plain storage — `.weapon` files are the single source of truth, loaded by `Weapons_Load`), `weaponModels[]`, fire/reload/melee, fire-mode + recoil + dropoff + sfx/haptic/mbox-weight routing |
 | `entities.{c,h}`  | `enemies[]`, `bullets[]`, `powerUps[]`, per-type zombie AI (lunge/weave/steamroll), proactive obstacle probing, damage→downed→dead transition |
 | `interact.{c,h}`  | Wall-buys, perks, PaP, doors, repairs, revive, Mystery Box |
 | `perks.{c,h}`     | Perk effects (jug/speed/dtap/stamin)                   |
@@ -514,7 +551,7 @@ is one translation unit per responsibility, sharing `types.h`:
 | `protocol.{c,h}`  | Serialization (`SerPlayer`, `SerEnemy`, `PktSnapshotHeader`) |
 | `net.{c,h}`       | enet wrapper, `Net_GetLocalIPs` for the host's join prompt |
 | `render.{c,h}`    | 3D world draw (model-first with cube fallbacks), textured walls/floor via rlgl, fog/sky/lit shader swap, tracer billboards |
-| `viewmodel.{c,h}` | First-person viewmodel system: shared arms VM (`arms_vm.glb`) + bone-bolted gun, `GunGrip`/`gunGrip[]` table, procedural walk-bob/sprint motion, `Viewmodel_LoadArms`/`Viewmodel_UnloadArms`, `Viewmodel_DrawFirstPerson(Camera)` |
+| `viewmodel.{c,h}` | First-person viewmodel system: shared arms VM (`arms_vm.glb`) + bone-bolted gun for ALL 5 guns (seating from `weaponGrip[]`, i.e. `.weapon` `vm_grip_*` keys), procedural walk-bob/sprint motion, `Viewmodel_LoadArms`/`Viewmodel_UnloadArms`, `Viewmodel_DrawFirstPerson(Camera)` |
 | `devtools.{c,h}`  | The 5 CLI debug/validation modes (`--validate`, `--screenshot-viewmodels`, `--screenshot-coop`, `--screenshot-pap`, `--anim-test`) behind `Devtools_HandleCLI(argc, argv, &exitCode)` |
 | `decals.{c,h}`    | 96-slot ring buffer for blood + impact decals, drawn from `Render_World3D` |
 | `anim.{c,h}`      | Skeletal animation pipeline. `AnimModel` (shared skinned glTF + clips) + per-instance `AnimState`; load/find-clip/update/draw via raylib 5.5 GPU skinning. `Anim_Pose` (pose without draw, for custom transforms), `Anim_FindBone`/`Anim_BoneMatrix` (bolt a separate object — e.g. a gun — onto a skeleton bone) |
@@ -711,22 +748,24 @@ data/
     (the OBJ's `-Z` muzzle / `+Y` up → `+Y` muzzle / `+Z` up to match the
     arms-forward frame), then applies the per-gun `gunGrip[wi]` `scale`/`rotDeg`/
     `pos` nudge in hand-local metres.
-  - **Pistol stays on the OBJ path.** The M1911 was originally authored as a
-    combined `pistol_vm.glb` (arms+gun in one rig), but the combined glb path
-    (`DrawPistolViewmodelGLB`) was removed — `W_PISTOL` uses the gun-only
-    floating OBJ path in `Viewmodel_DrawFirstPerson`. `pistol_vm.glb` is kept
-    on disk (authored content) but is currently unused. Don't route the pistol
-    through the arms path; it has no separate gun OBJ to bolt.
+  - **Pistol rides the arms path too (since ef1afe2).** The old
+    `wi != W_PISTOL` gate is gone — `pistol.obj` bolts onto hand.R like every
+    other gun. `pistol_vm.glb` is still on disk (authored content, unused).
+    The gun-only floating OBJ path survives only as the fallback when
+    `arms_vm.glb` is missing.
   - **Two shaders, two flat-light overrides.** Arms are skinned
     (`worldSkinnedShader`); the gun is a rigid OBJ (`worldShader`). Each gets its
     own flat sun/ambient override (restored after) so neither colour-swings —
     note the gun's override is darker (it's gunmetal, not skin).
-  - **Grips are tuned (2026-06-12, a8b1cfb).** `gunGrip[]` in `viewmodel.c`:
-    SMG {0.04,-0.12,0.05}, shotgun {0.03,-0.14,0.05}, rifle {0.03,-0.18,0.04}
-    (all scale 1.0, no rot), raygun {0.08,-0.10,0.04} scale 0.65. If a new gun
-    is added, dial its entry the same way via `--screenshot-viewmodels`. The
-    arms model is authored at real metric; one `VM_SCALE` (0.62) sizes the
-    whole assembly.
+  - **Grips are data-driven + re-seated (ef1afe2).** Seating lives in the
+    `vm_grip_pos/rot/scale` keys of each `.weapon` file (`weaponGrip[]` is
+    just storage). Because the gun OBJs are authored origin-at-grip, every
+    gun seats at `vm_grip_pos 0 0 0` (raygun `vm_grip_scale 0.65`). The old
+    a8b1cfb `gunGrip[]` numbers were tuned against a mid-raise screenshot
+    pose (single-frame devtool bug, fixed) — don't resurrect them. The arms
+    model is authored at real metric; one `VM_SCALE` (0.62) sizes the whole
+    assembly. New gun = edit keys, rerun `--screenshot-viewmodels`, no
+    recompile.
   - **Falls back gracefully.** If `arms_vm.glb` is missing or has no `hand.R`
     bone, `Viewmodel_DrawFirstPerson` drops through to the legacy procedural
     gun-only OBJ viewmodel for those 4 guns — nothing crashes.
@@ -743,8 +782,8 @@ data/
     `Game_Tick`). Downed players don't regen.
   - **Points** (`entities.c` bullet hit): 10 / hitmarker, 60 body kill,
     100 headshot kill, 130 melee. Don't re-add a non-kill headshot bonus.
-  - **Weapon stats** live in the `.weapon` files (the compiled `WEAPONS[]`
-    defaults are only fallbacks — edit BOTH). Base damages: M1911 40,
+  - **Weapon stats** live ONLY in the `.weapon` files (since ef1afe2 there
+    are no compiled-in stats — edit the file, done). Base damages: M1911 40,
     MP5 35, Olympia 60/pellet, M14 100 (now SEMI, not burst), Ray Gun 1000
     + 500 splash. **Pack-a-Punch** = damage ×2.5, mag ×2, reserve ×2
     (`weapons.c::Weapon_Eff*`).

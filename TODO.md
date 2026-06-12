@@ -136,6 +136,17 @@ connectivity auditor). Remaining work is authoring + per-entity wiring:
       low priority.
 
 ### Weapons polish (architecture is in)
+- [x] **Weapon system fully data-driven (ef1afe2).** No compiled-in stats:
+      `.weapon` files are the single source of truth (loud per-slot error if
+      one is missing). New keys: `sfx`, `haptic`, `mbox_weight`,
+      `vm_grip_pos/rot/scale`. M1911 unified onto the shared arms path;
+      hand placement root-caused (grips had been tuned against a mid-raise
+      pose — the screenshot devtool captured frame 1 of `raise`; it now
+      settles 75 frames first) and re-seated at `vm_grip_pos 0 0 0`.
+  - [ ] **In-game feel check of the re-seated grips** — verify in actual
+        play (ADS, sprint, reload) and fine-tune per-gun `vm_grip_pos` in
+        the `.weapon` files if any gun rides oddly. Box odds change to
+        flag on playtest: raygun `mbox_weight 0.5` (~11% vs old 20%).
 - [x] **Verify the 5 new viewmodels in first-person** — done via
       `--screenshot-viewmodels` CLI mode. Sizes look right; pistol
       bumped to `model_scale 15`. Tune individual `model_scale` /
@@ -225,7 +236,9 @@ connectivity auditor). Remaining work is authoring + per-entity wiring:
 - [ ] **CI**: GitHub Action that runs `./build/shooter --validate` on
       every `data/maps/*.map` and fails the build on any error.
 - [ ] **`tests/weapon_parser_test.c`** — `.weapon` files now have
-      enough machinery to deserve a fixture-based test too.
+      enough machinery to deserve a fixture-based test too. Higher value
+      since ef1afe2: the files are the ONLY source of weapon stats (no
+      compiled fallbacks), so a malformed file = a broken weapon.
 
 ## Mid-term
 

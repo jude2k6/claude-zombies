@@ -28,8 +28,8 @@ Built end-to-end with [Claude Code](https://claude.com/claude-code).
   grenade; start with 2 of each, capped at 4
 - **Pack-a-Punch** — spend points to upgrade a weapon (damage ×2.5, mag ×2,
   reserve ×2, new name)
-- **Mystery Box** — $950 to roll a random weapon (decelerating slow-roll);
-  the owner has a few seconds to take it
+- **Mystery Box** — $950 to roll a random weapon (decelerating slow-roll,
+  weighted so the Ray Gun is rarer); the owner has a few seconds to take it
 - **Power-ups** — Max Ammo, Nuke, Double Points, Insta-Kill, Carpenter drop
   from kills
 - **4 perks** — Juggernog (more HP), Speed Cola (faster reload),
@@ -158,7 +158,9 @@ src/{net,protocol}    networking (enet wrapper + snapshot serialization)
 src/{audio,pad,settings}                                 sfx, gamepad, bindings
 data/maps/*.map       map definitions (compact text grammar)
 data/models/          props + rigged glTF models (+ ASSETS.md spec)
-data/weapons/<name>/  per-weapon .weapon defs + models
+data/weapons/<name>/  per-weapon .weapon defs + models (single source of
+                      truth — stats, sfx, haptics, box odds, viewmodel grip
+                      are all file keys; no stats are compiled in)
 data/shaders/         world (lit + fog), world_skinned (GPU skinning), sky, postfx
 ```
 

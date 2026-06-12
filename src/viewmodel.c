@@ -48,10 +48,13 @@ void Viewmodel_UnloadArms(void) {
 // against the arms. Tuned via --screenshot-viewmodels.
 typedef struct { Vector3 pos; Vector3 rotDeg; float scale; } GunGrip;
 static GunGrip gunGrip[W_COUNT] = {
-    [W_SMG]     = { {0, 0, 0}, {0, 0, 0}, 1.0f },
-    [W_SHOTGUN] = { {0, 0, 0}, {0, 0, 0}, 1.0f },
-    [W_RIFLE]   = { {0, 0, 0}, {0, 0, 0}, 1.0f },
-    [W_RAYGUN]  = { {0, 0, 0}, {0, 0, 0}, 1.0f },
+    // pos is in bone-local frame (after base +90deg X rotation applied to gun).
+    // +x=right, +y=toward muzzle (gun forward), +z=up in hand bone frame.
+    // Empirically: pos.x positive moves gun right on screen.
+    [W_SMG]     = { {0.04f, -0.12f, 0.05f}, {0, 0, 0}, 1.0f },
+    [W_SHOTGUN] = { {0.03f, -0.14f, 0.05f}, {0, 0, 0}, 1.0f },
+    [W_RIFLE]   = { {0.03f, -0.18f, 0.04f}, {0, 0, 0}, 1.0f },
+    [W_RAYGUN]  = { {0.08f, -0.10f, 0.04f}, {0, 0, 0}, 0.65f },
 };
 
 // Procedural viewmodel movement: a gentle bob while walking and a stronger

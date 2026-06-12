@@ -15,6 +15,7 @@
 #include "game.h"
 #include "protocol.h"
 #include "render.h"
+#include "viewmodel.h"
 #include "hud.h"
 #include "menu.h"
 #include "pad.h"
@@ -183,7 +184,7 @@ int main(int argc, char **argv) {
         Weapons_Load();
         Assets_Load();
         Assets_ApplyWorldShader();
-        Render_LoadArmsVM();     // shared arms + bolted gun for the other 4
+        Viewmodel_LoadArms();     // shared arms + bolted gun for the other 4
 
         // Need a minimal level so Render_World3D doesn't barf on the
         // walls/floor draw paths. Level_Build initializes the hardcoded
@@ -501,7 +502,7 @@ int main(int argc, char **argv) {
     Weapons_Load();   // must run before Assets_Load — Assets_ApplyWorldShader iterates weaponModels[]
     Assets_Load();
     Render_LoadZombieAnim();   // shared rigged zombie.glb (skinned shader from Assets_Load)
-    Render_LoadArmsVM();       // shared first-person arms (non-pistol guns bolt onto hand.R)
+    Viewmodel_LoadArms();       // shared first-person arms (non-pistol guns bolt onto hand.R)
     Render_LoadPlayerAnim();   // rigged third-person soldier for co-op teammates
     Settings_Load();
     Decals_Init();
@@ -738,7 +739,7 @@ int main(int argc, char **argv) {
 
     Settings_Save();
     Render_UnloadZombieAnim();
-    Render_UnloadArmsVM();
+    Viewmodel_UnloadArms();
     Render_UnloadPlayerAnim();
     Assets_Unload();
     Weapons_Unload();

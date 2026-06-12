@@ -53,6 +53,7 @@ add_executable(shooter
     src/game.c
     src/protocol.c
     src/render.c
+    src/viewmodel.c
     src/hud.c
     src/menu.c
     src/pad.c

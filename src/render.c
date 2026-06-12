@@ -15,6 +15,15 @@
 #include <math.h>
 #include <stdio.h>
 
+// ---- post-FX render target --------------------------------------------------
+// One fullscreen RenderTexture2D. Recreated whenever the window size changes.
+// When postfxShaderLoaded == false the three public functions are no-ops so
+// the render path degrades gracefully to the pre-RT behaviour.
+static RenderTexture2D postfxRT;
+static int             postfxRT_w = 0;
+static int             postfxRT_h = 0;
+static bool            postfxRT_active = false;  // between Begin/EndPostFX
+
 // ---- shared rigged zombie (glTF skeletal animation) --------------------
 // One shared skinned model + clips; each enemy slot carries a lightweight,
 // render-local AnimState (clip + time). Driven entirely from DrawEnemy with
@@ -981,6 +990,60 @@ static void DrawTracers(Camera camera) {
     }
     rlEnd();
     rlEnableBackfaceCulling();
+}
+
+// Ensure the RT exists and matches the current window size. Called lazily from
+// BeginPostFX each frame so resize / F11 is handled automatically.
+static void PostFX_EnsureRT(int w, int h) {
+    if (postfxRT_w == w && postfxRT_h == h) return;
+    if (postfxRT_w > 0) UnloadRenderTexture(postfxRT);
+    postfxRT   = LoadRenderTexture(w, h);
+    postfxRT_w = w;
+    postfxRT_h = h;
+}
+
+void Render_BeginPostFX(void) {
+    if (!postfxShaderLoaded) return;
+    int w = GetScreenWidth();
+    int h = GetScreenHeight();
+    PostFX_EnsureRT(w, h);
+    BeginTextureMode(postfxRT);
+    postfxRT_active = true;
+}
+
+void Render_EndPostFX(float hitFlash, float lowHp) {
+    if (!postfxShaderLoaded) return;
+    if (postfxRT_active) {
+        EndTextureMode();
+        postfxRT_active = false;
+    }
+    int w = postfxRT_w;
+    int h = postfxRT_h;
+
+    // Push per-frame uniforms before the quad draw.
+    float res[2] = { (float)w, (float)h };
+    float t      = (float)GetTime();
+    SetShaderValue(postfxShader, postfxShader_resolutionLoc, res,      SHADER_UNIFORM_VEC2);
+    SetShaderValue(postfxShader, postfxShader_timeLoc,       &t,       SHADER_UNIFORM_FLOAT);
+    SetShaderValue(postfxShader, postfxShader_hitFlashLoc,   &hitFlash, SHADER_UNIFORM_FLOAT);
+    SetShaderValue(postfxShader, postfxShader_lowHpLoc,      &lowHp,   SHADER_UNIFORM_FLOAT);
+
+    // Draw fullscreen quad. Source rect uses negative height so the texture
+    // is not drawn upside-down (raylib RT textures flip V relative to screen).
+    BeginShaderMode(postfxShader);
+    DrawTextureRec(postfxRT.texture,
+                   (Rectangle){ 0, 0, (float)w, -(float)h },
+                   (Vector2){ 0, 0 },
+                   WHITE);
+    EndShaderMode();
+}
+
+void Render_UnloadPostFX(void) {
+    if (postfxRT_w > 0) {
+        UnloadRenderTexture(postfxRT);
+        postfxRT_w = 0;
+        postfxRT_h = 0;
+    }
 }
 
 void Render_World3D(Camera camera) {

@@ -65,6 +65,13 @@ Shader skyShader;
 bool   skyShaderLoaded;
 Model  skyModel;
 
+Shader postfxShader;
+bool   postfxShaderLoaded;
+int    postfxShader_resolutionLoc;
+int    postfxShader_timeLoc;
+int    postfxShader_hitFlashLoc;
+int    postfxShader_lowHpLoc;
+
 // Defaults match the night-sky aesthetic and Nacht's interior scale.
 // Tweak per-map by editing these globals before Render_World3D.
 float fogStart = 10.0f;
@@ -220,6 +227,28 @@ void Assets_Load(void) {
         fprintf(stderr, "shader: sky.{vs,fs} not found, sky disabled\n");
     }
 
+    // Post-FX fullscreen shader (postfx.fs — no vertex shader; use raylib's
+    // default VS which emits gl_Position from vertexPosition directly).
+    postfxShaderLoaded = false;
+    for (size_t p = 0; p < sizeof shaderPrefixes / sizeof shaderPrefixes[0]; p++) {
+        char fsPath[512];
+        snprintf(fsPath, sizeof fsPath, "%s%s", shaderPrefixes[p], "postfx.fs");
+        if (!FileExists(fsPath)) continue;
+        // NULL vertex shader = raylib's built-in passthrough VS
+        postfxShader = LoadShader(NULL, fsPath);
+        if (postfxShader.id == 0 || postfxShader.id == rlGetShaderIdDefault()) continue;
+        postfxShaderLoaded         = true;
+        postfxShader_resolutionLoc = GetShaderLocation(postfxShader, "resolution");
+        postfxShader_timeLoc       = GetShaderLocation(postfxShader, "time");
+        postfxShader_hitFlashLoc   = GetShaderLocation(postfxShader, "hitFlash");
+        postfxShader_lowHpLoc      = GetShaderLocation(postfxShader, "lowHp");
+        fprintf(stderr, "shader: loaded %spostfx.fs\n", shaderPrefixes[p]);
+        break;
+    }
+    if (!postfxShaderLoaded) {
+        fprintf(stderr, "shader: postfx.fs not found, post-FX disabled\n");
+    }
+
     Assets_ApplyWorldShader();
 }
 
@@ -268,5 +297,9 @@ void Assets_Unload(void) {
     if (worldSkinnedShaderLoaded) {
         UnloadShader(worldSkinnedShader);
         worldSkinnedShaderLoaded = false;
+    }
+    if (postfxShaderLoaded) {
+        UnloadShader(postfxShader);
+        postfxShaderLoaded = false;
     }
 }

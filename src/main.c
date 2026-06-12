@@ -35,6 +35,15 @@
 static float snapshotAccum = 0.0f;
 static float inputAccum    = 0.0f;
 
+// ---- Post-FX state ---------------------------------------------------------
+// hitFlash: spikes to 1.0 when the local player's HP drops in a single frame
+// (damage taken), then decays over ~0.35 s. Does NOT trigger on HP gains
+// (regen, Juggernog) or large upward jumps (respawn: hp reset from 0 -> max).
+// lowHp: rises as HP falls below ~40% of max; 1.0 when downed.
+static float postfx_hitFlash     = 0.0f;
+static float postfx_lowHp        = 0.0f;
+static int   postfx_prevHp       = -1;   // -1 = uninitialised (first frame)
+
 // Spectator camera state (used while local player is dead, or via F4 noclip cheat)
 static Vector3 specPos;
 static float   specYaw   = 0.0f;
@@ -210,6 +219,9 @@ int main(int argc, char **argv) {
         bool wantCursor = (uiState != UI_PLAY);
         if (uiState != prevUi) {
             if (wantCursor) EnableCursor(); else DisableCursor();
+            // Leaving gameplay → menu: invalidate prevHp so re-entering doesn't
+            // false-trigger a hit-flash (HP is reset between rounds/restarts).
+            if (uiState != UI_PLAY && uiState != UI_PAUSE) postfx_prevHp = -1;
             prevUi = uiState;
         }
 
@@ -332,6 +344,40 @@ int main(int argc, char **argv) {
         Fx_Tick(dt);
         if (uiState == UI_PLAY) Audio_Tick(me);
 
+        // ---- Post-FX state update -------------------------------------------
+        // Only when in gameplay (UI_PLAY or UI_PAUSE) and me is a valid player.
+        if (uiState == UI_PLAY || uiState == UI_PAUSE) {
+            int curHp = me->hp;
+            int maxHp = Perk_EffMaxHP(me);
+
+            // hitFlash: spike on damage, decay toward 0
+            if (postfx_prevHp >= 0 && curHp < postfx_prevHp) {
+                // HP dropped: spike to 1.0
+                postfx_hitFlash = 1.0f;
+            }
+            postfx_hitFlash -= dt / 0.35f;
+            if (postfx_hitFlash < 0.0f) postfx_hitFlash = 0.0f;
+            postfx_prevHp = curHp;
+
+            // lowHp: 0 when hp >= 40% max, ramps to 1.0 as hp → 0.
+            // Force 1.0 while downed.
+            float targetLowHp;
+            if (me->downed) {
+                targetLowHp = 1.0f;
+            } else {
+                float threshold = (float)maxHp * 0.4f;
+                float ratio = ((float)curHp - 0.0f) / fmaxf(threshold, 1.0f);
+                // ratio: 1.0 at threshold, 0.0 at 0 hp — clamp to [0,1]
+                ratio = 1.0f - fminf(1.0f, fmaxf(0.0f, ratio));
+                // ratio is now 0 at full HP, 1 at 0 HP, but only active below threshold
+                targetLowHp = (curHp < (int)threshold) ? ratio : 0.0f;
+            }
+            // Smooth toward target (~0.15 s to settle)
+            postfx_lowHp += (targetLowHp - postfx_lowHp) * (1.0f - expf(-dt / 0.15f));
+            if (postfx_lowHp < 0.001f) postfx_lowHp = 0.0f;
+        }
+        // ---- End post-FX state update ----------------------------------------
+
         float eyeY = me->pos.y;
         if (meDowned) eyeY = me->pos.y - 1.1f; // prone
         else if (me->alive && !noclipMode && uiState == UI_PLAY && (IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_C))) eyeY -= 0.6f;
@@ -408,8 +454,15 @@ int main(int argc, char **argv) {
         } else if (uiState == UI_CLIENT_LOBBY) {
             Menu_DrawLobby(sw, sh, false);
         } else {
+            // World pass — rendered into the post-FX RT when the shader loaded.
+            // Render_BeginPostFX / EndPostFX are no-ops when shader is missing.
+            Render_BeginPostFX();
+            ClearBackground((Color){20,25,35,255});
             Render_World3D(camera);
             Render_WorldLabels(camera, sw, sh, me);
+            Render_EndPostFX(postfx_hitFlash, postfx_lowHp);
+            // HUD and menus are drawn AFTER EndPostFX — they must not be
+            // post-processed (would apply bloom/vignette to the HUD).
             Hud_Draw(sw, sh, me, (uiState == UI_PLAY) ? ix : (Interact){ IK_NONE, -1, 0 });
             if (uiState == UI_PAUSE) Menu_DrawPause(sw, sh);
             if (gamePhase == GS_GAME_OVER) Menu_DrawGameOver(sw, sh);
@@ -420,6 +473,7 @@ int main(int argc, char **argv) {
     }
 
     Settings_Save();
+    Render_UnloadPostFX();
     Render_UnloadZombieAnim();
     Viewmodel_UnloadArms();
     Render_UnloadPlayerAnim();

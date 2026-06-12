@@ -486,6 +486,74 @@ static int Dev_ScreenshotParticles(void) {
     return 0;
 }
 
+// ---- --screenshot-postfx ---------------------------------------------------
+// Renders the world scene through the post-FX pipeline three times and saves
+// each as a separate PNG:
+//   postfx_baseline.png  — hitFlash=0 / lowHp=0   (vignette + bloom only)
+//   postfx_hitflash.png  — hitFlash=0.8            (red-tinted edges)
+//   postfx_lowhp.png     — lowHp=0.9               (desaturated heartbeat pulse)
+// Passes the hitFlash / lowHp values directly to Render_EndPostFX.
+
+static int Dev_ScreenshotPostFX(void) {
+    SetTraceLogLevel(LOG_WARNING);
+    SetConfigFlags(FLAG_MSAA_4X_HINT);
+    InitWindow(1280, 720, "Post-FX screenshot");
+    SetTargetFPS(60);
+    Weapons_Load();
+    Assets_Load();
+    Assets_ApplyWorldShader();
+    Level_Build();
+
+    localPlayerIdx = 0;
+    for (int i = 0; i < NET_MAX_PLAYERS; i++) memset(&players[i], 0, sizeof players[i]);
+    players[0].active = true; players[0].alive = true;
+    players[0].pos = (Vector3){ 0, PLAYER_EYE, 0 };
+    players[0].yaw = 0.0f;
+    players[0].pitch = 0.0f;
+
+    Camera cam = {
+        .position   = (Vector3){ 0, PLAYER_EYE, 5.0f },
+        .target     = (Vector3){ 0, PLAYER_EYE, 0 },
+        .up         = (Vector3){ 0, 1, 0 },
+        .fovy       = 75.0f,
+        .projection = CAMERA_PERSPECTIVE,
+    };
+
+    // Warm-up frames to get a stable dt and let the shader load settle.
+    for (int f = 0; f < 10; f++) {
+        BeginDrawing();
+        ClearBackground((Color){ 20, 25, 35, 255 });
+        Render_BeginPostFX();
+        ClearBackground((Color){ 20, 25, 35, 255 });
+        Render_World3D(cam);
+        Render_EndPostFX(0.0f, 0.0f);
+        EndDrawing();
+    }
+
+    struct { const char *name; float hitFlash; float lowHp; } shots[] = {
+        { "postfx_baseline.png",  0.0f, 0.0f },
+        { "postfx_hitflash.png",  0.8f, 0.0f },
+        { "postfx_lowhp.png",     0.0f, 0.9f },
+    };
+    for (int s = 0; s < 3; s++) {
+        BeginDrawing();
+        ClearBackground((Color){ 20, 25, 35, 255 });
+        Render_BeginPostFX();
+        ClearBackground((Color){ 20, 25, 35, 255 });
+        Render_World3D(cam);
+        Render_EndPostFX(shots[s].hitFlash, shots[s].lowHp);
+        TakeScreenshot(shots[s].name);
+        EndDrawing();
+        fprintf(stderr, "wrote %s  (hitFlash=%.1f lowHp=%.1f)\n",
+                shots[s].name, shots[s].hitFlash, shots[s].lowHp);
+    }
+
+    Render_UnloadPostFX();
+    Assets_Unload(); Weapons_Unload();
+    CloseWindow();
+    return 0;
+}
+
 // ---- dispatcher ------------------------------------------------------------
 
 bool Devtools_HandleCLI(int argc, char **argv, int *exitCode) {
@@ -511,6 +579,10 @@ bool Devtools_HandleCLI(int argc, char **argv, int *exitCode) {
     }
     if (argc >= 2 && strcmp(argv[1], "--screenshot-particles") == 0) {
         *exitCode = Dev_ScreenshotParticles();
+        return true;
+    }
+    if (argc >= 2 && strcmp(argv[1], "--screenshot-postfx") == 0) {
+        *exitCode = Dev_ScreenshotPostFX();
         return true;
     }
     if (argc >= 3 && strcmp(argv[1], "--anim-test") == 0) {

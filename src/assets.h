@@ -93,6 +93,15 @@ extern Shader skyShader;
 extern bool   skyShaderLoaded;
 extern Model  skyModel;             // unit cube, materials[0].shader = skyShader
 
+// Post-process fullscreen-quad shader (postfx.fs). Loaded alongside the world
+// shaders; postfxShaderLoaded == false triggers the "no RT, draw direct" path.
+extern Shader postfxShader;
+extern bool   postfxShaderLoaded;
+extern int    postfxShader_resolutionLoc;
+extern int    postfxShader_timeLoc;
+extern int    postfxShader_hitFlashLoc;
+extern int    postfxShader_lowHpLoc;
+
 // Tuning the renderer applies to worldShader every frame.
 extern float   fogStart;
 extern float   fogEnd;

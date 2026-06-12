@@ -12,46 +12,37 @@ it. What follows is the drift + hygiene found auditing the code against
 HANDOFF/README, ordered by priority.
 
 ### Dead code & waste
-- [ ] **Remove the dead pistol-glb viewmodel path.** `render.c:
-      DrawPistolViewmodelGLB` has been unreferenced since the 2026-06-03
-      "take the arms away" change, but `Render_LoadPistolVM()` is STILL
-      called at boot (`main.c:505`) and in `--screenshot-viewmodels`
-      (`main.c:186`) — it loads `pistol_vm.glb` + applies the skinned
-      shader for a model that is never drawn. Delete the function, the
-      `pistolVM`/`pistolVMState`/`pvm*` statics, `Render_{Load,Unload}
-      PistolVM` (render.h too), and the three main.c call sites. Keep the
-      `.glb` on disk — it's authored content that may come back.
-- [ ] **Drop `data/models/weapons/{revolver,sniper}.{obj,mtl}`** — legacy
-      Quaternius holdouts, wired to nothing.
+- [x] **Remove the dead pistol-glb viewmodel path.** `DrawPistolViewmodelGLB`,
+      the `pistolVM`/`pistolVMState`/`pvm*` statics, `Render_{Load,Unload}
+      PistolVM` (render.c/render.h), and all main.c call sites deleted (772606f).
+      `pistol_vm.glb` kept on disk; `W_PISTOL` uses the gun-only OBJ path.
+- [x] **Drop `data/models/weapons/{revolver,sniper}.{obj,mtl}`** — deleted
+      (c23bab9); referenced nowhere.
 
 ### Warnings & safety nets
-- [ ] **Enable `-Wall -Wextra` for GCC/Clang** — CMakeLists only sets MSVC
-      `/W3`; HANDOFF even leans on "no -Wall so no warning" to excuse dead
-      code. The current backlog is tiny: 5× misleading-indentation
-      one-line clamps (`fx.c:35-36`, `hud.c:255,260`, `render.c:902`),
-      1 sign-compare (`audio.c:65`), 1 unused-but-set
-      (`audio.c:352 lastCurrentSlot`). Fix those, then add the flags.
-- [ ] **`strdup` under strict C11** (`weapons.c:437`) — implicit decl →
-      int-to-pointer truncation if anyone builds with `-std=c11` proper
-      (we currently survive on CMake's gnu11 default). Use a tiny local
-      `xstrdup` or `#define _POSIX_C_SOURCE 200809L`.
-- [ ] **Add an ASan build option** — the raylib OBJ patch removed the old
-      "ASan can't be enabled" blocker. `option(SHOOTER_ASAN OFF)` +
-      `-fsanitize=address,undefined` on Debug.
+- [x] **Enable `-Wall -Wextra` for GCC/Clang** — done (a0468ba); all warning
+      backlog fixed (b1c6d7b): misleading-indentation clamps in fx.c/hud.c,
+      sign-compare + unused-var in audio.c. `-Wno-unused-parameter` added to
+      suppress the intentional ones. Remaining: a few `-Wstringop-truncation`
+      warnings from `strncpy` in net.c/level.c/settings.c/main.c — harmless,
+      not yet addressed.
+  - [ ] **Fix `-Wstringop-truncation` `strncpy` warnings** in
+        net.c/level.c/settings.c/main.c.
+- [x] **`strdup` under strict C11** — replaced with a local `xstrdup` in
+      `weapons.c` (b1c6d7b); strict-C11 safe.
+- [x] **Add an ASan build option** — `option(SHOOTER_ASAN OFF)` +
+      `-fsanitize=address,undefined` added to CMakeLists.txt (a0468ba).
 - [ ] **CI + parser tests** — tracked under Infrastructure below; listed
       here because it's the backstop that keeps all of this honest.
 
 ### Oversized translation units (mechanical splits, no behaviour change)
-- [ ] **`render.c` (1582 lines) → carve out `viewmodel.c`.** The whole
-      first-person system — `DrawFirstPersonViewmodel`, `DrawArmsViewmodel`,
-      `ViewmodelMotion`, `gunGrip[]`, the arms/pistol VM loaders + statics,
-      `muzzleFlashLocal` — is ~550 self-contained lines with a clean seam
-      (load/unload + one draw(camera) entry point).
-- [ ] **`main.c` (752 lines — HANDOFF still claims ~360) → `devtools.c`.**
-      The 4 CLI modes (`--screenshot-viewmodels` / `--screenshot-coop` /
-      `--screenshot-pap` / `--anim-test`) are ~330 lines of debug harness
-      inside `main()`. One `bool Devtools_HandleCLI(int argc, char **argv)`
-      and main.c is "just the game loop" again.
+- [x] **`render.c` → `viewmodel.{c,h}`** — carved out (491b5c1, 352 lines):
+      `Viewmodel_DrawFirstPerson`, `DrawArmsViewmodel`, `ViewmodelMotion`,
+      `GunGrip`/`gunGrip[]`, `Viewmodel_LoadArms`/`Viewmodel_UnloadArms`.
+      render.c is now 1116 lines.
+- [x] **`main.c` → `devtools.{c,h}`** — carved out (7d56ffb, 363 lines):
+      all 5 CLI modes behind `Devtools_HandleCLI(argc, argv, &exitCode)`.
+      main.c is now 431 lines — entry + main loop only.
 - [ ] **`entities.c` (953 lines) — optional.** It's really 4 systems
       (enemies AI, bullets, throwables, powerups) in one file, but they're
       stable; split only if it starts churning.
@@ -67,16 +58,14 @@ HANDOFF/README, ordered by priority.
       same family of fix.
 
 ### Doc drift (HANDOFF/README vs code — align one side)
-- [ ] HANDOFF "Current state" still says the arms-VM pass is *uncommitted*;
-      it landed in `6c794a7`. It also predates the two Pack-a-Punch commits
-      (`3619151`, `39dc856`). Refresh the header section.
-- [ ] HANDOFF "Map engine limits" says `MAX_INTERIOR_WALLS=16`; `types.h`
-      says **32**.
-- [ ] Scoring mismatch: HANDOFF/README/TODO all say 60 body kill / 100
-      headshot kill, but the code is `KILL_POINTS 50` + 40 headshot bonus
-      = **50 / 90** (`entities.c:648`). Decide which was the CoD balance
-      pass's intent and fix the other side.
-- [ ] README's dev-CLI list is missing `--screenshot-pap`.
+- [x] HANDOFF "Current state" refreshed: arms-VM pass noted as committed
+      (6c794a7), PaP commits (3619151, 39dc856) documented, architecture-
+      cleanup pass (772606f–c23bab9) described.
+- [x] HANDOFF "Map engine limits": `MAX_INTERIOR_WALLS=16` → **32** (matches
+      types.h).
+- [x] Scoring aligned: `KILL_POINTS` bumped 50 → 60 in types.h (c23bab9);
+      body kill = 60, headshot kill = 100. HANDOFF/README/TODO now match.
+- [x] README dev-CLI list: `--screenshot-pap` added.
 
 ## Next up (highest impact-per-effort)
 
@@ -103,24 +92,21 @@ connectivity auditor). Remaining work is authoring + per-entity wiring:
         blowback + recoil + hammer), `reload` 1.34s (mag swap, no rack),
         `reload_empty` 1.62s (slide locked back → release), `raise`/`lower`,
         `sprint`, `inspect`. Validated via `--anim-test`.
-  - [x] **Wired the vm.glb path into `render.c`** — `DrawPistolViewmodelGLB`
-        loads the shared `pistolVM` AnimModel (skinned shader), maps player
-        state to clips (raise on swap, fire on shot, reload/reload_empty by
-        mag-empty latch, sprint, idle), and draws it in camera space (model
-        +Y→fwd / +Z→up / +X→right) under flat lighting. Other 4 guns keep the
-        OBJ + procedural path. Shows in-game; verified via
-        `--screenshot-viewmodels`.
+  - [x] **Wired (then removed) the combined vm.glb path** — `DrawPistolViewmodelGLB`
+        was implemented and verified, then removed (772606f) per the "take the
+        arms away" request. `W_PISTOL` now uses the gun-only OBJ path in
+        `viewmodel.c:Viewmodel_DrawFirstPerson`.
   - [~] Roll the vm clip set across SMG / shotgun / rifle / raygun. **Engine
-        path built (2026-06-03, uncommitted):** a shared rigged
-        `data/models/arms_vm.glb` (arms+hands, full clip set) drives all 4
-        non-pistol guns via `render.c:DrawArmsViewmodel`; the equipped gun OBJ
-        is bolted onto the `hand.R` bone each frame (new `Anim_FindBone` /
-        `Anim_BoneMatrix`), so only the arms need a skin, not a combined glb per
-        gun. Same clip state machine as the pistol VM. **Remaining: tune the
-        per-gun `gunGrip[W_COUNT]` table** (pos/rotDeg/scale, currently all-zero
+        path is built and committed:** a shared rigged `data/models/arms_vm.glb`
+        (arms+hands, full clip set) drives all 4 non-pistol guns via
+        `viewmodel.c:DrawArmsViewmodel`; the equipped gun OBJ is bolted onto the
+        `hand.R` bone each frame (new `Anim_FindBone` / `Anim_BoneMatrix`), so
+        only the arms need a skin, not a combined glb per gun. Same clip state
+        machine as the pistol VM. **Remaining: tune the per-gun
+        `gunGrip[W_COUNT]` table** (pos/rotDeg/scale, currently all-zero
         placeholders) via `--screenshot-viewmodels` so each grip sits in the
-        hand and the muzzle points forward. The M1911 keeps its own combined
-        `pistol_vm.glb`. See HANDOFF "shared arms viewmodel" gotcha.
+        hand and the muzzle points forward. `W_PISTOL` uses the gun-only OBJ
+        path. See HANDOFF "shared arms viewmodel" gotcha.
 - [x] **Player third-person model** (`data/models/player.glb`) — authored +
       validated + WIRED. Rig-first soldier on the shared 17-bone humanoid family
       (same bone names as `zombie.glb`): skin-modifier stick-figure body in

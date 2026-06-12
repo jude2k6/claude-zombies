@@ -149,7 +149,8 @@ CMakeLists.txt        FetchContent for raylib / raygui / enet, per-OS link bits
 src/main.c            entry + main loop only
 src/types.h           shared structs / enums / constants
 src/{level,player,weapons,perks,entities,interact,game}  simulation
-src/{render,hud,menu,assets,decals,anim,fx}              presentation
+src/{render,viewmodel,hud,menu,assets,decals,anim,fx}    presentation
+src/devtools                                             dev/debug CLI modes
 src/{net,protocol}    networking (enet wrapper + snapshot serialization)
 src/{audio,pad,settings}                                 sfx, gamepad, bindings
 data/maps/*.map       map definitions (compact text grammar)
@@ -204,8 +205,9 @@ Other dev CLI modes: `--screenshot-viewmodels` (renders each weapon's
 first-person viewmodel to a PNG), `--screenshot-coop` (renders dummy
 teammates in every animation state — locomotion/reload/downed/dead/revive —
 so the third-person player model can be checked without a multiplayer game),
-and `--anim-test <file.glb> [clip]` (renders a skinned glTF model across an
-animation clip to verify it).
+`--screenshot-pap` (renders the Pack-a-Punch machine with the chamber open
+and a weapon inside), and `--anim-test <file.glb> [clip]` (renders a skinned
+glTF model across an animation clip to verify it).
 
 ## License
 

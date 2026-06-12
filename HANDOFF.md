@@ -12,25 +12,59 @@ and **enet 1.3.18** (all via CMake `FetchContent`). Host-authoritative
 
 Repo: `git@github.com:jude2k6/claude-zombies.git` · branch: `main`.
 
-## Current state (2026-06-03)
+## Current state (2026-06-12)
 
-Movement/viewmodel pass (2026-06-03) — **M1911 no longer uses `pistol_vm.glb`.**
-The combined arms+gun pistol viewmodel was dropped per request ("take the arms
-away"); `W_PISTOL` now takes the **gun-only floating OBJ path** in
-`DrawFirstPersonViewmodel` (the arms path is gated `wi != W_PISTOL`).
-`DrawPistolViewmodelGLB` + the `pistolVM` load are now dead code (kept,
-unreferenced; no `-Wall` so no warning) — remove if you want it gone. New
-`render.c:ViewmodelMotion(me, fwd, right, up, &pos, &tilt)` adds procedural
-**walk-bob** (sinusoidal, amplitude scales with the new `Player.moveBlend`) and
-a **sprint sink + muzzle-down tilt + high-freq shake** (scales with
-`sprintBlend`, settled by ADS); applied to both the gun-only path (pos+tilt) and
-the shared arms path (pos only, on top of its sprint clip). `Player.moveBlend`
-(new, local-only, eased like `sprintBlend`, set in `Player_ApplyLocalMove`) also
-**opens the crosshair** (`hud.c` bloom) and **degrades hip-fire accuracy**
+Architecture-cleanup pass (2026-06-12, commits 772606f–c23bab9):
+
+- **Dead pistol-glb path removed** (772606f): `DrawPistolViewmodelGLB`, the
+  `pistolVM` statics, and `Render_{Load,Unload}PistolVM` deleted from
+  render.c/render.h/main.c. `data/weapons/pistol/pistol_vm.glb` stays on disk
+  (authored content); `W_PISTOL` uses the gun-only procedural OBJ path.
+- **New TU `src/viewmodel.{c,h}`** (491b5c1, 352 lines): first-person viewmodel
+  system carved out of render.c — shared arms VM, `Viewmodel_LoadArms`/
+  `Viewmodel_UnloadArms` (renamed from `Render_Load/UnloadArmsVM`),
+  `ViewmodelMotion`, `GunGrip`/`gunGrip[]`, `DrawArmsViewmodel`, and
+  `Viewmodel_DrawFirstPerson(Camera)` (was `DrawFirstPersonViewmodel`). render.c
+  is now 1116 lines.
+- **New TU `src/devtools.{c,h}`** (7d56ffb, 363 lines): all five CLI debug modes
+  (`--validate`, `--screenshot-viewmodels`, `--screenshot-coop`,
+  `--screenshot-pap`, `--anim-test`) moved out of main.c behind
+  `Devtools_HandleCLI`. main.c is now 431 lines.
+- **Build flags** (a0468ba): `-Wall -Wextra -Wno-unused-parameter` now on for
+  GCC/Clang; new `option(SHOOTER_ASAN OFF)` adds `-fsanitize=address,undefined`.
+  A few pre-existing `-Wstringop-truncation` warnings from `strncpy` in
+  net.c/level.c/settings.c/main.c remain harmless and aren't yet addressed.
+- **All warnings fixed** (b1c6d7b): fx.c/hud.c indentation clamps, audio.c
+  sign-compare + unused var, weapons.c uses a local `xstrdup` (strict-C11 safe).
+- **Scoring aligned** (c23bab9): `KILL_POINTS` 50 → 60 in types.h; body kill =
+  60, headshot kill = 100 (existing +40 bonus). The documented 10/60/100/130 CoD
+  scoring is now true in code.
+- **Legacy assets deleted** (c23bab9): `data/models/weapons/{revolver,sniper}.
+  {obj,mtl}` — referenced nowhere.
+
+Pack-a-Punch pass (2026-06-04, commits 3619151 and 39dc856):
+
+- **CoD-style PaP machine** (`data/models/pap_machine.obj`): full-sized cabinet
+  authored in Blender — lit chamber baked in, procedural shutter animation and
+  spark/particle effects from `render.c`, `--screenshot-pap` dev mode added.
+- **Insert-weapon workflow** (3619151): player walks up and inserts the weapon;
+  machine "works" it (PaP upgrade applied), then player manually retrieves from
+  the chamber. Replaces the old instant-purchase interaction.
+
+Prior pass (2026-06-03) — committed as 6c794a7 and 6aa759d:
+
+**Movement/viewmodel pass** — `W_PISTOL` takes the **gun-only floating OBJ
+path** in `Viewmodel_DrawFirstPerson` (the arms path is gated `wi != W_PISTOL`).
+`ViewmodelMotion(me, fwd, right, up, &pos, &tilt)` adds procedural **walk-bob**
+(sinusoidal, amplitude scales with the new `Player.moveBlend`) and a **sprint
+sink + muzzle-down tilt + high-freq shake** (scales with `sprintBlend`, settled
+by ADS); applied to both the gun-only path (pos+tilt) and the shared arms path
+(pos only, on top of its sprint clip). `Player.moveBlend` (new, local-only,
+eased like `sprintBlend`, set in `Player_ApplyLocalMove`) also **opens the
+crosshair** (`hud.c` bloom) and **degrades hip-fire accuracy**
 (`weapons.c:Weapon_Fire` adds `moveBlend*1.2 + sprintBlend*3.5` deg of spread,
-×0.25 in ADS). MP caveat: moveBlend/sprintBlend are local-only, so remote
-players' shots aren't movement-penalised on the host (same caveat as recoil).
-The pistol viewmodel is framed entirely from `pistol.weapon` (`model_scale 35`,
+×0.25 in ADS). MP caveat: moveBlend/sprintBlend are local-only. The pistol
+viewmodel is framed entirely from `pistol.weapon` (`model_scale 35`,
 `model_yaw 28`, `model_offset 0.05 0.09 0.0`).
 
 **raylib OBJ loader fixed at the root (2026-06-03).** Adding that `model_offset`
@@ -55,15 +89,14 @@ two bugs (found with an ASan build):
 If you bump the raylib `GIT_TAG`, re-check the patch still matches (the script
 fails loudly with a clear message if `LoadOBJ`/tinyobj sources moved).
 
-Prior pass (2026-06-03) — **uncommitted in the working tree** (new
-`data/models/arms_vm.glb` + edits to `src/{anim.{c,h},render.c,render.h,main.c}`):
+Prior sub-pass (2026-06-03) — now committed (6c794a7):
 
 - **Shared first-person ARMS viewmodel for the other 4 guns (`data/models/arms_vm.glb`).**
   One rigged pair of arms+hands on the viewmodel skeleton with the full clip set
   (`idle`/`fire`/`reload`/`reload_empty`/`raise`/`lower`/`sprint`); the equipped
   gun is a **separate model bolted onto the `hand.R` bone each frame**, so a
   future character skin only retextures this *one* arms model instead of baking
-  a combined arms+gun glb per weapon. `render.c:DrawArmsViewmodel(camera, wi)`
+  a combined arms+gun glb per weapon. `viewmodel.c:DrawArmsViewmodel(camera, wi)`
   drives it: same player-state→clip state machine as the pistol VM (raise on
   swap, fire on shot, reload/reload_empty by mag-empty latch, sprint, idle),
   posed via `Anim_Pose`, then the arms are drawn with a camera-space root matrix
@@ -71,13 +104,12 @@ Prior pass (2026-06-03) — **uncommitted in the working tree** (new
   `root * handBone * gunLocal` using the **new `Anim_FindBone` + `Anim_BoneMatrix`**
   helpers (anim.{c,h}) — so recoil/reload hand motion carries the gun for free.
   Arms use `worldSkinnedShader`, the gun keeps its OBJ `worldShader`; both under
-  the flat-lighting override. Wired in `DrawFirstPersonViewmodel`: `W_PISTOL`
-  still takes the combined `pistolVM` path; the other four take this arms path
+  the flat-lighting override. Wired in `Viewmodel_DrawFirstPerson`: `W_PISTOL`
+  takes the gun-only OBJ path; the other four take this arms path
   when `armsVM.loaded`, else fall through to the legacy gun-only floating OBJ
-  viewmodel. Loaded/unloaded via `Render_LoadArmsVM()`/`Render_UnloadArmsVM()`
-  in `main.c` (boot + `--screenshot-viewmodels`). **Status: wired and builds
-  clean, the model is authored, but the per-gun grips are NOT tuned yet** — the
-  `gunGrip[W_COUNT]` table at the top of `DrawArmsViewmodel` is all
+  viewmodel. Loaded/unloaded via `Viewmodel_LoadArms()`/`Viewmodel_UnloadArms()`
+  in `main.c` (boot + `--screenshot-viewmodels`). **The per-gun grips are NOT
+  tuned yet** — the `gunGrip[W_COUNT]` table at the top of `viewmodel.c` is all
   `{pos {0,0,0}, rotDeg {0,0,0}, scale 1.0}` placeholders. Each gun needs its
   `pos`/`rotDeg`/`scale` dialed in via `--screenshot-viewmodels` so the muzzle
   and grip sit right in the hand. See the arms-viewmodel gotcha below.
@@ -104,26 +136,15 @@ Prior pass (2026-06-02) — committed to `main`, not pushed:
   `main.c` boot (after `Assets_Load`). Verify via the new
   **`./build/shooter --screenshot-coop`** mode (writes `coop_*.png` of dummy
   teammates in every state — no real MP needed). See the player-model gotcha.
-- **M1911 viewmodel wired into first person — shows in-game.**
-  `render.c:DrawPistolViewmodelGLB` loads the shared `pistolVM` AnimModel
-  (skinned shader from `Assets_Load`; `Render_LoadPistolVM` in `main.c` boot +
-  the `--screenshot-viewmodels` mode), runs a render-local `AnimState`, and
-  picks a clip each frame from the local player's weapon state: `raise` on a
-  weapon swap (slot/weapon change), `reload`/`reload_empty` on the reload
-  rising edge (empty latched from `ammo==0`, playback scaled
-  `clipDur/reloadTimer` so it fits Speed Cola too), `fire` on the fire rising
-  edge, `sprint` when `sprintBlend>0.6`, else `idle`. It's drawn in camera
-  space with a hand-built matrix — the glb is +Y forward so the columns are
-  `X→right, Y→camFwd, Z→camUp` (NOT the OBJ path's −Z mapping) — under a flat
-  sun/high-ambient override on `worldSkinnedShader` (restored after), same
-  anti-colour-swing trick the OBJ path uses. Only `W_PISTOL` takes this path;
-  the other four guns stay on the OBJ + procedural viewmodel. Framing knobs
-  (`VM_SCALE`, `PITCH`/`YAW` cant, anchor offsets) are constants at the top of
-  the function. **Gotcha:** the model's forearms were authored long and had to
-  be shortened to stubs — long forearms reach back to/behind the camera and
-  the perspective divide wraps them to the top of the screen. **Added
-  `Anim_Pose`** (anim.{c,h}) = the posing half of `Anim_Draw` without the
-  draw, so the viewmodel can draw with its own transform.
+- **M1911 viewmodel wired into first person — shows in-game** (later removed).
+  The combined `DrawPistolViewmodelGLB` path was added here, then dropped in
+  2026-06-03 (the "take the arms away" request). `W_PISTOL` now uses the
+  gun-only floating OBJ path in `Viewmodel_DrawFirstPerson`. **Gotcha from
+  original authoring:** the model's forearms were long and had to be shortened
+  to stubs — long forearms reach back to/behind the camera and the perspective
+  divide wraps them to the top of the screen. **Added `Anim_Pose`** (anim.{c,h})
+  = the posing half of `Anim_Draw` without the draw, so the viewmodel can draw
+  with its own transform.
 - **M1911 viewmodel authored: `data/weapons/pistol/pistol_vm.glb`** (rigged,
   animated). Arms + gun, 9 bones (`root`/`frame`/`slide`/`mag`/
   `hammer` + `hand.{L,R}`/`forearm.{L,R}`), 20 rigid box parts each bound 100%
@@ -134,12 +155,10 @@ Prior pass (2026-06-02) — committed to `main`, not pushed:
   slide rack), `reload_empty` (slide held back the whole clip, then slide
   release slams it forward), `raise`/`lower`, `sprint`, `inspect`. Authored
   +Y-forward (muzzle +Y, sights +Z up, grip at origin) per the glTF facing
-  rule. Validated via `--anim-test`. **Still TODO: the engine viewmodel path
-  in `render.c` (`DrawFirstPersonViewmodel`) is still OBJ + procedural** — it
-  doesn't load `*_vm.glb` yet. Wiring it (map player fire/reload/sprint/swap
-  state → clip + playback, draw in camera space) is the next step; the other 4
-  guns stay on the OBJ path until they get their own vm.glb. See the viewmodel
-  gotcha below.
+  rule. Validated via `--anim-test`. The combined glb viewmodel path was later
+  removed (2026-06-03); `W_PISTOL` now uses the gun-only OBJ path in
+  `viewmodel.c:Viewmodel_DrawFirstPerson`. `pistol_vm.glb` is kept on disk as
+  authored content. See the arms-viewmodel gotcha below.
 - **First rigged glTF asset shipped: `data/models/zombie.glb`** — the
   proof-of-pipeline for the skeletal-animation system. Authored rig-first via
   the `blender-game-asset` skill: 17-bone humanoid skeleton (pelvis/spine/
@@ -437,9 +456,8 @@ from the build dir). On first run with no file, defaults are written.
 
 ## Architecture
 
-`src/main.c` is just the game loop (~360 lines after the new
-`--validate` branch). Everything else is one translation unit per
-responsibility, sharing `types.h`:
+`src/main.c` is just the entry point + game loop (~430 lines). Everything else
+is one translation unit per responsibility, sharing `types.h`:
 
 | File              | Owns                                                   |
 |-------------------|--------------------------------------------------------|
@@ -455,6 +473,8 @@ responsibility, sharing `types.h`:
 | `protocol.{c,h}`  | Serialization (`SerPlayer`, `SerEnemy`, `PktSnapshotHeader`) |
 | `net.{c,h}`       | enet wrapper, `Net_GetLocalIPs` for the host's join prompt |
 | `render.{c,h}`    | 3D world draw (model-first with cube fallbacks), textured walls/floor via rlgl, fog/sky/lit shader swap, tracer billboards |
+| `viewmodel.{c,h}` | First-person viewmodel system: shared arms VM (`arms_vm.glb`) + bone-bolted gun, `GunGrip`/`gunGrip[]` table, procedural walk-bob/sprint motion, `Viewmodel_LoadArms`/`Viewmodel_UnloadArms`, `Viewmodel_DrawFirstPerson(Camera)` |
+| `devtools.{c,h}`  | The 5 CLI debug/validation modes (`--validate`, `--screenshot-viewmodels`, `--screenshot-coop`, `--screenshot-pap`, `--anim-test`) behind `Devtools_HandleCLI(argc, argv, &exitCode)` |
 | `decals.{c,h}`    | 96-slot ring buffer for blood + impact decals, drawn from `Render_World3D` |
 | `anim.{c,h}`      | Skeletal animation pipeline. `AnimModel` (shared skinned glTF + clips) + per-instance `AnimState`; load/find-clip/update/draw via raylib 5.5 GPU skinning. `Anim_Pose` (pose without draw, for custom transforms), `Anim_FindBone`/`Anim_BoneMatrix` (bolt a separate object — e.g. a gun — onto a skeleton bone) |
 | `hud.{c,h}`       | 2D HUD overlay, round splash, downed/spectate overlays |
@@ -475,8 +495,7 @@ data/
 │   ├── *.obj/*.mtl              # static props (mystery box, doors, perks, …)
 │   ├── zombie.glb               # rigged enemy (walk/attack_a/death)
 │   ├── player.glb               # rigged co-op third-person soldier
-│   ├── arms_vm.glb              # shared first-person arms (4 non-pistol guns)
-│   └── weapons/                 # legacy holdouts (revolver/sniper, not yet wired)
+│   └── arms_vm.glb              # shared first-person arms (4 non-pistol guns)
 ├── weapons/                     # NEW — per-folder weapon defs + assets
 │   ├── pistol/{pistol.weapon,pistol.obj,pistol.mtl,pistol_vm.glb}
 │   ├── smg/...
@@ -518,6 +537,11 @@ data/
   - For MTL `Kd` to carry, the material must `use_nodes = True` and
     the colour set on `Principled BSDF → Base Color`. Plain
     `material.diffuse_color` is viewport-only.
+- **`-Wall -Wextra` are ON** (GCC/Clang, CMakeLists.txt). `SHOOTER_ASAN=ON`
+  adds `-fsanitize=address,undefined` (the raylib OBJ patch removed the old
+  blocker). Remaining: a handful of `-Wstringop-truncation` warnings from
+  `strncpy` in net.c/level.c/settings.c/main.c — harmless, not yet addressed;
+  everything else is clean.
 - **raylib 5.5 OBJ loader — both known bugs are now PATCHED** (2026-06-03)
   via `cmake/patch_raylib_obj.cmake`, applied as a `PATCH_COMMAND` on the
   raylib `FetchContent_Declare`. Historic context (the patch makes both moot):
@@ -635,7 +659,7 @@ data/
   non-pistol guns share ONE rigged arms model; the gun is a separate object
   attached to the `hand.R` bone each frame instead of being baked into a combined
   arms+gun glb. So skins/new guns are cheap (retexture the arms once, drop in any
-  gun OBJ). Implementation notes for `render.c:DrawArmsViewmodel`:
+  gun OBJ). Implementation notes for `viewmodel.c:DrawArmsViewmodel`:
   - **The attach math.** `Anim_BoneMatrix(am, st, boneIdx)` returns the bone's
     model-space transform at the current frame; the gun's world matrix is
     `gunLocal * bone * root` (raylib `MatrixMultiply` applies the LEFT operand
@@ -644,22 +668,25 @@ data/
     (the OBJ's `-Z` muzzle / `+Y` up → `+Y` muzzle / `+Z` up to match the
     arms-forward frame), then applies the per-gun `gunGrip[wi]` `scale`/`rotDeg`/
     `pos` nudge in hand-local metres.
-  - **Pistol stays combined.** The M1911 keeps its own `pistol_vm.glb` (arms+gun
-    in one rig) — it was authored first, before the shared-arms split. Don't try
-    to route the pistol through the arms path; it has no separate gun OBJ to bolt.
+  - **Pistol stays on the OBJ path.** The M1911 was originally authored as a
+    combined `pistol_vm.glb` (arms+gun in one rig), but the combined glb path
+    (`DrawPistolViewmodelGLB`) was removed — `W_PISTOL` uses the gun-only
+    floating OBJ path in `Viewmodel_DrawFirstPerson`. `pistol_vm.glb` is kept
+    on disk (authored content) but is currently unused. Don't route the pistol
+    through the arms path; it has no separate gun OBJ to bolt.
   - **Two shaders, two flat-light overrides.** Arms are skinned
     (`worldSkinnedShader`); the gun is a rigid OBJ (`worldShader`). Each gets its
     own flat sun/ambient override (restored after) so neither colour-swings —
     note the gun's override is darker (it's gunmetal, not skin).
-  - **Grips are unfinished.** `gunGrip[]` ships as all-zero placeholders, so right
-    now the gun renders at the raw hand-bone origin with only the base +90°
-    orientation — it will look misplaced until each entry is tuned. Tune with
-    `--screenshot-viewmodels` (it renders every weapon's viewmodel); adjust
-    `pos`/`rotDeg`/`scale` per gun until the grip sits in the hand and the muzzle
-    points forward. The arms model itself is authored at real metric; one
-    `VM_SCALE` (0.62) sizes the whole assembly.
+  - **Grips are unfinished.** `gunGrip[]` (in `viewmodel.c`) ships as all-zero
+    placeholders, so right now the gun renders at the raw hand-bone origin with
+    only the base +90° orientation — it will look misplaced until each entry is
+    tuned. Tune with `--screenshot-viewmodels` (it renders every weapon's
+    viewmodel); adjust `pos`/`rotDeg`/`scale` per gun until the grip sits in the
+    hand and the muzzle points forward. The arms model itself is authored at real
+    metric; one `VM_SCALE` (0.62) sizes the whole assembly.
   - **Falls back gracefully.** If `arms_vm.glb` is missing or has no `hand.R`
-    bone, `DrawFirstPersonViewmodel` drops through to the legacy procedural
+    bone, `Viewmodel_DrawFirstPerson` drops through to the legacy procedural
     gun-only OBJ viewmodel for those 4 guns — nothing crashes.
 - **CoD-style balance pass (2026-06-02).** Numbers are tuned to classic
   Treyarch zombies, so don't "simplify" them back:
@@ -696,7 +723,7 @@ data/
   the 10–15 range to display at the same on-screen size — that's why
   the new weapons all have `model_scale ≈ 10–12` in their `.weapon`
   files.
-- **Map engine limits** (current): `MAX_INTERIOR_WALLS=16`,
+- **Map engine limits** (current): `MAX_INTERIOR_WALLS=32`,
   `MAX_DOORS=8`, `MAX_WINDOWS=4`, `MAX_OBSTACLES=24`, `MAX_MAP_PROPS=32`.
   Windows must be on arena perimeter walls (engine renders gaps in
   those for windows).
@@ -729,7 +756,7 @@ data/
   moved `me->pos`. While noclipping, the local player's own third-person
   body IS drawn (the `DrawOtherPlayer` loop skips `localPlayerIdx` only
   when `!noclipMode`) and the first-person viewmodel is suppressed
-  (`DrawFirstPersonViewmodel` bails on `noclipMode`) so the arms+gun don't
+  (`Viewmodel_DrawFirstPerson` bails on `noclipMode`) so the arms+gun don't
   trail the detached camera. Toggling noclip off snaps the camera back to
   the body. Verify with `--screenshot-coop` (the `coop_noclip` shot).
 - **Round 1 skip** — was a real bug, fixed by initializing
@@ -782,9 +809,9 @@ See `TODO.md` for the full live list. Impact-ordered short version:
 2. **Roll animation out** — fill zombie clips + per-type overrides. The
    weapon viewmodels and the player third-person model are now wired; the
    open item there is **tuning the per-gun `gunGrip[]` table** in
-   `render.c:DrawArmsViewmodel` (shared arms + bone-bolted gun for the 4
-   non-pistol guns — currently placeholder zeros) and authoring the rest of
-   the zombie/per-type clips. Clip lists in `data/ANIMATIONS.md`.
+   `viewmodel.c` (shared arms + bone-bolted gun for the 4 non-pistol guns —
+   currently placeholder zeros) and authoring the rest of the zombie/per-type
+   clips. Clip lists in `data/ANIMATIONS.md`.
 3. **Per-type zombie audio tells** — distinct groan/hiss/roar via
    raylib positional audio; the visual tells (runner red-eye wind-up,
    boss stripe) already exist.

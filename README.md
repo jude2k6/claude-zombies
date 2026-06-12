@@ -46,6 +46,9 @@ Built end-to-end with [Claude Code](https://claude.com/claude-code).
   player through an opened door
 - **Dynamic crosshair** that blooms with spread and collapses in ADS;
   low-HP vignette, hit markers, directional damage indicators
+- **Post-FX pipeline** — bloom on bright sources (Pack-a-Punch, Ray Gun,
+  muzzle flash), vignette, hit-flash, and a low-HP/bleedout heartbeat
+  pulse, all in one fullscreen shader pass
 - **Stamina** — sprinting drains a small bar that regens while walking
 
 ## Controls
@@ -156,7 +159,7 @@ src/{audio,pad,settings}                                 sfx, gamepad, bindings
 data/maps/*.map       map definitions (compact text grammar)
 data/models/          props + rigged glTF models (+ ASSETS.md spec)
 data/weapons/<name>/  per-weapon .weapon defs + models
-data/shaders/         world (lit + fog), world_skinned (GPU skinning), sky
+data/shaders/         world (lit + fog), world_skinned (GPU skinning), sky, postfx
 ```
 
 A deeper map for contributors lives in `HANDOFF.md` (architecture table,
@@ -208,9 +211,10 @@ so the third-person player model can be checked without a multiplayer game),
 `--screenshot-pap` (renders the Pack-a-Punch machine with the chamber open
 and a weapon inside), `--screenshot-zombies` (renders each zombie type in
 idle/attack/dying states), `--screenshot-particles` (renders the particle
-effects — muzzle flash, casings, blood, explosion), and
-`--anim-test <file.glb> [clip]` (renders a skinned glTF model across an
-animation clip to verify it).
+effects — muzzle flash, casings, blood, explosion), `--screenshot-postfx`
+(renders the world through the post-FX pipeline at baseline / hit-flash /
+low-HP settings), and `--anim-test <file.glb> [clip]` (renders a skinned
+glTF model across an animation clip to verify it).
 
 ## License
 

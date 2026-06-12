@@ -44,9 +44,19 @@ Feature pass (2026-06-12, later — commits a8b1cfb, c4170d6, 2cf6c3b, b362902):
   HUD-tint hack is fully removed** (render.h/render.c/weapons.c/main.c/
   hud.c). New `--screenshot-particles` dev mode.
 
-NOT done from the rendering wishlist: the post-FX render target (bloom/
-vignette/hit-flash/low-HP pulse) — next up; was cut when the session ran
-out of budget.
+- **Post-FX render target** (563068c): the world pass (`Render_World3D`
+  + `Render_WorldLabels`) renders into a lazily-resized screen-size RT;
+  `data/shaders/postfx.fs` draws it as a fullscreen quad with
+  thresholded single-pass bloom, vignette, hit-flash red tint, and a
+  low-HP heartbeat desat/red-edge pulse. main.c owns the two uniforms:
+  `hitFlash` spikes when local HP drops (decays ~0.35 s; prevHp reset
+  on menu transitions so re-entry never false-flashes), `lowHp` ramps
+  below 40% of `Perk_EffMaxHP` and pins at 1.0 while downed. HUD and
+  menus draw after `Render_EndPostFX` so they stay unprocessed; if
+  postfx.fs is missing the Begin/End calls are no-ops and the old
+  direct path is byte-identical. New `--screenshot-postfx` dev mode
+  (baseline / hitFlash / lowHp panels). That completes the whole
+  2026-06-12 feature wishlist.
 
 Architecture-cleanup pass (2026-06-12, commits 772606f–c23bab9):
 
@@ -842,18 +852,15 @@ See `TODO.md` for the full live list. Impact-ordered short version:
    variants (runner `lunge`, crawler `crawl`, boss `steamroll`); the
    gunGrip table is tuned and death/attack are sim-driven now. Clip
    lists in `data/ANIMATIONS.md`.
-3. **Post-FX render target** — bloom + vignette + hit-flash red +
-   low-HP heartbeat pulse. The one rendering wishlist item NOT done in
-   the 2026-06-12 pass; unlocks every subsequent "feel" upgrade.
-4. **Author music + ambience .oggs** — the per-map music *engine* path
+3. **Author music + ambience .oggs** — the per-map music *engine* path
    is in (audio.c streams `data/audio/<name>.ogg` if present); no audio
    files ship yet. nacht.map references `nacht_loop`.
-5. **`LIGHTS x y z r g b range`** in `.map` + `sky_tint` plumbing.
-6. **Textures (5)** — `floor_concrete.png`, `ground_dirt.png`,
+4. **`LIGHTS x y z r g b range`** in `.map` + `sky_tint` plumbing.
+5. **Textures (5)** — `floor_concrete.png`, `ground_dirt.png`,
    `wall_brick.png`, `wall_plaster.png`, `ceiling_wood.png`.
-7. **Frustum culling for props** — bounding-sphere test before each
+6. **Frustum culling for props** — bounding-sphere test before each
    `DrawProp`. Matters once more props ship.
-8. **`tests/map_parser_test.c`** + CI step running `--validate` on
+7. **`tests/map_parser_test.c`** + CI step running `--validate` on
     every shipped map.
 
 Tune-on-playtest flags from the 2026-06-02 balance pass: boss melee

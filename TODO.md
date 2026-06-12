@@ -161,10 +161,11 @@ connectivity auditor). Remaining work is authoring + per-entity wiring:
       256-slot pool, muzzle flash + casing eject (Weapon_Fire), blood
       mist on hits, frag explosion burst. HUD-tint muzzle hack removed.
       `--screenshot-particles` dev mode verifies.
-- [ ] **Post-FX render target** — wrap `Render_World3D` in a
-      `RenderTexture2D`; final fullscreen quad does bloom on bright
-      pixels (PaP, raygun, muzzle), vignette, hit-flash red overlay,
-      low-HP heartbeat pulse. Unlocks every subsequent "feel" upgrade.
+- [x] **Post-FX render target** — done (563068c): world pass renders
+      into a screen-size RT, `data/shaders/postfx.fs` fullscreen quad
+      does thresholded bloom (PaP, raygun, muzzle), vignette, hit-flash
+      red overlay, low-HP heartbeat desat/pulse. HUD stays unprocessed;
+      missing shader = old direct path. `--screenshot-postfx` verifies.
 - [ ] **Frustum culling for props** — bounding-sphere test before each
       `DrawProp`. Matters once more props are in scene.
 
@@ -198,9 +199,10 @@ connectivity auditor). Remaining work is authoring + per-entity wiring:
 - [x] **Footstep + reload SFX** — done: 3 footstep variants with
       sprint/walk/crouch cadence; 2-stage reload (mag-out, mag-in at 55%
       of reload time).
-- [~] **Bleedout vignette + heartbeat audio** when downed — heartbeat
-      done (lub-dub ramps 1.30 s → 0.55 s, other SFX ducked); the
-      *vignette* half needs the post-FX render target (see Rendering).
+- [x] **Bleedout vignette + heartbeat audio** when downed — heartbeat
+      done c4170d6 (lub-dub ramps 1.30 s → 0.55 s, other SFX ducked);
+      vignette/desat pulse done 563068c via the post-FX `lowHp` uniform
+      (pins at 1.0 while downed).
 
 ### Map format / engine integration
 - [ ] **`LIGHTS x y z r g b range`** in `.map` — per-map placed lights;

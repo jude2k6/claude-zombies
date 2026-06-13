@@ -15,10 +15,11 @@
 > gun-only OBJ fallback). Decision + mechanism checklist:
 > `docs/arms-rig-generalisation.md` §0. Status: `HANDOFF.md` top.
 >
-> ℹ️ Optional polish noticed during the 2026-06-14 pass: the combined-rig
-> first-person **framing sits low/dark** (gun in the lower screen). It's the
-> shared `CRIG_*` constants in `src/viewmodel.c`, not the asset — nudge
-> `CRIG_DOWN_OFFSET`/scale if you want it higher. Not blocking.
+> ℹ️ Framing tuned 2026-06-14 to a canted CoD-style hold (gun lower-right, muzzle
+> up toward centre, arms from the lower-right) via the shared `CRIG_*` constants
+> in `src/viewmodel.c`: scale 1.08, down −0.20 (lifts it), base pitch 0.13
+> (muzzle up), new base **roll 0.22 (cant)**, brighter flat lighting. These are
+> shared across all combined-rig guns — re-check them when guns 2–5 land.
 
 Live punch list, ordered by impact-per-effort. The architecture for almost
 every item below is already in place — these are mostly authoring + small

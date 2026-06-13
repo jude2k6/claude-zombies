@@ -25,13 +25,18 @@
 // --- Framing constants (tuned via --screenshot-viewmodels once real asset lands)
 // The combined rig is authored with origin ≈ the eye point, looking down the
 // arms; start with near-identity framing and small downward offset.
-#define CRIG_SCALE        1.0f   // uniform framing scale for combined-rig VMs
+#define CRIG_SCALE        1.08f  // uniform framing scale for combined-rig VMs
 #define CRIG_FWD_OFFSET   0.13f  // metres forward — push the rig off the lens
-#define CRIG_RIGHT_OFFSET 0.07f  // metres right from camera.position
-#define CRIG_DOWN_OFFSET  -0.14f // metres downward from camera.position (positive = down; negative lifts the gun up)
+#define CRIG_RIGHT_OFFSET 0.06f  // metres right from camera.position
+#define CRIG_DOWN_OFFSET  -0.20f // metres downward from camera.position (positive = down; negative lifts the gun up)
 // Optional base pitch (radians) applied before camera basis; negative tilts
 // muzzle down (matching a slight downward author pose). 0 = none.
-#define CRIG_BASE_PITCH   0.0f
+// Positive = muzzle up, giving the diagonal "held up toward centre" FPS look.
+#define CRIG_BASE_PITCH   0.13f
+// Base roll (cant) about the view-forward axis: tilts the gun toward its
+// left-side 3/4 profile and swings the arm origins toward the lower-right,
+// like a real FPS hold. Positive = top of the gun tilts to the player's right.
+#define CRIG_BASE_ROLL    0.22f
 
 // Stable lowercase IDs matching the data/weapons/<id>/ directory names.
 // Order must match the W_* enum: W_PISTOL=0, W_SMG=1, W_SHOTGUN=2,
@@ -249,6 +254,24 @@ static void DrawCombinedRigViewmodel(Camera camera, int wi) {
         up  = Vector3Normalize(up);
     }
     Vector3 right = Vector3Normalize(Vector3CrossProduct(fwd, camera.up));
+    up = Vector3Normalize(Vector3CrossProduct(right, fwd));  // re-orthonormalize
+
+    // Optional base roll (cant) rotates (right, up) about fwd.
+    if (CRIG_BASE_ROLL != 0.0f) {
+        float cr = cosf(CRIG_BASE_ROLL), sr = sinf(CRIG_BASE_ROLL);
+        Vector3 r2 = {
+            right.x * cr + up.x * sr,
+            right.y * cr + up.y * sr,
+            right.z * cr + up.z * sr,
+        };
+        Vector3 u2 = {
+            up.x * cr - right.x * sr,
+            up.y * cr - right.y * sr,
+            up.z * cr - right.z * sr,
+        };
+        right = Vector3Normalize(r2);
+        up    = Vector3Normalize(u2);
+    }
 
     // Anchor: origin near camera.position + small static offsets.
     // CRIG_FWD_OFFSET, CRIG_RIGHT_OFFSET, CRIG_DOWN_OFFSET are the tuning

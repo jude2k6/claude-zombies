@@ -25,10 +25,10 @@
 // --- Framing constants (tuned via --screenshot-viewmodels once real asset lands)
 // The combined rig is authored with origin ≈ the eye point, looking down the
 // arms; start with near-identity framing and small downward offset.
-#define CRIG_SCALE        0.9f   // uniform framing scale for combined-rig VMs
-#define CRIG_FWD_OFFSET   0.14f  // metres forward — push the rig off the lens
-#define CRIG_RIGHT_OFFSET 0.08f  // metres right from camera.position
-#define CRIG_DOWN_OFFSET  0.03f  // metres downward from camera.position (positive = down)
+#define CRIG_SCALE        1.0f   // uniform framing scale for combined-rig VMs
+#define CRIG_FWD_OFFSET   0.13f  // metres forward — push the rig off the lens
+#define CRIG_RIGHT_OFFSET 0.07f  // metres right from camera.position
+#define CRIG_DOWN_OFFSET  -0.14f // metres downward from camera.position (positive = down; negative lifts the gun up)
 // Optional base pitch (radians) applied before camera basis; negative tilts
 // muzzle down (matching a slight downward author pose). 0 = none.
 #define CRIG_BASE_PITCH   0.0f
@@ -286,8 +286,8 @@ static void DrawCombinedRigViewmodel(Camera camera, int wi) {
     // doesn't colour-swing with the world directional light as the player
     // looks around.
     if (worldSkinnedShaderLoaded) {
-        Vector3 flatSun = { 0.25f, 0.26f, 0.30f };
-        Vector3 flatAmb = { 1.30f, 1.31f, 1.36f };
+        Vector3 flatSun = { 0.45f, 0.46f, 0.50f };
+        Vector3 flatAmb = { 2.40f, 2.42f, 2.50f };
         rlDrawRenderBatchActive();
         SetShaderValue(worldSkinnedShader, worldSkinnedShader_sunColorLoc,
                        &flatSun, SHADER_UNIFORM_VEC3);

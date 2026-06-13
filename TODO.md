@@ -107,18 +107,19 @@ connectivity auditor). Remaining work is authoring + per-entity wiring:
         `W_PISTOL` uses the gun-only OBJ path. Still open: authoring per-gun
         vm clips (fire blowback etc. currently come from the shared arms
         clips). See HANDOFF "shared arms viewmodel" gotcha.
-  - [~] **🚧 IN PROGRESS (2026-06-13): hands don't sit on the guns.**
-        Re-verified via `--screenshot-viewmodels`: the bolted gun + the
-        red/blue hand-bone markers sit at eye-center but the visible forearm
-        meshes hang below, disconnected — on ALL 5 guns. This is an ASSET bug,
-        not a tuning bug: the gun and the markers both ride `hand.R` through
-        `Anim_BoneMatrix`, so they always agree; the arm mesh is skinned
-        separately and isn't following the bone. Leading hypothesis: a hand/
-        forearm mesh in `arms_vm.glb` is unweighted / wrongly weighted (floats
-        at bind pose), or the `idle` pose never closes the hands on the bore.
-        A background Blender agent (blender-game-asset skill) is diagnosing +
-        re-exporting `arms_vm.glb`; main session verifies on return. DO NOT
-        chase this with more `vm_grip_*` number tweaks.
+  - [~] **🚧 IN PROGRESS (2026-06-13): hands still don't sit on the guns —
+        Blender pass landed (5cf3a4e) but reset the seating calibration.**
+        A Blender agent welded the 4 arm meshes (were unconnected vertex soup,
+        78–80 islands each → 1 island, audit PASS) and re-exported with
+        `export_yup=False`, which fixed the forearms being pointed the wrong
+        way (they now render fully in front of the camera). BUT flipping yup
+        rotated the whole arms frame (`hand.R` Y/Z swapped per the `vmdbg`
+        dump), so the base `MatrixRotateX(PI*0.5)` in
+        `viewmodel.c:DrawArmsViewmodel` AND every `.weapon` `vm_grip_*` value
+        are now stale. Re-verified renders: SMG ~reaches the gun, pistol sits
+        below the hand, rifle vertical. NEXT (iterative VISUAL tuning, can't
+        be done blind): re-derive the gun bolt rotation for the new frame,
+        then re-tune each `vm_grip_pos/scale`. See HANDOFF "IN PROGRESS".
   - [ ] **Author `idle_pistol` clip in `arms_vm.glb`.** `vm_pose PISTOL`
         (pistol.weapon) + the `avmIdlePistol` lookup are wired in code, but
         the clip doesn't exist in the asset (only 7 clips ship), so it's a

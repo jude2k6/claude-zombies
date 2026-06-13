@@ -36,23 +36,49 @@ where things stood:
   the gun bolts to `hand.R` via `Anim_BoneMatrix` (frame-pose) and the debug
   markers use the *same* matrix, so they always agree with each other and
   with the gun — meaning the seat math is self-consistent. The arm *mesh* is
-  GPU-skinned separately. **Leading hypothesis: a hand/forearm mesh in
-  `arms_vm.glb` is unweighted or wrongly weighted, so it stays at bind pose
-  while the bone (and gun) animate up — the hand floats free of the gun.**
-  Alternative: the `idle` pose simply never closes the hands on the bore.
+  GPU-skinned separately. (Original hypothesis was bad skin weights; the
+  Blender pass below found it was actually disconnected mesh islands + a
+  `export_yup` coordinate mismatch that pointed the forearms the wrong way.)
 - ❌ **`idle_pistol` clip does not exist.** Commit d215d1b wired
   `vm_pose PISTOL` → an `idle_pistol` clip, but `arms_vm.glb` has only the
   7 clips above (no `idle_pistol`, no `inspect` either, despite TODO/HANDOFF
   prose). `avmIdlePistol` resolves to -1, so pistols silently fall back to
   the two-handed foregrip `idle`. The `vm_pose` feature is currently a no-op.
 
-**Dispatched (background Sonnet agent, blender-game-asset skill):** diagnose
-`arms_vm.glb` skin weights + idle pose in Blender, fix so both hands close on
-a grip line through `hand.R`, re-export to the same path (bone + clip names
-preserved), and add `idle_pistol` if time permits. Asset-only — no C edits.
-When it returns, the main session rebuilds, re-runs `--screenshot-viewmodels`,
-and verifies before marking this done. **If this section still says IN
-PROGRESS, the fix is unverified — check the agent's report / re-screenshot.**
+**Blender agent pass DONE + verified in-engine (commit 5cf3a4e). Mixed
+result — read carefully before the next attempt:**
+
+- ✅ **Mesh connectivity fixed.** All 4 arm meshes (forearm_L/R, glove_L/R)
+  were coincident-but-unwelded vertex soup (78–80 islands each). Welded by
+  distance → 1 connected island per mesh, 721 dup verts removed, integrity
+  audit PASS. This was real and is a keeper.
+- ✅ **Arms are now fully visible & forward-facing.** The old export used
+  `export_yup=True`, which (combined with the viewmodel root matrix mapping
+  model-Y → camera-forward) left much of the forearm geometry pointing the
+  wrong way — part of why the old arms looked like stubs disconnected from
+  the gun. Re-exported with `export_yup=False`; re-ran `--screenshot-view
+  models` 2026-06-13 and the full arms now render in front of the camera.
+- ⚠️ **The yup flip RESET the gun-seating calibration — guns are now
+  mis-seated in a NEW way; hands still aren't on the guns.** Flipping yup
+  rotated the whole arms frame: the `hand.R` bone's Y/Z axes swapped
+  (`vmdbg`: handR pos went `+0.329,-0.453` → `+0.453,+0.329`). Everything
+  downstream that was tuned against the OLD frame is now stale: the base
+  `MatrixRotateX(PI*0.5)` gun rotation in `viewmodel.c:DrawArmsViewmodel`,
+  AND every per-gun `vm_grip_pos/rot/scale` in the `.weapon` files. Current
+  renders: SMG ~reaches the gun, pistol sits BELOW the hand, rifle stands
+  vertical. **All seating numbers must be re-derived against the new frame.**
+
+**NEXT (this is iterative VISUAL tuning — a blind agent cannot converge on
+it; needs render→adjust→render loops):**
+1. Re-derive the gun bolt orientation for the new arms frame. Likely the
+   base `MatrixRotateX(PI*0.5)` in `viewmodel.c` needs to change (or move to
+   a per-gun `vm_grip_rot`). Verify with `--screenshot-viewmodels`.
+2. Re-tune each `vm_grip_pos`/`scale` so the modelled grip lands in `hand.R`.
+3. Then (optional) author the `idle_pistol` clip (still missing).
+NOTE pistol.obj is ~2.5× real size (HANDOFF gotcha) so its `vm_grip_scale`
+0.6 is doing extra work — expect the pistol to need the most attention.
+
+**If this section still says IN PROGRESS, the hands are NOT yet on the guns.**
 
 ## Current state (2026-06-12)
 

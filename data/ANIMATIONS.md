@@ -121,14 +121,19 @@ clips are authored once.
 > remains on disk as authored-but-unused content. New guns follow the
 > shared-arms model, not a combined glb.
 >
-> ⚠️ **2026-06-13: the hands still don't sit on the guns.** The seat math is
-> self-consistent (gun + debug markers both ride `hand.R`), so the gap is an
-> ASSET problem in `arms_vm.glb` — a hand/forearm mesh that isn't tracking its
-> bone (unweighted / wrong weights), or an `idle` pose that never closes on the
-> bore. Being fixed in Blender; do NOT chase it with more `vm_grip_*` tweaks.
-> Note the asset ships **7 clips** (`fire idle lower raise reload reload_empty
-> sprint`) — the `idle_pistol` and `inspect` clips referenced elsewhere in this
-> doc are NOT in `arms_vm.glb` yet, so `vm_pose PISTOL` is currently a no-op.
+> ⚠️ **2026-06-13: the hands still don't sit on the guns.** A Blender pass
+> (commit 5cf3a4e) welded the arm meshes (were disconnected vertex islands)
+> and re-exported with `export_yup=False` so the forearms point forward —
+> arms now render fully. BUT the yup flip rotated the arms frame (`hand.R`
+> Y/Z swapped), invalidating the gun-seating calibration: the base
+> `MatrixRotateX(PI*0.5)` in `viewmodel.c:DrawArmsViewmodel` and every
+> `.weapon` `vm_grip_*` value were tuned for the OLD frame. NEXT step is to
+> re-derive those against the new frame (re-tune `vm_grip_rot/pos/scale` and
+> likely the base rotation) with `--screenshot-viewmodels`. See HANDOFF "IN
+> PROGRESS". Note the asset ships **7 clips** (`fire idle lower raise reload
+> reload_empty sprint`) — the `idle_pistol` and `inspect` clips referenced
+> elsewhere in this doc are NOT in `arms_vm.glb` yet, so `vm_pose PISTOL` is a
+> no-op until authored.
 
 > Gameplay timings (current `.weapon` files): reload — pistol **1.3s**,
 > smg **1.8s**, shotgun **2.0s**, rifle **1.5s**, raygun **2.6s**. Fire

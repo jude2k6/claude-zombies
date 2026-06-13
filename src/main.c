@@ -192,9 +192,10 @@ int main(int argc, char **argv) {
     Audio_Init();
     Weapons_Load();   // must run before Assets_Load — Assets_ApplyWorldShader iterates weaponModels[]
     Assets_Load();
-    Render_LoadZombieAnim();   // shared rigged zombie.glb (skinned shader from Assets_Load)
-    Viewmodel_LoadArms();       // shared first-person arms (non-pistol guns bolt onto hand.R)
-    Render_LoadPlayerAnim();   // rigged third-person soldier for co-op teammates
+    Render_LoadZombieAnim();        // shared rigged zombie.glb (skinned shader from Assets_Load)
+    Viewmodel_LoadArms();           // shared first-person arms (non-pistol guns bolt onto hand.R)
+    Viewmodel_LoadCombinedRigs();   // per-weapon combined rigs (arms+gun glTF, if present)
+    Render_LoadPlayerAnim();        // rigged third-person soldier for co-op teammates
     Settings_Load();
     Decals_Init();
     Particles_Reset();
@@ -476,6 +477,7 @@ int main(int argc, char **argv) {
     Render_UnloadPostFX();
     Render_UnloadZombieAnim();
     Viewmodel_UnloadArms();
+    Viewmodel_UnloadCombinedRigs();
     Render_UnloadPlayerAnim();
     Assets_Unload();
     Weapons_Unload();

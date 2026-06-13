@@ -186,12 +186,48 @@ the load log shows the expected mesh/material/bone/clip counts and no
   note. anim-test's fixed camera views the back of a correctly-facing model.
 - **Emissive accents** (zombie eyes, raygun coils): set Principled
   `Emission Color` + `Emission Strength` on that part's material.
-- **Shared arms viewmodel, gun bolted to a bone (don't bake combined rigs).**
-  For first-person weapons, author ONE arms+hands rig (`arms_vm.glb`) with the
-  full clip set and a `hand.R` bone — the engine attaches the gun mesh to that
-  bone at runtime (`Anim_BoneMatrix`), so one arms model serves every gun and a
-  skin only retextures the arms. Author the arms facing +Y (gun points away from
-  the camera) at real metric scale; keep a clean `hand.R` bone where the grip
-  sits. Only bake a *combined* arms+gun glb when a gun's hands must do something
-  the shared rig can't (the M1911 `pistol_vm.glb` predates this split). Same
-  bone-attach trick works for any "object held/mounted on a skeleton" case.
+- **First-person weapons: bake a COMBINED per-weapon rig.** ⚠️ The old
+  "shared `arms_vm.glb` + gun bolted to `hand.R` at runtime" approach is
+  **superseded** (see `docs/arms-rig-generalisation.md` §0). It can't do moving
+  gun parts (racking charging handle, slide blowback, mag swap) or per-gun
+  animation, and it caused a long-running hand-placement bug. New guns are ONE
+  rigged `.glb` = **arms + hands + gun + mechanism part-bones**, hands posed ON
+  the gun in the rig (no runtime seating). The bone-bolt trick still works for
+  other "object mounted on a skeleton" cases, just not weapons.
+
+- **Combined per-weapon viewmodel rig — proven recipe (MP5 `smg_vm.glb`,
+  2026-06-13).** Author guns 2–5 the same way:
+  - **Skeleton (9 bones for the MP5 archetype):** reuse the canonical arm chain
+    `root, upperarm.L/R, forearm.L/R, hand.L/R`, plus per-gun mechanism bones as
+    children of `root` (MP5: `bolt` = charging handle/reciprocating bolt,
+    `magazine`). The engine binds by **bone name**, so keep these names.
+  - **Part breakdown:** each mechanism part is its OWN single-island mesh,
+    rigidly bound 100% to its bone (so it keys independently). Forearms
+    gradient-blend `forearm.*`↔`hand.*` for a clean elbow/wrist; the rest is
+    rigid. 9 meshes, ~5 flat Principled-BSDF colour zones is plenty.
+  - **Facing / scale / ORIGIN (this is the contract the engine draws against —
+    get it right or the viewmodel is invisible/mis-framed):** author facing
+    **+Y in Blender, export `export_yup=True`** (same as zombie/player; → in
+    raylib the barrel is **−Z**, up **+Y**, right **+X**). **Real metric** (MP5
+    body ≈0.64 m long). **Put the rig origin at the EYE/camera point** and build
+    the whole assembly (arms + gun) extending **forward (+Y) and slightly DOWN**
+    from origin. Target model-space AABB roughly `x[-0.13,0.13] y[-0.30,0]
+    z[-0.68,0.05]` — i.e. geometry hangs *below and in front of* origin. The
+    engine anchors that origin near the camera and applies shared `CRIG_*`
+    framing offsets, so DON'T bury the gun at the origin or it clips the lens.
+  - **Clips (lowercase = engine API):** `idle`, `fire` (mechanism reciprocates +
+    `root` recoil kick), `reload` (mag swap, **no** rack), `reload_empty` (mag
+    swap THEN the rack — e.g. `bolt` −12 mm open → −32 mm yank → 0 release),
+    `raise`, `lower`, `sprint`, `inspect` (optional). Match durations to the
+    `.weapon` gameplay constants (reload_time, fire_cooldown).
+  - **Validate:** integrity audit PASS → export to
+    `data/weapons/<id>/<id>_vm.glb` → `./build/shooter --anim-test
+    data/weapons/<id>/<id>_vm.glb` logs `(N mesh, M mat, 9 bones, 8 clips)` and
+    must deform with no "skeleton does not match". The engine auto-discovers the
+    file (`Viewmodel_LoadCombinedRigs`) — **no per-gun engine code**, framing is
+    the shared `CRIG_*` constants in `src/viewmodel.c`.
+  - **Gotchas hit:** (1) `bpy.ops.wm.read_factory_settings` WIPES the live scene
+    — export the `.glb` BEFORE any round-trip/reset checks. (2) Don't mix yup
+    conventions: combined rigs use `export_yup=True` (the legacy `arms_vm.glb`
+    used False). (3) Boolean ops leave odd mesh-data names (`_mag1_data`) — fine,
+    the engine binds by node/bone name, not mesh-data name.

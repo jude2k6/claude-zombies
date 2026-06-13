@@ -10,6 +10,81 @@
 #include <math.h>
 #include <stdio.h>
 
+// ---- combined per-weapon viewmodel rigs (NEW PATH) ---------------------
+// Each weapon can have its own combined glTF (<id>/<id>_vm.glb) that already
+// contains arms + gun + mechanical part-bones, with its own per-gun clip set.
+// The engine just plays clips on the skinned model — no runtime gun-bolting,
+// no vm_grip_*, no IK, no hand-seating math.
+//
+// Convention: combined rig is authored facing +Y in Blender, exported with
+// export_yup=True → in raylib model space: forward = -Z, up = +Y, right = +X.
+// (Same convention as zombie.glb / player.glb.)
+// So the camera-space root maps: model +X → camera right, +Y → camera up,
+//                                 model -Z → camera forward.
+//
+// --- Framing constants (tuned via --screenshot-viewmodels once real asset lands)
+// The combined rig is authored with origin ≈ the eye point, looking down the
+// arms; start with near-identity framing and small downward offset.
+#define CRIG_SCALE        0.9f   // uniform framing scale for combined-rig VMs
+#define CRIG_FWD_OFFSET   0.14f  // metres forward — push the rig off the lens
+#define CRIG_RIGHT_OFFSET 0.07f  // metres right from camera.position
+#define CRIG_DOWN_OFFSET  0.07f  // metres downward from camera.position (positive = down)
+// Optional base pitch (radians) applied before camera basis; negative tilts
+// muzzle down (matching a slight downward author pose). 0 = none.
+#define CRIG_BASE_PITCH   0.0f
+
+// Stable lowercase IDs matching the data/weapons/<id>/ directory names.
+// Order must match the W_* enum: W_PISTOL=0, W_SMG=1, W_SHOTGUN=2,
+// W_RIFLE=3, W_RAYGUN=4.
+static const char *WEAPON_DIR_IDS[W_COUNT] = {
+    [W_PISTOL]  = "pistol",
+    [W_SMG]     = "smg",
+    [W_SHOTGUN] = "shotgun",
+    [W_RIFLE]   = "rifle",
+    [W_RAYGUN]  = "raygun",
+};
+
+typedef struct {
+    int idle, fire, reload, reloadEmpty, raise, lower, sprint;
+} CrigClips;
+
+static AnimModel  crigVM[W_COUNT];
+static AnimState  crigVMState[W_COUNT];
+static CrigClips  crigClips[W_COUNT];
+
+// Load all per-weapon combined rigs that exist on disk. Missing files are
+// silently skipped — the weapon falls through to the shared-arms path. Call
+// after Assets_Load so worldSkinnedShader is ready.
+void Viewmodel_LoadCombinedRigs(void) {
+    for (int wi = 0; wi < W_COUNT; wi++) {
+        const char *id = WEAPON_DIR_IDS[wi];
+        if (!id) continue;
+        char relpath[128];
+        snprintf(relpath, sizeof relpath, "weapons/%s/%s_vm.glb", id, id);
+        // Anim_Load searches data/models/ and data/ prefixes; weapons/ lives
+        // under data/ so passing "weapons/<id>/<id>_vm.glb" hits the
+        // "data/" prefix automatically.
+        if (!Anim_Load(&crigVM[wi], relpath)) continue;
+        if (worldSkinnedShaderLoaded)
+            Anim_ApplyShader(&crigVM[wi], worldSkinnedShader);
+        CrigClips *c = &crigClips[wi];
+        c->idle        = Anim_FindClip(&crigVM[wi], "idle");
+        c->fire        = Anim_FindClip(&crigVM[wi], "fire");
+        c->reload      = Anim_FindClip(&crigVM[wi], "reload");
+        c->reloadEmpty = Anim_FindClip(&crigVM[wi], "reload_empty");
+        c->raise       = Anim_FindClip(&crigVM[wi], "raise");
+        c->lower       = Anim_FindClip(&crigVM[wi], "lower");
+        c->sprint      = Anim_FindClip(&crigVM[wi], "sprint");
+        // Start in idle (or bind-pose if no idle clip)
+        Anim_Play(&crigVMState[wi], c->idle, true, 1.0f);
+        fprintf(stderr, "viewmodel: loaded combined rig for %s\n", id);
+    }
+}
+
+void Viewmodel_UnloadCombinedRigs(void) {
+    for (int wi = 0; wi < W_COUNT; wi++) Anim_Unload(&crigVM[wi]);
+}
+
 // ---- shared first-person ARMS viewmodel (glTF) -------------------------
 // One rigged pair of arms+hands (arms_vm.glb) used by ALL guns. The gun is a
 // separate model bolted onto the `hand.R` bone each frame, so a character
@@ -93,6 +168,140 @@ static void ViewmodelMotion(Player *me, Vector3 fwd, Vector3 right, Vector3 up,
     o = Vector3Add(o, Vector3Scale(fwd,  -sprint * 0.05f * ads));
     *outPos  = o;
     *outTilt = sprint * 0.35f * ads;              // muzzle dips while sprinting
+}
+
+// ---- combined-rig first-person draw ----------------------------------------
+// Draws the combined per-weapon glTF (arms + gun + mechanical parts) using the
+// same player-state → clip state machine as DrawArmsViewmodel. Called only when
+// crigVM[wi].loaded is true. No separate gun model, no weaponGrip seating.
+static void DrawCombinedRigViewmodel(Camera camera, int wi) {
+    Player *me = &players[localPlayerIdx];
+    int cs = me->currentSlot;
+    WeaponSlot *slot = &me->inventory[cs];
+    float dt = GetFrameTime();
+
+    // State tracking (persistent across frames, per-weapon-slot edge detect).
+    static int   cr_prevSlot   = -1;
+    static int   cr_prevWi     = -1;
+    static float cr_prevFire   = 0.0f;
+    static float cr_prevReload = 0.0f;
+    static bool  cr_reloadEmpty = false;
+
+    bool swapEdge    = (cs != cr_prevSlot || wi != cr_prevWi);
+    bool fireEdge    = (slot->fireTimer  > 0.0f && cr_prevFire   <= 0.0f);
+    bool reloadStart = (slot->reloadTimer > 0.0f && cr_prevReload <= 0.0f);
+    bool reloading   = (slot->reloadTimer > 0.0f);
+    if (reloadStart) cr_reloadEmpty = (slot->ammo == 0);
+    cr_prevSlot   = cs;
+    cr_prevWi     = wi;
+    cr_prevFire   = slot->fireTimer;
+    cr_prevReload = slot->reloadTimer;
+    bool sprinting = (me->sprintBlend > 0.6f) && !reloading;
+
+    AnimModel *am = &crigVM[wi];
+    AnimState *st = &crigVMState[wi];
+    CrigClips *c  = &crigClips[wi];
+
+    // --- Clip state machine (mirrors DrawArmsViewmodel) ---
+    if (swapEdge && c->raise >= 0) {
+        Anim_Play(st, c->raise, false, 1.0f);
+    } else if (reloadStart) {
+        int clip = (cr_reloadEmpty && c->reloadEmpty >= 0) ? c->reloadEmpty : c->reload;
+        float dur = Anim_ClipDuration(am, clip);
+        float spd = (slot->reloadTimer > 0.05f) ? dur / slot->reloadTimer : 1.0f;
+        Anim_Play(st, clip, false, spd);
+    } else if (fireEdge && !reloading && c->fire >= 0) {
+        Anim_Play(st, c->fire, false, 1.0f);
+    } else {
+        bool busy = ((st->clip == c->fire || st->clip == c->raise) && !st->finished)
+                 || (reloading && (st->clip == c->reload || st->clip == c->reloadEmpty));
+        if (!busy) {
+            int want = (sprinting && c->sprint >= 0) ? c->sprint : c->idle;
+            if (st->clip != want) Anim_Play(st, want, true, 1.0f);
+        }
+    }
+    Anim_Update(am, st, dt);
+    Anim_Pose(am, st);
+
+    // --- Camera-space root matrix ---
+    // Combined rig authored: +Y in Blender, export_yup=True → in raylib:
+    //   forward = -Z, up = +Y, right = +X  (same convention as zombie.glb).
+    // Map: model +X → camera right, model +Y → camera up, model -Z → camera fwd.
+    Vector3 camFwd   = Vector3Normalize(Vector3Subtract(camera.target, camera.position));
+    Vector3 camRight = Vector3Normalize(Vector3CrossProduct(camFwd, camera.up));
+    Vector3 camUp    = Vector3CrossProduct(camRight, camFwd);
+
+    // Optional base pitch rotates camFwd / camUp around camRight (negative = nose down).
+    Vector3 fwd = camFwd, up = camUp;
+    if (CRIG_BASE_PITCH != 0.0f) {
+        float cp = cosf(CRIG_BASE_PITCH), sp = sinf(CRIG_BASE_PITCH);
+        fwd = (Vector3){
+            camFwd.x * cp + camUp.x * sp,
+            camFwd.y * cp + camUp.y * sp,
+            camFwd.z * cp + camUp.z * sp,
+        };
+        up = (Vector3){
+            camUp.x * cp - camFwd.x * sp,
+            camUp.y * cp - camFwd.y * sp,
+            camUp.z * cp - camFwd.z * sp,
+        };
+        fwd = Vector3Normalize(fwd);
+        up  = Vector3Normalize(up);
+    }
+    Vector3 right = Vector3Normalize(Vector3CrossProduct(fwd, camera.up));
+
+    // Anchor: origin near camera.position + small static offsets.
+    // CRIG_FWD_OFFSET, CRIG_RIGHT_OFFSET, CRIG_DOWN_OFFSET are the tuning
+    // constants at the top of this file.
+    Vector3 anchor = camera.position;
+    anchor = Vector3Add(anchor, Vector3Scale(camFwd,   CRIG_FWD_OFFSET));
+    anchor = Vector3Add(anchor, Vector3Scale(camRight,  CRIG_RIGHT_OFFSET));
+    anchor = Vector3Add(anchor, Vector3Scale(camUp,    -CRIG_DOWN_OFFSET));
+
+    // Walk-bob / sprint-sink-shake applied as a world-space offset (same as
+    // the arms path — arms+gun ride the same root so the gun follows for free).
+    Vector3 moveOff; float moveTilt;
+    ViewmodelMotion(me, fwd, right, up, &moveOff, &moveTilt);
+    (void)moveTilt;  // no extra tilt on combined rig (it's in the clip)
+    anchor = Vector3Add(anchor, moveOff);
+
+    // Build the 4×4 column-major root matrix (raylib convention):
+    //   col 0 = model +X → world right  (scaled by CRIG_SCALE)
+    //   col 1 = model +Y → world up     (scaled)
+    //   col 2 = model -Z → world fwd    (negated, scaled)
+    //   col 3 = translation
+    float s = CRIG_SCALE;
+    Vector3 cx = Vector3Scale(right, s);     // model +X → camera right
+    Vector3 cy = Vector3Scale(up,    s);     // model +Y → camera up
+    Vector3 cz = Vector3Scale(fwd,  -s);     // model -Z → camera fwd (negate)
+    Matrix root;
+    root.m0 = cx.x; root.m4 = cy.x; root.m8  = cz.x; root.m12 = anchor.x;
+    root.m1 = cx.y; root.m5 = cy.y; root.m9  = cz.y; root.m13 = anchor.y;
+    root.m2 = cx.z; root.m6 = cy.z; root.m10 = cz.z; root.m14 = anchor.z;
+    root.m3 = 0;    root.m7 = 0;    root.m11 = 0;    root.m15 = 1;
+
+    am->model.transform = root;
+
+    // Draw under flat lighting (same treatment as the arms path) so the rig
+    // doesn't colour-swing with the world directional light as the player
+    // looks around.
+    if (worldSkinnedShaderLoaded) {
+        Vector3 flatSun = { 0.25f, 0.26f, 0.30f };
+        Vector3 flatAmb = { 1.30f, 1.31f, 1.36f };
+        rlDrawRenderBatchActive();
+        SetShaderValue(worldSkinnedShader, worldSkinnedShader_sunColorLoc,
+                       &flatSun, SHADER_UNIFORM_VEC3);
+        SetShaderValue(worldSkinnedShader, worldSkinnedShader_ambientColorLoc,
+                       &flatAmb, SHADER_UNIFORM_VEC3);
+        DrawModel(am->model, (Vector3){0,0,0}, 1.0f, WHITE);
+        rlDrawRenderBatchActive();
+        SetShaderValue(worldSkinnedShader, worldSkinnedShader_sunColorLoc,
+                       &sunColor, SHADER_UNIFORM_VEC3);
+        SetShaderValue(worldSkinnedShader, worldSkinnedShader_ambientColorLoc,
+                       &ambientColor, SHADER_UNIFORM_VEC3);
+    } else {
+        DrawModel(am->model, (Vector3){0,0,0}, 1.0f, WHITE);
+    }
 }
 
 // Shared first-person arms + the equipped gun bolted to the hand.R bone. Used
@@ -275,9 +484,14 @@ void Viewmodel_DrawFirstPerson(Camera camera) {
     int wi = me->inventory[me->currentSlot].weaponIdx;
     if (wi < 0 || wi >= W_COUNT) return;
     if (!weaponModelLoaded[wi]) return;
-    // All guns use the shared arms + gun bolted to hand.R (skinnable arms),
-    // falling through to the legacy gun-only floating OBJ path below only if
-    // arms_vm.glb isn't loaded (graceful degradation, never crashes).
+    // --- Fallback priority: combined rig → shared arms → gun-only OBJ ---
+    // 1. Combined per-weapon rig (arms + gun + mechanical parts in one glTF).
+    //    Used if data/weapons/<id>/<id>_vm.glb was loaded successfully.
+    if (wi >= 0 && wi < W_COUNT && crigVM[wi].loaded) {
+        DrawCombinedRigViewmodel(camera, wi);
+        return;
+    }
+    // 2. Shared arms + gun bolted to hand.R bone (arms_vm.glb path).
     if (armsVM.loaded && avmHandR >= 0) { DrawArmsViewmodel(camera, wi); return; }
 
     // ---- viewmodel anim state (local to the player's render) ----

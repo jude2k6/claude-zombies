@@ -81,8 +81,9 @@ static int Dev_ScreenshotViewmodels(void) {
     Weapons_Load();
     Assets_Load();
     Assets_ApplyWorldShader();
-    Viewmodel_LoadArms();     // shared arms + bolted gun (all 5 guns)
-    vmDebugMarkers = true;    // hand-bone markers for vm_grip_* tuning
+    Viewmodel_LoadArms();          // shared arms + bolted gun (fallback path)
+    Viewmodel_LoadCombinedRigs();  // per-weapon combined rigs (takes priority when loaded)
+    vmDebugMarkers = true;         // hand-bone markers for vm_grip_* tuning (arms path only)
 
     // Need a minimal level so Render_World3D doesn't barf on the
     // walls/floor draw paths. Level_Build initializes the hardcoded
@@ -148,6 +149,7 @@ static int Dev_ScreenshotViewmodels(void) {
         TakeScreenshot(fname);
         fprintf(stderr, "wrote %s\n", fname);
     }
+    Viewmodel_UnloadCombinedRigs();
     Assets_Unload();
     Weapons_Unload();
     CloseWindow();

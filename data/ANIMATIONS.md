@@ -121,6 +121,17 @@ clips are authored once.
 > remains on disk as authored-but-unused content. New guns follow the
 > shared-arms model, not a combined glb.
 >
+> ✅ **2026-06-13 (later): SUPERSEDED by combined per-weapon rigs — proven on
+> the MP5.** The shared-arms + bone-bolted-gun approach described above is no
+> longer the path for new guns. Each gun is now ONE rigged `.glb` (arms + gun +
+> mechanism bones, hands posed on the gun) with its own clip set; the engine
+> auto-loads `data/weapons/<id>/<id>_vm.glb` and plays it
+> (`viewmodel.c:DrawCombinedRigViewmodel`). This kills the hand-placement bug
+> (hands are authored on the gun) and enables moving parts (the MP5's charging
+> handle racks). Authoring recipe: `blender-game-asset` skill → "Combined
+> per-weapon viewmodel rig — proven recipe". Decision: `docs/arms-rig-
+> generalisation.md` §0. The struggle below is retained for historical context.
+>
 > ⚠️ **2026-06-13: the hands still don't sit on the guns.** A Blender pass
 > (commit 5cf3a4e) welded the arm meshes (were disconnected vertex islands)
 > and re-exported with `export_yup=False` so the forearms point forward —

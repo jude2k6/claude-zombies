@@ -12,7 +12,45 @@ and **enet 1.3.18** (all via CMake `FetchContent`). Host-authoritative
 
 Repo: `git@github.com:jude2k6/claude-zombies.git` · branch: `main`.
 
-## 🚧 IN PROGRESS (2026-06-13) — viewmodel hands, read me first
+## ✅ DONE (2026-06-13 later) — MP5 combined viewmodel rig + engine path
+
+The combined per-weapon viewmodel architecture (decided in
+`docs/arms-rig-generalisation.md` §0) is now **proven on the MP5**, end to end:
+
+- ✅ **Asset:** `data/weapons/smg/smg_vm.glb` — ONE rigged glTF: arms + hands +
+  MP5 + mechanism bones (`bolt`, `magazine`), hands posed ON the gun (no runtime
+  seating). 9 bones, 9 meshes, 8 clips (`idle fire reload reload_empty raise
+  lower sprint inspect`). Integrity audit PASS. `reload_empty` racks the
+  charging handle (`bolt` −12 mm open → −32 mm yank → 0 release). Authored
+  +Y-forward / `export_yup=True` / real metric, **origin at the eye** with the
+  rig hanging below+forward (model AABB ≈ x[-0.13,0.13] y[-0.30,0] z[-0.68,0.05]).
+- ✅ **Engine:** new combined-rig playback path in `src/viewmodel.c`
+  (`Viewmodel_LoadCombinedRigs` + `DrawCombinedRigViewmodel`). Auto-discovers
+  `data/weapons/<id>/<id>_vm.glb` per weapon (no per-gun code), plays the clip
+  set on the skinned model, draws it in camera space. **Fallback order is
+  combined rig → shared-arms-bolt → gun-only OBJ**, so the other 4 guns render
+  exactly as before. Verified in-engine: `--anim-test` loads/deforms;
+  `--screenshot-viewmodels` frames the MP5 correctly in first person.
+- ✅ **Framing is shared `CRIG_*` constants** at the top of
+  `DrawCombinedRigViewmodel` (scale 0.9, fwd 0.14, right 0.07, down 0.07, base
+  pitch 0). **Debug lesson (recorded so we don't re-chase it):** a combined rig
+  authored origin-at-eye is *invisible* if anchored exactly at the camera (you're
+  embedded in it / it clips the lens) — it is NOT a shader/skinning bug. Isolate
+  by drawing the model via `Anim_Draw` a few metres ahead; if it shows there,
+  it's purely the framing transform. Push it off the lens with `CRIG_FWD_OFFSET`
+  and keep `CRIG_DOWN_OFFSET` small (the model already hangs below its origin).
+- ℹ️ The legacy `pistol_vm.glb` (a pre-convention combined rig) is now
+  auto-picked-up by this path too and renders acceptably — consistent with §0's
+  "reconsider that removal". It should still be re-authored to the MP5 recipe.
+
+**NEXT:** author guns 2–5 (`pistol/shotgun/rifle/raygun` `_vm.glb`) via the
+combined-rig recipe now captured in the `blender-game-asset` skill ("Combined
+per-weapon viewmodel rig — proven recipe"), re-screenshot to confirm framing
+holds. Once all 5 exist, **retire the bolt-on path**:
+`armsVM`/`DrawArmsViewmodel`/`weaponGrip[]`/`vm_grip_*` parsing/`vmDebugMarkers`
+and the gun-only OBJ viewmodel fallback.
+
+<details><summary>Historical: the abandoned hand-placement struggle (pre-decision)</summary>
 
 A working session opened 2026-06-13 to (a) confirm yesterday's two big
 claims actually landed and (b) fix the viewmodel hand placement, which is
@@ -90,6 +128,8 @@ charging-handle rack), retire the bolt-on-OBJ/`vm_grip`/`weaponGrip[]` path,
 restore skinned-glTF viewmodel playback. See the doc's implementation path.
 
 **If this section still says IN PROGRESS, the per-weapon rigs are not built.**
+
+</details>
 
 ## Current state (2026-06-12)
 

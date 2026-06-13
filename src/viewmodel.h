@@ -9,6 +9,14 @@
 void Viewmodel_LoadArms(void);
 void Viewmodel_UnloadArms(void);
 
+// Load / unload per-weapon combined viewmodel rigs.
+// Each weapon may have data/weapons/<id>/<id>_vm.glb (arms + gun + mechanism
+// in one rigged glTF). Missing files are silently skipped — that weapon falls
+// through to the shared-arms path or gun-only OBJ. Call after Assets_Load so
+// worldSkinnedShader is available.
+void Viewmodel_LoadCombinedRigs(void);
+void Viewmodel_UnloadCombinedRigs(void);
+
 // Draw the first-person viewmodel for the local player.
 // Must be called inside an active BeginMode3D scope.
 void Viewmodel_DrawFirstPerson(Camera camera);

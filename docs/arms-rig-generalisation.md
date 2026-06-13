@@ -10,6 +10,74 @@ re-rigging or re-animating per weapon. Adding a gun = drop in a mesh + a few num
 
 ---
 
+## 0. DECISION (2026-06-13) — this supersedes §2's recommendation
+
+The clean-room recommendation below (static gun OBJ bolted to `hand.R` + one shared arm
+clip set + left-arm IK) is **NOT adopted.** It optimises for cheap authoring but, by design,
+**cannot do two things the project requires:**
+
+- **Mechanical gun parts** — a charging handle that racks back, slide blowback, magazine
+  drop/insert, hammer fall, cylinder swing, break-action. A rigid mesh on a bone can't
+  articulate internally.
+- **Per-gun animations** — a single shared clip set forces every weapon to use the same
+  retimed reload/fire motion. No Olympia break-open, no MP5 mag-swap-and-rack, no Ray Gun
+  cell swap as distinct motions.
+
+**Chosen architecture: combined per-weapon viewmodel rigs.** Each weapon is ONE rigged glTF
+containing arms + gun + the gun's mechanical part-bones, with its OWN per-gun clip set
+(idle / raise / lower / fire / reload / reload_empty / sprint / inspect). The animator poses
+the hands AND the mechanism together in the same file.
+
+Why this is the correct call:
+
+- **Mechanical parts are free** — the charging handle / slide / mag / hammer are bones in the
+  rig; the relevant clip animates them, and the hand that operates them is choreographed in the
+  same clip (so the support hand and the charging handle move together — a sync problem that is
+  intractable if the gun and arms are separate rigs).
+- **Per-gun animation identity is free** — every gun owns its clips.
+- **It eliminates the hand-placement bug entirely** — when hands and gun are authored in one
+  rig, the hands are on the gun by construction. No runtime seating, no `vm_grip_*`, no
+  bone-bolting math, no IK solver. The engine just plays clips on a skinned model, which
+  `anim.c` already supports (this is what `pistol_vm.glb` was before the combined path was
+  removed — that removal should be reconsidered).
+
+The cost, accepted deliberately: **each gun must be authored as a full rig + clip set in
+Blender** — no "drop in an OBJ + tune four numbers." `arms_vm.glb` becomes the *authoring base*
+(arm mesh + the canonical `root/upperarm/forearm/hand` skeleton you start each weapon from),
+not a runtime-shared bolt target.
+
+What still carries over from the analysis below: the **model-space convention** (muzzle −Z,
+up +Y, origin at receiver — §2.2), the **measured grip/region positions** (§1.2, now an
+authoring reference for where to pose the hands), the **scale audit** (pistol OBJ ~2.5×
+oversized, raygun mildly so — fix at author time so all rigs share one metric), and the finding
+that **no `inspect` clip exists yet** and `idle_pistol` is absent.
+
+### Per-weapon mechanism checklist (what each rig must animate)
+
+| weapon | mechanical part-bones | empty-reload mechanism |
+|---|---|---|
+| M1911 pistol | slide, hammer, magazine | slide locks back → released to chamber |
+| MP5 SMG | bolt/charging handle, magazine | mag swap → **yank charging handle back** |
+| Olympia shotgun | break hinge, 2 shells | break open → eject → insert 2 → snap closed |
+| M14 rifle | op-rod/charging handle, bolt (locks back), magazine | mag swap → op-rod/bolt release |
+| Ray Gun | energy cell, coils | pop cell → insert fresh cell → coils spin up |
+
+### Implementation path (engine + assets)
+
+1. **Engine:** reuse `anim.c` skinned-glTF playback per weapon (one `AnimState` per local
+   viewmodel); retire the bolt-on-OBJ + `vm_grip_*` + `weaponGrip[]` path. This is *simpler*
+   than the rejected IK approach — no solver to write.
+2. **Convention:** lock the combined-rig contract — canonical arm bone names, mechanism bone
+   naming per archetype, clip names, −Z muzzle, one shared metric scale.
+3. **Assets:** author the 5 weapon rigs from the `arms_vm.glb` base via the
+   `blender-game-asset` skill (rig-first + connectivity audit). Re-scale the pistol/raygun to
+   the shared metric at author time.
+4. **Prove it on one gun first** (recommend the MP5 — it exercises the charging-handle rack you
+   specifically want), validate via `--anim-test` and `--screenshot-viewmodels`, then roll the
+   pattern across the rest.
+
+---
+
 ## 1. Inventory of facts (measured from the assets)
 
 ### 1.1 The shared arms rig — `data/models/arms_vm.glb`

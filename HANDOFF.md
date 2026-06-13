@@ -68,17 +68,28 @@ result — read carefully before the next attempt:**
   renders: SMG ~reaches the gun, pistol sits BELOW the hand, rifle stands
   vertical. **All seating numbers must be re-derived against the new frame.**
 
-**NEXT (this is iterative VISUAL tuning — a blind agent cannot converge on
-it; needs render→adjust→render loops):**
-1. Re-derive the gun bolt orientation for the new arms frame. Likely the
-   base `MatrixRotateX(PI*0.5)` in `viewmodel.c` needs to change (or move to
-   a per-gun `vm_grip_rot`). Verify with `--screenshot-viewmodels`.
-2. Re-tune each `vm_grip_pos`/`scale` so the modelled grip lands in `hand.R`.
-3. Then (optional) author the `idle_pistol` clip (still missing).
-NOTE pistol.obj is ~2.5× real size (HANDOFF gotcha) so its `vm_grip_scale`
-0.6 is doing extra work — expect the pistol to need the most attention.
+**DIRECTION CHANGED (2026-06-13) — the bolt-on + `vm_grip_*` re-seating plan
+is ABANDONED.** Jude wants per-gun animations AND mechanical gun parts (a
+charging handle that racks, slide blowback, mag swap). The shared-arms +
+bolted-OBJ path can't do either. **New chosen architecture: combined
+per-weapon viewmodel rigs** (arms + gun + mechanism part-bones in ONE rigged
+glTF, with a per-gun clip set). This also dissolves the hand-placement bug —
+hands are authored onto the gun, so there's no runtime seating, no
+`vm_grip_*`, no IK. Engine just plays clips on a skinned model (`anim.c`
+already does this; it's what `pistol_vm.glb` was before the combined path was
+removed — reconsider that removal). Full design + per-weapon mechanism
+checklist + implementation path: `docs/arms-rig-generalisation.md` §0.
 
-**If this section still says IN PROGRESS, the hands are NOT yet on the guns.**
+The re-seating agent's abandoned `vm_grip_*`/`viewmodel.c` edits were reverted
+(working tree clean). The mesh-weld + forward-facing re-export of
+`arms_vm.glb` (5cf3a4e) is KEPT — it's now the authoring base for the
+per-weapon rigs.
+
+**NEXT:** author the 5 combined weapon rigs (start with the MP5 to prove the
+charging-handle rack), retire the bolt-on-OBJ/`vm_grip`/`weaponGrip[]` path,
+restore skinned-glTF viewmodel playback. See the doc's implementation path.
+
+**If this section still says IN PROGRESS, the per-weapon rigs are not built.**
 
 ## Current state (2026-06-12)
 

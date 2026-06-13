@@ -117,9 +117,17 @@ connectivity auditor). Remaining work is authoring + per-entity wiring:
         dump), so the base `MatrixRotateX(PI*0.5)` in
         `viewmodel.c:DrawArmsViewmodel` AND every `.weapon` `vm_grip_*` value
         are now stale. Re-verified renders: SMG ~reaches the gun, pistol sits
-        below the hand, rifle vertical. NEXT (iterative VISUAL tuning, can't
-        be done blind): re-derive the gun bolt rotation for the new frame,
-        then re-tune each `vm_grip_pos/scale`. See HANDOFF "IN PROGRESS".
+        below the hand, rifle vertical.
+        **DIRECTION CHANGED 2026-06-13: bolt-on + vm_grip re-seating ABANDONED.**
+        Jude wants per-gun animations + mechanical parts (racking charging
+        handle, slide blowback, mag swap), which the bolt-on path can't do.
+        New architecture: combined per-weapon viewmodel rigs (arms + gun +
+        mechanism bones in one glTF, per-gun clips) — also removes the
+        hand-seating problem entirely (no vm_grip/IK). The vm_grip/viewmodel.c
+        tuning was reverted; arms_vm.glb (5cf3a4e weld+re-export) kept as the
+        authoring base. Design + plan: `docs/arms-rig-generalisation.md` §0.
+        NEXT: author the 5 rigs (start MP5 for the charging handle), retire
+        the weaponGrip[]/vm_grip path, restore skinned-glTF VM playback.
   - [ ] **Author `idle_pistol` clip in `arms_vm.glb`.** `vm_pose PISTOL`
         (pistol.weapon) + the `avmIdlePistol` lookup are wired in code, but
         the clip doesn't exist in the asset (only 7 clips ship), so it's a

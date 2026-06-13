@@ -1,5 +1,16 @@
 # TODO
 
+> ▶ **NEXT SESSION — START HERE (2026-06-13):** Build the viewmodel as
+> **combined per-weapon rigs** (arms + gun + mechanism part-bones in ONE glTF,
+> per-gun clips) — this is the agreed way to get per-gun animations + mechanical
+> parts (racking charging handle, slide blowback, mag swap), and it removes the
+> hand-placement bug for free. Full decision + per-weapon mechanism checklist +
+> implementation path: **`docs/arms-rig-generalisation.md` §0**. Status/context:
+> **`HANDOFF.md` top "IN PROGRESS"** section. First step: author the **MP5** rig
+> as the proof (it exercises the charging-handle rack), validate via
+> `--anim-test` + `--screenshot-viewmodels`, then roll across the other 4.
+> NOTE: this revives the combined-glTF VM path removed in 772606f.
+
 Live punch list, ordered by impact-per-effort. The architecture for almost
 every item below is already in place — these are mostly authoring + small
 shader / system additions.

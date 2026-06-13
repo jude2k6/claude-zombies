@@ -19,11 +19,16 @@ The combined per-weapon viewmodel architecture (decided in
 
 - ✅ **Asset:** `data/weapons/smg/smg_vm.glb` — ONE rigged glTF: arms + hands +
   MP5 + mechanism bones (`bolt`, `magazine`), hands posed ON the gun (no runtime
-  seating). 9 bones, 9 meshes, 8 clips (`idle fire reload reload_empty raise
-  lower sprint inspect`). Integrity audit PASS. `reload_empty` racks the
-  charging handle (`bolt` −12 mm open → −32 mm yank → 0 release). Authored
-  +Y-forward / `export_yup=True` / real metric, **origin at the eye** with the
-  rig hanging below+forward (model AABB ≈ x[-0.13,0.13] y[-0.30,0] z[-0.68,0.05]).
+  seating). 9 bones, 8 clips (`idle fire reload reload_empty raise lower sprint
+  inspect`). Integrity audit PASS. `reload_empty` racks the charging handle.
+  Authored +Y-forward / `export_yup=True` / real metric, **origin at the eye**.
+  **v2 (re-authored after v1 was too crude):** proper MP5 silhouette — **3,984
+  tris, 40 single-island parts** (stepped receiver, slim ribbed handguard, A3
+  twin-tube stock, top-left charging-handle tube, hooded front + drum rear
+  sights, real trigger-guard loop, forward-curved mag). Hold re-posed lower-
+  right-forward of the eye so it frames in the lower screen, not the face.
+  **Lesson: hit the `ASSETS.md` ~3–5k tri budget by building distinct
+  single-island objects (40 here), not one extruded block (v1 was ~64 verts).**
 - ✅ **Engine:** new combined-rig playback path in `src/viewmodel.c`
   (`Viewmodel_LoadCombinedRigs` + `DrawCombinedRigViewmodel`). Auto-discovers
   `data/weapons/<id>/<id>_vm.glb` per weapon (no per-gun code), plays the clip
@@ -32,16 +37,18 @@ The combined per-weapon viewmodel architecture (decided in
   exactly as before. Verified in-engine: `--anim-test` loads/deforms;
   `--screenshot-viewmodels` frames the MP5 correctly in first person.
 - ✅ **Framing is shared `CRIG_*` constants** at the top of
-  `DrawCombinedRigViewmodel` (scale 0.9, fwd 0.14, right 0.07, down 0.07, base
+  `DrawCombinedRigViewmodel` (scale 0.9, fwd 0.14, right 0.08, down 0.03, base
   pitch 0). **Debug lesson (recorded so we don't re-chase it):** a combined rig
   authored origin-at-eye is *invisible* if anchored exactly at the camera (you're
   embedded in it / it clips the lens) — it is NOT a shader/skinning bug. Isolate
   by drawing the model via `Anim_Draw` a few metres ahead; if it shows there,
   it's purely the framing transform. Push it off the lens with `CRIG_FWD_OFFSET`
   and keep `CRIG_DOWN_OFFSET` small (the model already hangs below its origin).
-- ℹ️ The legacy `pistol_vm.glb` (a pre-convention combined rig) is now
-  auto-picked-up by this path too and renders acceptably — consistent with §0's
-  "reconsider that removal". It should still be re-authored to the MP5 recipe.
+- ℹ️ The legacy `pistol_vm.glb` was briefly auto-used by this path but its hold
+  was wrong (too high/near face), so it's been **renamed to
+  `pistol_vm.legacy.glb`** to take it off auto-discovery — the pistol reverts to
+  its prior arms-bolt hold (which looked better) until it gets a proper combined
+  rig authored to the MP5 recipe.
 
 **NEXT:** author guns 2–5 (`pistol/shotgun/rifle/raygun` `_vm.glb`) via the
 combined-rig recipe now captured in the `blender-game-asset` skill ("Combined

@@ -27,8 +27,8 @@
 // arms; start with near-identity framing and small downward offset.
 #define CRIG_SCALE        0.9f   // uniform framing scale for combined-rig VMs
 #define CRIG_FWD_OFFSET   0.14f  // metres forward — push the rig off the lens
-#define CRIG_RIGHT_OFFSET 0.07f  // metres right from camera.position
-#define CRIG_DOWN_OFFSET  0.07f  // metres downward from camera.position (positive = down)
+#define CRIG_RIGHT_OFFSET 0.08f  // metres right from camera.position
+#define CRIG_DOWN_OFFSET  0.03f  // metres downward from camera.position (positive = down)
 // Optional base pitch (radians) applied before camera basis; negative tilts
 // muzzle down (matching a slight downward author pose). 0 = none.
 #define CRIG_BASE_PITCH   0.0f

@@ -204,7 +204,13 @@ the load log shows the expected mesh/material/bone/clip counts and no
   - **Part breakdown:** each mechanism part is its OWN single-island mesh,
     rigidly bound 100% to its bone (so it keys independently). Forearms
     gradient-blend `forearm.*`↔`hand.*` for a clean elbow/wrist; the rest is
-    rigid. 9 meshes, ~5 flat Principled-BSDF colour zones is plenty.
+    rigid. **Hit the `ASSETS.md` ~3–5k tri budget — do NOT ship a featureless
+    block.** The MP5 v1 was rejected for being ~64 verts; v2 that passed was
+    **40 single-island objects ≈ 3,984 tris** (receiver, ribbed handguard, A3
+    tube stock, charging-handle tube, hooded front + drum rear sights, real
+    trigger-guard loop, curved mag, bevelled edges). Build the silhouette from
+    many separate overlapping single-island parts, each rigidly bound — that's
+    how you get detail AND pass the per-object "1 island" audit.
   - **Facing / scale / ORIGIN (this is the contract the engine draws against —
     get it right or the viewmodel is invisible/mis-framed):** author facing
     **+Y in Blender, export `export_yup=True`** (same as zombie/player; → in

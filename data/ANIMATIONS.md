@@ -113,11 +113,22 @@ clips are authored once.
 > composed as `gunLocal * bone * root`). So authoring a new gun viewmodel = just
 > the gun mesh (any of the existing world OBJs works); the arms, hand pose, and
 > recoil/reload motion are inherited. **The arms model must include a `hand.R`
-> bone** for the gun to ride. A per-gun grip nudge (`gunGrip[]` in `render.c`:
-> position/rotation/scale in hand-local metres) seats each gun in the hand —
-> tune it with `--screenshot-viewmodels`. The **M1911 is the exception**: it was
-> authored first as a *combined* arms+gun rig (`pistol_vm.glb`) and keeps its own
-> path. New guns should follow the shared-arms model, not bake a combined glb.
+> bone** for the gun to ride. A per-gun grip nudge (now the `vm_grip_pos/rot/
+> scale` keys of each `.weapon` file, read into `weaponGrip[]`; the code moved
+> from `render.c` to `viewmodel.c:DrawArmsViewmodel`) seats each gun — re-check
+> with `--screenshot-viewmodels`. **Since ef1afe2 the M1911 also rides the
+> shared arms path** (the `wi != W_PISTOL` gate is gone); `pistol_vm.glb`
+> remains on disk as authored-but-unused content. New guns follow the
+> shared-arms model, not a combined glb.
+>
+> ⚠️ **2026-06-13: the hands still don't sit on the guns.** The seat math is
+> self-consistent (gun + debug markers both ride `hand.R`), so the gap is an
+> ASSET problem in `arms_vm.glb` — a hand/forearm mesh that isn't tracking its
+> bone (unweighted / wrong weights), or an `idle` pose that never closes on the
+> bore. Being fixed in Blender; do NOT chase it with more `vm_grip_*` tweaks.
+> Note the asset ships **7 clips** (`fire idle lower raise reload reload_empty
+> sprint`) — the `idle_pistol` and `inspect` clips referenced elsewhere in this
+> doc are NOT in `arms_vm.glb` yet, so `vm_pose PISTOL` is currently a no-op.
 
 > Gameplay timings (current `.weapon` files): reload — pistol **1.3s**,
 > smg **1.8s**, shotgun **2.0s**, rifle **1.5s**, raygun **2.6s**. Fire
@@ -286,7 +297,9 @@ Keep these code-/shader-driven; rigging them is wasted effort.
 3. **M1911 viewmodel** with `idle`/`fire`/`reload`/`raise` — replaces the
    procedural viewmodel anim; proves the weapon view path + reload sync.
 4. Roll the viewmodel clip set across the other 4 guns (shared arm rig).
-   *Engine path done (`arms_vm.glb` + bone-bolted gun, 2026-06-03); remaining
-   work is tuning the per-gun `gunGrip[]` seating.*
+   *Engine path done (`arms_vm.glb` + bone-bolted gun, 2026-06-03). 🚧
+   2026-06-13: hands still don't sit on the guns — asset-side fix in progress
+   (bad skin weights / idle pose in `arms_vm.glb`), plus `idle_pistol` clip
+   still to author. See HANDOFF "IN PROGRESS".*
 5. Player third-person model (co-op visibility). *Done (`player.glb`, wired).*
 6. Machine polish (PaP, box, perks) as time allows.

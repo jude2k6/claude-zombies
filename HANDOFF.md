@@ -12,6 +12,48 @@ and **enet 1.3.18** (all via CMake `FetchContent`). Host-authoritative
 
 Repo: `git@github.com:jude2k6/claude-zombies.git` · branch: `main`.
 
+## 🚧 IN PROGRESS (2026-06-13) — viewmodel hands, read me first
+
+A working session opened 2026-06-13 to (a) confirm yesterday's two big
+claims actually landed and (b) fix the viewmodel hand placement, which is
+still visibly wrong on all 5 guns. If credits ran out mid-session, this is
+where things stood:
+
+**Verified DONE from the 2026-06-12 work:**
+- ✅ **Weapons are fully data-driven.** Confirmed in code: `WEAPONS[]` is
+  zeroed storage (`weapons.c:28`), the `.weapon` files are the only source
+  of stats, no `switch (weaponIdx)` stat tables remain in any `.c`. Builds
+  clean (`-Wall -Wextra`). All 5 `.weapon` files are complete and parsed.
+- ✅ **Blender pistol viewmodel anim** exists (`pistol_vm.glb`), and the
+  shared `arms_vm.glb` carries 7 clips: `fire idle lower raise reload
+  reload_empty sprint`.
+
+**Confirmed STILL BROKEN — the hand placement:**
+- ❌ **The hands do not sit on the guns** (re-ran `--screenshot-viewmodels`
+  2026-06-13: the bolted gun + the red/blue bone markers sit at eye-center
+  but the visible forearm meshes hang well below, disconnected). This is NOT
+  a tuning problem and three rounds of `vm_grip_*` numbers did not fix it:
+  the gun bolts to `hand.R` via `Anim_BoneMatrix` (frame-pose) and the debug
+  markers use the *same* matrix, so they always agree with each other and
+  with the gun — meaning the seat math is self-consistent. The arm *mesh* is
+  GPU-skinned separately. **Leading hypothesis: a hand/forearm mesh in
+  `arms_vm.glb` is unweighted or wrongly weighted, so it stays at bind pose
+  while the bone (and gun) animate up — the hand floats free of the gun.**
+  Alternative: the `idle` pose simply never closes the hands on the bore.
+- ❌ **`idle_pistol` clip does not exist.** Commit d215d1b wired
+  `vm_pose PISTOL` → an `idle_pistol` clip, but `arms_vm.glb` has only the
+  7 clips above (no `idle_pistol`, no `inspect` either, despite TODO/HANDOFF
+  prose). `avmIdlePistol` resolves to -1, so pistols silently fall back to
+  the two-handed foregrip `idle`. The `vm_pose` feature is currently a no-op.
+
+**Dispatched (background Sonnet agent, blender-game-asset skill):** diagnose
+`arms_vm.glb` skin weights + idle pose in Blender, fix so both hands close on
+a grip line through `hand.R`, re-export to the same path (bone + clip names
+preserved), and add `idle_pistol` if time permits. Asset-only — no C edits.
+When it returns, the main session rebuilds, re-runs `--screenshot-viewmodels`,
+and verifies before marking this done. **If this section still says IN
+PROGRESS, the fix is unverified — check the agent's report / re-screenshot.**
+
 ## Current state (2026-06-12)
 
 Weapon-system pass (2026-06-12, latest — commit ef1afe2):
@@ -774,19 +816,28 @@ data/
     (`worldSkinnedShader`); the gun is a rigid OBJ (`worldShader`). Each gets its
     own flat sun/ambient override (restored after) so neither colour-swings —
     note the gun's override is darker (it's gunmetal, not skin).
-  - **Grips are data-driven + re-seated (ef1afe2, abf709e).** Seating lives
-    in the `vm_grip_pos/rot/scale` keys of each `.weapon` file
-    (`weaponGrip[]` is just storage). The arms idle pose is a true foregrip
-    hold along the bore, so the seat is pure translation — but the OBJ
-    origins are NOT at the grips, so each gun has a per-gun `vm_grip_pos`
-    that slides the modelled grip into the hand (see the .weapon files;
-    derived from the OBJ underside depth profiles + the ~4 cm hand-bone
-    wrist→palm drop). The old a8b1cfb `gunGrip[]` numbers were tuned
-    against a mid-raise screenshot pose (single-frame devtool bug, fixed) —
-    don't resurrect them, and don't add rotations. The arms model is
-    authored at real metric; one `VM_SCALE` (0.62) sizes the whole
-    assembly. New gun = edit keys, rerun `--screenshot-viewmodels` (grip
-    markers: red = hand.R + axes, blue = hand.L), no recompile.
+  - **Grips are data-driven (ef1afe2, abf709e) — BUT the hands still don't
+    sit on the guns as of 2026-06-13 (see the IN PROGRESS section at the top
+    of this file).** Seating lives in the `vm_grip_pos/rot/scale` keys of each
+    `.weapon` file (`weaponGrip[]` is just storage). The seat math is
+    self-consistent — the gun and the debug markers both ride `hand.R` via
+    `Anim_BoneMatrix`, so tuning `vm_grip_*` moves the gun relative to a hand
+    bone that the *visible mesh isn't tracking*. **Do NOT keep tuning these
+    numbers to chase the gap; the fix is in the asset** (`arms_vm.glb` skin
+    weights / idle pose), being handled in Blender. Notes that still hold:
+    each gun's OBJ origin is NOT at its grip, so a per-gun translation is
+    legitimately needed; the arms model is authored at real metric and one
+    `VM_SCALE` (0.62) sizes the whole assembly; don't resurrect the old
+    a8b1cfb `gunGrip[]` numbers (tuned against a mid-raise single-frame
+    devtool bug, since fixed). Re-check with `--screenshot-viewmodels` (grip
+    markers: red = hand.R + axes, blue = hand.L; stderr `vmdbg` line dumps the
+    hand-bone positions in arms-model space), no recompile.
+  - **`idle_pistol` / `inspect` clips are NOT in `arms_vm.glb`.** The asset
+    ships 7 clips: `fire idle lower raise reload reload_empty sprint`. The
+    `vm_pose PISTOL` key (pistol.weapon) asks for an `idle_pistol` clip that
+    doesn't exist, so `avmIdlePistol == -1` and pistols fall back to the
+    two-handed `idle`. Authoring `idle_pistol` is part of the in-progress
+    Blender pass; until then `vm_pose` is effectively a no-op.
   - **Falls back gracefully.** If `arms_vm.glb` is missing or has no `hand.R`
     bone, `Viewmodel_DrawFirstPerson` drops through to the legacy procedural
     gun-only OBJ viewmodel for those 4 guns — nothing crashes.

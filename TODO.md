@@ -107,6 +107,25 @@ connectivity auditor). Remaining work is authoring + per-entity wiring:
         `W_PISTOL` uses the gun-only OBJ path. Still open: authoring per-gun
         vm clips (fire blowback etc. currently come from the shared arms
         clips). See HANDOFF "shared arms viewmodel" gotcha.
+  - [~] **🚧 IN PROGRESS (2026-06-13): hands don't sit on the guns.**
+        Re-verified via `--screenshot-viewmodels`: the bolted gun + the
+        red/blue hand-bone markers sit at eye-center but the visible forearm
+        meshes hang below, disconnected — on ALL 5 guns. This is an ASSET bug,
+        not a tuning bug: the gun and the markers both ride `hand.R` through
+        `Anim_BoneMatrix`, so they always agree; the arm mesh is skinned
+        separately and isn't following the bone. Leading hypothesis: a hand/
+        forearm mesh in `arms_vm.glb` is unweighted / wrongly weighted (floats
+        at bind pose), or the `idle` pose never closes the hands on the bore.
+        A background Blender agent (blender-game-asset skill) is diagnosing +
+        re-exporting `arms_vm.glb`; main session verifies on return. DO NOT
+        chase this with more `vm_grip_*` number tweaks.
+  - [ ] **Author `idle_pistol` clip in `arms_vm.glb`.** `vm_pose PISTOL`
+        (pistol.weapon) + the `avmIdlePistol` lookup are wired in code, but
+        the clip doesn't exist in the asset (only 7 clips ship), so it's a
+        silent no-op and pistols use the two-handed foregrip idle. Add a
+        one-handed pistol hold (support hand cups the grip). Part of the
+        in-progress Blender pass above. (`inspect` is also referenced in prose
+        but absent from the asset — lower priority.)
 - [x] **Player third-person model** (`data/models/player.glb`) — authored +
       validated + WIRED. Rig-first soldier on the shared 17-bone humanoid family
       (same bone names as `zombie.glb`): skin-modifier stick-figure body in

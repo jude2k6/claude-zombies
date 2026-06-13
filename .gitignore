@@ -51,3 +51,4 @@ settings.cfg
 # screenshots / viewmodel captures dropped in the repo root (textures
 # under data/ are still tracked)
 /*.png
+*.blend1

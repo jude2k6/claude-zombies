@@ -197,24 +197,39 @@ the load log shows the expected mesh/material/bone/clip counts and no
 
 - **Combined per-weapon viewmodel rig — proven recipe (MP5 `smg_vm.glb`,
   2026-06-13).** Author guns 2–5 the same way:
-  - **Skeleton (9 bones for the MP5 archetype):** reuse the canonical arm bones
-    `root, upperarm.L/R, forearm.L/R, hand.L/R`, plus per-gun mechanism bones
-    parented to `root` (MP5: `bolt` = charging handle/reciprocating bolt,
-    `magazine`). The engine binds by **bone NAME** and plays baked model-space
-    poses, so **hierarchy doesn't matter to playback** — v1 used nested arm
-    chains (`upperarm→forearm→hand`), v2 made every bone a flat child of `root`;
-    both loaded fine. Use nested arm chains anyway, they're far easier to pose.
-    Keep the names exactly (case-sensitive).
+  - **Skeleton (13 bones for the MP5 archetype):** the canonical arm+hand bones
+    `root, upperarm.L/R, forearm.L/R, hand.L/R, fingers.L/R, thumb.L/R` (the
+    `fingers`/`thumb` bones are children of the matching `hand` so they ride the
+    wrist), plus per-gun mechanism bones parented to `root` (MP5: `bolt` =
+    charging handle/reciprocating bolt, `magazine`). The engine binds by **bone
+    NAME** and plays baked model-space poses, so **hierarchy doesn't matter to
+    playback** — but DO parent fingers/thumb under the hand so the curl follows
+    the wrist when you pose. Keep the names exactly (case-sensitive).
+  - **Gripping hands (2026-06-14 — required, replaces solid-box hands).** A solid
+    box hand can't grip a round part — it floats or clips. Build each hand as a
+    **C-clamp**: a `palm` (bound to `hand.*`), a curled **grooved finger-bank**
+    (one slab, extruded into an L so the fingertips curl OVER the part, 2–3 groove
+    bevels so it reads as 4 fingers but moves as ONE; bound to `fingers.*`), and
+    an **opposing `thumb`** angled in from the near side (bound to `thumb.*`). The
+    gun part nestles in the gap between thumb and fingers so contact reads as a
+    grip, not a clip. The `fingers.*` bone gives one curl DOF: **author it OPEN
+    (~+0.38 rad about local X uncurls — calibrate the sign) when the support hand
+    releases/reaches and CLOSED (0) when gripping**, so reloads look alive. The
+    left hand wraps a horizontal handguard; the right wraps the (vertical) pistol
+    grip — build the canonical C-clamp once and rotate it onto each part.
+  - **Higher-poly arms.** Forearms are tapered **octagonal tubes** following the
+    `upperarm`→`forearm`→`hand` chain (NOT flat slabs), smooth-weighted
+    `upperarm.*`↔`forearm.*` with the blend centred on the elbow. Sleeve material
+    on the arm, glove material on the hands.
   - **Part breakdown:** each mechanism part is its OWN single-island mesh,
-    rigidly bound 100% to its bone (so it keys independently). Forearms
-    gradient-blend `forearm.*`↔`hand.*` for a clean elbow/wrist; the rest is
-    rigid. **Hit the `ASSETS.md` ~3–5k tri budget — do NOT ship a featureless
-    block.** The MP5 v1 was rejected for being ~64 verts; v2 that passed was
-    **40 single-island objects ≈ 3,984 tris** (receiver, ribbed handguard, A3
-    tube stock, charging-handle tube, hooded front + drum rear sights, real
-    trigger-guard loop, curved mag, bevelled edges). Build the silhouette from
-    many separate overlapping single-island parts, each rigidly bound — that's
-    how you get detail AND pass the per-object "1 island" audit.
+    rigidly bound 100% to its bone (so it keys independently). **Hit the
+    `ASSETS.md` ~3–5k tri budget — do NOT ship a featureless block.** The MP5 v1
+    was rejected for being ~64 verts; the shipping rig is **42 single-island
+    objects ≈ 3,120 tris** (receiver, ribbed handguard, A3 tube stock,
+    charging-handle tube, hooded front + drum rear sights, trigger-guard loop,
+    curved mag, the gripping hands + octagonal arms, bevelled edges). Build the
+    silhouette from many separate overlapping single-island parts, each rigidly
+    bound — that's how you get detail AND pass the per-object "1 island" audit.
   - **Facing / scale / ORIGIN (this is the contract the engine draws against —
     get it right or the viewmodel is invisible/mis-framed):** author facing
     **+Y in Blender, export `export_yup=True`** (same as zombie/player; → in
@@ -241,9 +256,24 @@ the load log shows the expected mesh/material/bone/clip counts and no
     needs them off — the support hand leaves only to fetch/seat the mag and work
     the charging handle in `reload`/`reload_empty`, and both lower off-weapon in
     `sprint`. Author the mechanism bone and the hand that operates it together in
-    the same clip (that sync is the whole reason for a combined rig).
-  - **Per-gun mechanism bones vary** (7 canonical arm bones + however many the
-    action needs): M1911 = `slide`,`hammer`,`magazine`; Olympia = break
+    the same clip (that sync is the whole reason for a combined rig). **Reload
+    must be mechanically real:** the support hand actually moves — releases the
+    handguard (fingers OPEN), drops to the magwell, the `magazine` bone travels
+    fully DOWN/out (not a token dip), fingers CLOSE on a fresh mag, seat it, hand
+    returns to the handguard. Don't animate the mag floating out by itself with
+    static hands (the bug the first MP5 shipped with).
+  - **Mechanism gotchas (hit on the MP5):** (a) the MP5 charging handle is
+    **non-reciprocating** — keep the `bolt` bone STATIC in every clip and move it
+    ONLY for the `reload_empty` rack (a forward bolt-bob during `fire` looks
+    wrong; zero it). (b) Animate the mechanism bones (`bolt`,`magazine`) in
+    **bone-LOCAL** space, not world — authoring them in world space lets them
+    detach from the gun when `root` moves (recoil/dip). (c) **Keep one rotation
+    mode for the whole rig** (this rig is XYZ euler): if you flip a bone to euler
+    for a test and then keyframe `rotation_quaternion`, the keys are silently
+    ignored and that bone won't animate — key the mode the bone is actually in.
+  - **Per-gun mechanism bones vary** (11 canonical arm+hand bones —
+    `root`+6 arm+4 finger/thumb — plus however many the action needs):
+    M1911 = `slide`,`hammer`,`magazine`; Olympia = break
     `hinge` + 2 shells; M14 = `oprod`/charging handle,`bolt`,`magazine`; Ray Gun
     = energy `cell`,`coils`. Full per-archetype list + empty-reload mechanism:
     `docs/arms-rig-generalisation.md` §0 and the blowback table in `ANIMATIONS.md`.

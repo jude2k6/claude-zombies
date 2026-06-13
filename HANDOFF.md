@@ -12,6 +12,39 @@ and **enet 1.3.18** (all via CMake `FetchContent`). Host-authoritative
 
 Repo: `git@github.com:jude2k6/claude-zombies.git` · branch: `main`.
 
+## ✅ DONE (2026-06-14) — MP5 gripping hands + higher-poly arms + correct reload
+
+Follow-up pass fixing what Jude flagged on the shipped MP5 viewmodel: the reload
+"made no sense" (the magazine floated out while both hands sat frozen), only one
+hand was actually on the gun, and the solid-box hands clipped the gun. All fixed
+on `data/weapons/smg/smg_vm.glb` (now **13 bones, 42 meshes, ~3,120 tris**, audit
+PASS, loads in-engine clean). A **`.blend` source is now kept** at
+`data/weapons/smg/smg_vm.blend` (Jude wants `.blend`s retained until the full
+model set is OK — see the memory note; the asset previously had no source).
+
+- ✅ **Gripping hands.** Solid-box hands replaced with C-clamp hands: `palm`
+  (`hand.*`) + opposing `thumb` (`thumb.*`) + a curled, grooved **finger-bank**
+  (`fingers.*`, moves as one). Added 4 bones (`fingers.L/R`, `thumb.L/R`). The
+  gun part now nestles between thumb and fingers — reads as a grip, not a clip.
+- ✅ **Both hands on the gun.** Root cause of the floating left hand: the left
+  shoulder is at x≈−0.18 but the handguard at x≈+0.09/y≈0.44 — ~0.73 m away,
+  beyond the ~0.66 m arm. Fixed by shifting the whole left arm forward+inboard
+  (a local pose offset, stamped into every static clip) so it actually reaches.
+- ✅ **Higher-poly arms.** Flat slab forearms → tapered **octagonal tubes** along
+  the arm chain, smooth-weighted at the elbow; sleeve vs glove materials.
+- ✅ **Mechanically-correct reloads.** `reload` (tactical, no rack): support hand
+  releases handguard (fingers open) → magwell → `magazine` bone travels fully
+  out/down → fresh mag in → seat → back to handguard. `reload_empty`: same swap
+  THEN the HK slap — left hand to the charging handle, `bolt`+`ch_tube` yank
+  −3.5 cm rearward then slam forward (verified: ch_tube Y 0.355→0.320→0.355).
+  **`ch_tube` rebound from `root` to the `bolt` bone** so the rack is visible at
+  all; `bolt` kept static everywhere else (non-reciprocating charging handle).
+- ⚠️ **Gotcha recorded:** keep ONE rotation mode per rig (this rig is XYZ euler).
+  Flipping a bone to euler for a calibration test then keyframing
+  `rotation_quaternion` = silently-ignored keys (the finger open/close was a
+  no-op until caught). The hand/arm build is now the **template for guns 2–5** —
+  recipe updated in the `blender-game-asset` skill ("Combined per-weapon rig").
+
 ## ✅ DONE (2026-06-13 later) — MP5 combined viewmodel rig + engine path
 
 The combined per-weapon viewmodel architecture (decided in

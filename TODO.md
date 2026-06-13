@@ -1,15 +1,24 @@
 # TODO
 
-> ▶ **NEXT SESSION — START HERE (2026-06-13 later):** The **combined per-weapon
-> viewmodel rig** path is built and **proven on the MP5** (`smg_vm.glb` + the new
-> `DrawCombinedRigViewmodel` path; renders correctly in first person). Remaining:
-> **author guns 2–5** (`pistol/shotgun/rifle/raygun` `<id>_vm.glb`) using the
-> step-by-step recipe in the **`blender-game-asset` skill → "Combined per-weapon
-> viewmodel rig — proven recipe"**, then re-run `--screenshot-viewmodels`. Once
-> all 5 exist, **retire the bolt-on path** (`armsVM`/`DrawArmsViewmodel`/
-> `weaponGrip[]`/`vm_grip_*`/`vmDebugMarkers` + gun-only OBJ fallback). Decision +
-> mechanism checklist: `docs/arms-rig-generalisation.md` §0. Status:
-> `HANDOFF.md` top "✅ DONE — MP5 combined viewmodel rig".
+> ▶ **NEXT SESSION — START HERE (2026-06-14):** The **combined per-weapon
+> viewmodel rig** is built and **proven on the MP5** (`smg_vm.glb` + the
+> `DrawCombinedRigViewmodel` path). As of 2026-06-14 the MP5 also has the
+> finished **hand/arm template**: C-clamp gripping hands (palm + opposing thumb +
+> grooved finger-bank, 13 bones), higher-poly octagonal arms, and a
+> mechanically-correct reload/reload_empty (real mag swap + HK-slap rack). A
+> `.blend` source is kept next to every `.glb`. Remaining: **author guns 2–5**
+> (`pistol/shotgun/rifle/raygun` `<id>_vm.glb`) using the updated recipe in the
+> **`blender-game-asset` skill → "Combined per-weapon viewmodel rig"** (now
+> includes the gripping-hands + higher-poly-arm template), then re-run
+> `--screenshot-viewmodels`. Once all 5 exist, **retire the bolt-on path**
+> (`armsVM`/`DrawArmsViewmodel`/`weaponGrip[]`/`vm_grip_*`/`vmDebugMarkers` +
+> gun-only OBJ fallback). Decision + mechanism checklist:
+> `docs/arms-rig-generalisation.md` §0. Status: `HANDOFF.md` top.
+>
+> ℹ️ Optional polish noticed during the 2026-06-14 pass: the combined-rig
+> first-person **framing sits low/dark** (gun in the lower screen). It's the
+> shared `CRIG_*` constants in `src/viewmodel.c`, not the asset — nudge
+> `CRIG_DOWN_OFFSET`/scale if you want it higher. Not blocking.
 
 Live punch list, ordered by impact-per-effort. The architecture for almost
 every item below is already in place — these are mostly authoring + small

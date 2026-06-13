@@ -15,11 +15,13 @@
 > gun-only OBJ fallback). Decision + mechanism checklist:
 > `docs/arms-rig-generalisation.md` §0. Status: `HANDOFF.md` top.
 >
-> ℹ️ Framing tuned 2026-06-14 to a canted CoD-style hold (gun lower-right, muzzle
-> up toward centre, arms from the lower-right) via the shared `CRIG_*` constants
-> in `src/viewmodel.c`: scale 1.08, down −0.20 (lifts it), base pitch 0.13
-> (muzzle up), new base **roll 0.22 (cant)**, brighter flat lighting. These are
-> shared across all combined-rig guns — re-check them when guns 2–5 land.
+> ℹ️ Framing tuned 2026-06-14 to a canted CoD-style hold (gun sits LOW in the
+> lower third, canted diagonally muzzle-up, arms entering from the mid-bottom)
+> via the shared `CRIG_*` constants in `src/viewmodel.c`: scale 1.0, down −0.03,
+> base pitch 0.06, base **roll 0.36 (cant — this is what makes the diagonal)**,
+> brighter flat lighting. The diagonal comes from ROLL (in-screen rotation of the
+> side-on gun), not pitch. Shared across all combined-rig guns — re-check when
+> guns 2–5 land.
 
 Live punch list, ordered by impact-per-effort. The architecture for almost
 every item below is already in place — these are mostly authoring + small

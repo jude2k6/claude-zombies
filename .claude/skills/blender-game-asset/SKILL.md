@@ -197,10 +197,14 @@ the load log shows the expected mesh/material/bone/clip counts and no
 
 - **Combined per-weapon viewmodel rig — proven recipe (MP5 `smg_vm.glb`,
   2026-06-13).** Author guns 2–5 the same way:
-  - **Skeleton (9 bones for the MP5 archetype):** reuse the canonical arm chain
-    `root, upperarm.L/R, forearm.L/R, hand.L/R`, plus per-gun mechanism bones as
-    children of `root` (MP5: `bolt` = charging handle/reciprocating bolt,
-    `magazine`). The engine binds by **bone name**, so keep these names.
+  - **Skeleton (9 bones for the MP5 archetype):** reuse the canonical arm bones
+    `root, upperarm.L/R, forearm.L/R, hand.L/R`, plus per-gun mechanism bones
+    parented to `root` (MP5: `bolt` = charging handle/reciprocating bolt,
+    `magazine`). The engine binds by **bone NAME** and plays baked model-space
+    poses, so **hierarchy doesn't matter to playback** — v1 used nested arm
+    chains (`upperarm→forearm→hand`), v2 made every bone a flat child of `root`;
+    both loaded fine. Use nested arm chains anyway, they're far easier to pose.
+    Keep the names exactly (case-sensitive).
   - **Part breakdown:** each mechanism part is its OWN single-island mesh,
     rigidly bound 100% to its bone (so it keys independently). Forearms
     gradient-blend `forearm.*`↔`hand.*` for a clean elbow/wrist; the rest is
@@ -216,19 +220,36 @@ the load log shows the expected mesh/material/bone/clip counts and no
     **+Y in Blender, export `export_yup=True`** (same as zombie/player; → in
     raylib the barrel is **−Z**, up **+Y**, right **+X**). **Real metric** (MP5
     body ≈0.64 m long). **Put the rig origin at the EYE/camera point** and build
-    the whole assembly (arms + gun) extending **forward (+Y) and slightly DOWN**
-    from origin. Target model-space AABB roughly `x[-0.13,0.13] y[-0.30,0]
-    z[-0.68,0.05]` — i.e. geometry hangs *below and in front of* origin. The
-    engine anchors that origin near the camera and applies shared `CRIG_*`
-    framing offsets, so DON'T bury the gun at the origin or it clips the lens.
+    the whole assembly so the gun hangs **below and forward** of origin (in
+    Blender: forward = +Y, down = −Z). The engine anchors that origin near the
+    camera and applies small shared `CRIG_*` offsets, so DON'T bury the gun at
+    the origin (it clips the lens) and DON'T leave it dead-centred on the optical
+    axis (you stare down the barrel and it crowds the face — v1's mistake).
+  - **Hold pose (v2 fix — author it like a real FPS, not v1's centred block):**
+    hold the gun **lower-right and canted** so the player sees its **left-side
+    3/4 profile**; right hand wraps the pistol grip, left hand the handguard,
+    gloves visibly gripping. v2 placed the gun centre at roughly Blender
+    `x ≈ +0.10` (right), `y ≈ +0.35` (forward), `z ≈ −0.26` (below eye) and that
+    framed well in-engine with the shared offsets — start there and adjust.
+    Sit it **lower than feels natural in Blender**; on-screen it reads higher.
   - **Clips (lowercase = engine API):** `idle`, `fire` (mechanism reciprocates +
     `root` recoil kick), `reload` (mag swap, **no** rack), `reload_empty` (mag
     swap THEN the rack — e.g. `bolt` −12 mm open → −32 mm yank → 0 release),
     `raise`, `lower`, `sprint`, `inspect` (optional). Match durations to the
-    `.weapon` gameplay constants (reload_time, fire_cooldown).
+    `.weapon` gameplay constants (reload_time, fire_cooldown). **Choreography
+    rule:** both hands stay ON the gun in every clip EXCEPT where the action
+    needs them off — the support hand leaves only to fetch/seat the mag and work
+    the charging handle in `reload`/`reload_empty`, and both lower off-weapon in
+    `sprint`. Author the mechanism bone and the hand that operates it together in
+    the same clip (that sync is the whole reason for a combined rig).
+  - **Per-gun mechanism bones vary** (7 canonical arm bones + however many the
+    action needs): M1911 = `slide`,`hammer`,`magazine`; Olympia = break
+    `hinge` + 2 shells; M14 = `oprod`/charging handle,`bolt`,`magazine`; Ray Gun
+    = energy `cell`,`coils`. Full per-archetype list + empty-reload mechanism:
+    `docs/arms-rig-generalisation.md` §0 and the blowback table in `ANIMATIONS.md`.
   - **Validate:** integrity audit PASS → export to
     `data/weapons/<id>/<id>_vm.glb` → `./build/shooter --anim-test
-    data/weapons/<id>/<id>_vm.glb` logs `(N mesh, M mat, 9 bones, 8 clips)` and
+    data/weapons/<id>/<id>_vm.glb` logs `(N mesh, M mat, B bones, 8 clips)` and
     must deform with no "skeleton does not match". The engine auto-discovers the
     file (`Viewmodel_LoadCombinedRigs`) — **no per-gun engine code**, framing is
     the shared `CRIG_*` constants in `src/viewmodel.c`.

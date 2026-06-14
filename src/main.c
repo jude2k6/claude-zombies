@@ -110,26 +110,53 @@ static void PollNetwork(void) {
     }
 }
 
+// Engine input action ids. The gameplay actions reuse the BindAction (BA_*)
+// ids directly, so a single id names the action across the engine action map
+// (keyboard + mouse) and the configurable gamepad layer (Bind_*). A few
+// keyboard-only variants that don't have their own gamepad bind live past
+// BA_COUNT.
+enum {
+    IA_INTERACT_HOLD = BA_COUNT,   // hold-E revive/repair (gamepad: BA_INTERACT held)
+};
+
+// Bind the keyboard + mouse defaults into the engine action map. The
+// configurable gamepad bindings stay on the Bind_* layer (rebind UI +
+// settings.cfg persistence), so each call site is "engine OR Bind_".
+static void BindGameInputDefaults(void) {
+    //              action            key       mouse               pad (-1 = via Bind_*)
+    Eng_InputBind(BA_FIRE,           KEY_NULL, MOUSE_BUTTON_LEFT,  -1);
+    Eng_InputBind(BA_ADS,            KEY_NULL, MOUSE_BUTTON_RIGHT, -1);
+    Eng_InputBind(BA_RELOAD,         KEY_R,    -1,                 -1);
+    Eng_InputBind(BA_INTERACT,       KEY_F,    -1,                 -1);  // edge interact
+    Eng_InputBind(BA_MELEE,          KEY_V,    -1,                 -1);
+    Eng_InputBind(BA_SWAP,           KEY_Q,    -1,                 -1);
+    Eng_InputBind(BA_SLOT1,          KEY_ONE,  -1,                 -1);
+    Eng_InputBind(BA_SLOT2,          KEY_TWO,  -1,                 -1);
+    Eng_InputBind(BA_THROW_LETHAL,   KEY_G,    -1,                 -1);
+    Eng_InputBind(BA_THROW_TACTICAL, KEY_H,    -1,                 -1);
+    Eng_InputBind(IA_INTERACT_HOLD,  KEY_E,    -1,                 -1);  // hold revive/repair
+}
+
 static void HandleLocalActions(Player *me) {
     // Downed players can't act. They lay there until revived or bled out.
     bool canAct = me->alive && !me->downed;
-    bool kbdSwap  = IsKeyPressed(KEY_Q) && canAct;
+    bool kbdSwap  = Eng_InputPressed(BA_SWAP) && canAct;
     bool padSwap  = Bind_Pressed(BA_SWAP) && canAct;
     if (kbdSwap || padSwap) {
         int other = (me->currentSlot + 1) % INV_SLOTS;
         if (me->inventory[other].owned) me->currentSlot = other; // local predict
     }
-    if (canAct && (IsKeyPressed(KEY_ONE) || Bind_Pressed(BA_SLOT1)))  { if (me->inventory[0].owned) me->currentSlot = 0; }
-    if (canAct && (IsKeyPressed(KEY_TWO) || Bind_Pressed(BA_SLOT2))) { if (me->inventory[1].owned) me->currentSlot = 1; }
+    if (canAct && (Eng_InputPressed(BA_SLOT1) || Bind_Pressed(BA_SLOT1)))  { if (me->inventory[0].owned) me->currentSlot = 0; }
+    if (canAct && (Eng_InputPressed(BA_SLOT2) || Bind_Pressed(BA_SLOT2))) { if (me->inventory[1].owned) me->currentSlot = 1; }
 
-    bool reloadEdge   = (IsKeyPressed(KEY_R) || Bind_Pressed(BA_RELOAD)) && canAct;
+    bool reloadEdge   = (Eng_InputPressed(BA_RELOAD) || Bind_Pressed(BA_RELOAD)) && canAct;
     bool swapEdge     = (kbdSwap || padSwap);
-    bool slot1Edge    = canAct && (IsKeyPressed(KEY_ONE) || Bind_Pressed(BA_SLOT1));
-    bool slot2Edge    = canAct && (IsKeyPressed(KEY_TWO) || Bind_Pressed(BA_SLOT2));
-    bool interactEdge = canAct && (IsKeyPressed(KEY_F) || Bind_Pressed(BA_INTERACT));
-    bool meleeEdge    = canAct && (IsKeyPressed(KEY_V) || Bind_Pressed(BA_MELEE));
-    bool lethalEdge   = canAct && (IsKeyPressed(KEY_G) || Bind_Pressed(BA_THROW_LETHAL));
-    bool tacticalEdge = canAct && (IsKeyPressed(KEY_H) || Bind_Pressed(BA_THROW_TACTICAL));
+    bool slot1Edge    = canAct && (Eng_InputPressed(BA_SLOT1) || Bind_Pressed(BA_SLOT1));
+    bool slot2Edge    = canAct && (Eng_InputPressed(BA_SLOT2) || Bind_Pressed(BA_SLOT2));
+    bool interactEdge = canAct && (Eng_InputPressed(BA_INTERACT) || Bind_Pressed(BA_INTERACT));
+    bool meleeEdge    = canAct && (Eng_InputPressed(BA_MELEE) || Bind_Pressed(BA_MELEE));
+    bool lethalEdge   = canAct && (Eng_InputPressed(BA_THROW_LETHAL) || Bind_Pressed(BA_THROW_LETHAL));
+    bool tacticalEdge = canAct && (Eng_InputPressed(BA_THROW_TACTICAL) || Bind_Pressed(BA_THROW_TACTICAL));
 
     int swapTarget = -1;
     if (swapEdge) {
@@ -198,6 +225,7 @@ int main(int argc, char **argv) {
     Viewmodel_LoadCombinedRigs();   // per-weapon combined rigs (arms+gun glTF, if present)
     Render_LoadPlayerAnim();        // rigged third-person soldier for co-op teammates
     Settings_Load();
+    BindGameInputDefaults();    // keyboard+mouse → engine action map (gamepad stays on Bind_*)
     Decals_Init();
     Particles_Reset();
     if (fullscreen && !IsWindowFullscreen()) Menu_ToggleFullscreenSafe();
@@ -311,10 +339,10 @@ int main(int argc, char **argv) {
                 // player. (Dead spectating doesn't move the body either.)
             }
             bool actable = me->alive && !me->downed && !noclipMode;
-            me->fireHeld     = (IsMouseButtonDown(MOUSE_BUTTON_LEFT)  || Bind_Down(BA_FIRE)) && actable;
+            me->fireHeld     = (Eng_InputDown(BA_FIRE) || Bind_Down(BA_FIRE)) && actable;
             // E (keyboard) or holding the interact bind (gamepad) drives revive/repair.
-            me->interactHeld = (IsKeyDown(KEY_E) || Bind_Down(BA_INTERACT))   && actable;
-            me->adsHeld      = (IsMouseButtonDown(MOUSE_BUTTON_RIGHT) || Bind_Down(BA_ADS)) && actable;
+            me->interactHeld = (Eng_InputDown(IA_INTERACT_HOLD) || Bind_Down(BA_INTERACT)) && actable;
+            me->adsHeld      = (Eng_InputDown(BA_ADS) || Bind_Down(BA_ADS)) && actable;
 
             HandleLocalActions(me);
 

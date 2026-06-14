@@ -47,8 +47,8 @@ bool  Pad_TriggerR(void);
 // The map supports up to ENG_MAX_ACTIONS distinct actions.
 //
 // Typical usage:
-//   Eng_InputBind(ACT_FIRE, KEY_SPACE, PAD_RT_BTN);
-//   if (Eng_InputPressed(ACT_FIRE)) { ... }
+//   Eng_InputBind(ACT_FIRE, KEY_NULL, MOUSE_BUTTON_LEFT, PAD_RT_BTN);
+//   if (Eng_InputDown(ACT_FIRE)) { ... }
 // ---------------------------------------------------------------------------
 
 #define ENG_MAX_ACTIONS 64
@@ -56,9 +56,10 @@ bool  Pad_TriggerR(void);
 // Opaque integer id chosen by the game.  The engine does not enumerate names.
 typedef int Action;
 
-// Bind a raylib KEY_* and/or GAMEPAD_BUTTON_* to an action.
-// Pass -1 for "none" on either slot.
-void    Eng_InputBind(Action a, int key, int padButton);
+// Bind a raylib KEY_*, MOUSE_BUTTON_*, and/or GAMEPAD_BUTTON_* to an action.
+// Pass -1 for "none" on any slot. (MOUSE_BUTTON_LEFT == 0 is a real button, so
+// only -1 — not 0 — disables the mouse slot.)
+void    Eng_InputBind(Action a, int key, int mouseButton, int padButton);
 
 // True on the first frame the action becomes active (edge trigger).
 bool    Eng_InputPressed(Action a);

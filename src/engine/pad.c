@@ -61,26 +61,46 @@ bool Pad_TriggerR(void) {
 #define ENG_DEFAULT_PAD_SENS    1.8f
 
 typedef struct {
-    int key;        // raylib KEY_* or -1
-    int padButton;  // GAMEPAD_BUTTON_* or -1
+    int key;          // raylib KEY_* (0/KEY_NULL = none)
+    int mouseButton;  // raylib MOUSE_BUTTON_* (-1 = none; note LEFT == 0)
+    int padButton;    // GAMEPAD_BUTTON_* (0/UNKNOWN = none)
 } ActionBind;
 
+// Default every slot to fully-unbound: mouseButton must start at -1 because
+// MOUSE_BUTTON_LEFT == 0 is a real button (zero-init would bind every action
+// to left-click). key/padButton use 0 as their natural "none" sentinel.
 static ActionBind s_binds[ENG_MAX_ACTIONS];
+static bool       s_bindsInit = false;
 static float      s_mouseSens = ENG_DEFAULT_MOUSE_SENS;
 static float      s_padSens   = ENG_DEFAULT_PAD_SENS;
 
-void Eng_InputBind(Action a, int key, int padButton) {
+static void EnsureBindsInit(void) {
+    if (s_bindsInit) return;
+    for (int i = 0; i < ENG_MAX_ACTIONS; i++) {
+        s_binds[i].key = 0; s_binds[i].mouseButton = -1; s_binds[i].padButton = 0;
+    }
+    s_bindsInit = true;
+}
+
+void Eng_InputBind(Action a, int key, int mouseButton, int padButton) {
     if (a < 0 || a >= ENG_MAX_ACTIONS) return;
-    // Callers pass -1 for "none"; normalise to 0 (KEY_NULL / GAMEPAD_BUTTON_UNKNOWN).
-    s_binds[a].key       = (key       < 0) ? 0 : key;
-    s_binds[a].padButton = (padButton < 0) ? 0 : padButton;
+    EnsureBindsInit();
+    // key/padButton: callers pass -1 for "none"; normalise to 0 (KEY_NULL /
+    // GAMEPAD_BUTTON_UNKNOWN). mouseButton keeps -1 as "none" because
+    // MOUSE_BUTTON_LEFT == 0 is a valid button.
+    s_binds[a].key         = (key       < 0) ? 0 : key;
+    s_binds[a].mouseButton = mouseButton;
+    s_binds[a].padButton   = (padButton < 0) ? 0 : padButton;
 }
 
 bool Eng_InputPressed(Action a) {
     if (a < 0 || a >= ENG_MAX_ACTIONS) return false;
+    EnsureBindsInit();
     int k = s_binds[a].key;
     // KEY_NULL == 0 and GAMEPAD_BUTTON_UNKNOWN == 0 are the unbound sentinels.
     if (k > 0 && IsKeyPressed(k)) return true;
+    int m = s_binds[a].mouseButton;
+    if (m >= 0 && IsMouseButtonPressed(m)) return true;
     int b = s_binds[a].padButton;
     if (b > 0 && IsGamepadAvailable(PAD_ID) && IsGamepadButtonPressed(PAD_ID, b)) return true;
     return false;
@@ -88,8 +108,11 @@ bool Eng_InputPressed(Action a) {
 
 bool Eng_InputDown(Action a) {
     if (a < 0 || a >= ENG_MAX_ACTIONS) return false;
+    EnsureBindsInit();
     int k = s_binds[a].key;
     if (k > 0 && IsKeyDown(k)) return true;
+    int m = s_binds[a].mouseButton;
+    if (m >= 0 && IsMouseButtonDown(m)) return true;
     int b = s_binds[a].padButton;
     if (b > 0 && IsGamepadAvailable(PAD_ID) && IsGamepadButtonDown(PAD_ID, b)) return true;
     return false;

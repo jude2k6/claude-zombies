@@ -22,9 +22,15 @@ path to it. The goal is a clean, reusable **engine** that owns
 >   rule, wired as a CMake `seam-check` target the `shooter` build depends on,
 >   plus a tracked `scripts/hooks/pre-commit` (activate with
 >   `git config core.hooksPath scripts/hooks`).
-> - Remaining: Phase 0 globals→`Engine`/`World`, Phase 2 input map (engine-side
->   action-map API in progress), Phase 4 content registry, Phase 5 render seam,
->   Phase 6 `main.c` flip, Phase 7 full directory split.
+> - 🔶 **Phase 2 (input action map) — infra landed** — engine-owned action map
+>   in `src/engine/pad.{c,h}`: `Eng_InputBind` / `Eng_InputPressed` /
+>   `Eng_InputDown` / `Eng_InputMoveAxis` / `Eng_InputLookDelta` /
+>   `Eng_InputSetLookSensitivity` (commit `b3247ab`). Additive, nothing calls it
+>   yet. **TODO:** migrate `HandleLocalActions` + the raw `IsKeyPressed`/`Bind_*`
+>   sites (main.c, player.c, menu.c, hud.c, settings.c) onto it.
+> - Remaining: Phase 0 globals→`Engine`/`World` (needs real `World *` threading —
+>   see note below), Phase 2 call-site migration, Phase 4 content registry,
+>   Phase 5 render seam, Phase 6 `main.c` flip, Phase 7 full directory split.
 >
 > **Note on Phase 0:** the doc's §14 macro-shim (`#define players …`) is unsafe
 > as-is — `players`, `mbox`, `mapName`, `roundNum` and the power-up timers are

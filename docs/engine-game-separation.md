@@ -34,18 +34,21 @@ path to it. The goal is a clean, reusable **engine** that owns
 >   the configurable gamepad layer (`Bind_*`) into the engine map so each site is
 >   a single call; migrate movement/look onto `Eng_InputMoveAxis/LookDelta`; the
 >   menu/HUD/debug key reads (player.c, menu.c, hud.c, settings.c) are untouched.
-> - 🔶 **Phase 0 (state ownership) — World struct + first cluster** — `src/world.{h,c}`
->   add the `World` struct and the live `g_world`; the six collision-free
->   sim-state globals (`enemies, bullets, throwables, powerUps, localPlayerIdx,
->   gamePhase`) now live in `g_world`, with old call sites bridged by
->   transitional object-like macros in `world.h` (commit `059b638`). Pure
->   storage relocation — linker-proven, `--screenshot-zombies` renders from
->   `g_world.enemies`. **TODO:** the colliding names (`players`, `mbox`,
->   `mapName`, `roundNum`, power-up timers) need real `World *` threading, not
->   macros; then thread `World *` through the sim so it can tick headless (the §15
->   litmus). The macros are the temporary bridge, removed as call sites are
->   threaded.
-> - Remaining: Phase 0 colliding-name threading + headless `World` tick, Phase 2
+> - 🔶 **Phase 0 (state ownership) — World struct + two clusters** — `src/world.{h,c}`
+>   add the `World` struct and the live `g_world`. Migrated so far:
+>   `enemies, bullets, throwables, powerUps, localPlayerIdx, gamePhase` via
+>   transitional macros (collision-free names, commit `059b638`); and
+>   `roundNum, doublePointsTimer, instaKillTimer` via **explicit `g_world.X`**
+>   (these clash with `PktSnapshotHeader` fields so can't be macro-aliased —
+>   commit `e02f621`). Two techniques now established: object-like macro for
+>   collision-free names, explicit relocation for colliders (leave `hdr->X`
+>   snapshot fields alone). Pure storage relocation — linker-proven,
+>   `--screenshot-{zombies,coop}` + 5s run clean.
+> - Remaining Phase 0: relocate the rest (`players[]` — 277 uses/13 files,
+>   `mbox`, `mapName`, level state) the same way, then thread `World *` through
+>   the sim so it can tick headless (the §15 litmus). Macros are removed as call
+>   sites take a `World *`.
+> - Remaining: Phase 0 (players[]/level/mbox/mapName + headless tick), Phase 2
 >   gamepad fold-in + movement/look, Phase 4 content registry, Phase 5 render
 >   seam, Phase 6 `main.c` flip, Phase 7 full dir split.
 >

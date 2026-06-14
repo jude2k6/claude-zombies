@@ -33,6 +33,14 @@ static void BuildTangents(Vector3 n, Vector3 *u, Vector3 *v) {
     *v = Vector3CrossProduct(n, *u);
 }
 
+// ---- generic engine API ----------------------------------------------------
+
+void Eng_FxDecal(EngDecalKind kind, Vector3 pos, Vector3 normal, float size) {
+    Decals_Spawn((DecalKind)kind, pos, normal, size);
+}
+
+// ---- concrete spawn --------------------------------------------------------
+
 void Decals_Spawn(DecalKind kind, Vector3 pos, Vector3 normal, float size) {
     float nLen = sqrtf(normal.x*normal.x + normal.y*normal.y + normal.z*normal.z);
     Vector3 n = (nLen > 1e-4f) ? (Vector3){ normal.x/nLen, normal.y/nLen, normal.z/nLen }

@@ -8,22 +8,17 @@
 
 #define MAX_PARTICLES 256
 
-typedef enum {
-    PBLEND_ADDITIVE,  // muzzle flash, sparks, explosion fire
-    PBLEND_ALPHA,     // blood mist, casings, smoke puffs
-} ParticleBlend;
-
 typedef struct {
-    bool          active;
-    ParticleBlend blend;
-    Vector3       pos;
-    Vector3       vel;
-    float         size;
-    float         life;
-    float         maxLife;
-    Color         colorStart;
-    Color         colorEnd;
-    float         gravity;   // m/s^2 downward acceleration (0 = none)
+    bool             active;
+    EngParticleBlend blend;
+    Vector3          pos;
+    Vector3          vel;
+    float            size;
+    float            life;
+    float            maxLife;
+    Color            colorStart;
+    Color            colorEnd;
+    float            gravity;   // m/s^2 downward acceleration (0 = none)
 } Particle;
 
 static Particle particles[MAX_PARTICLES];
@@ -34,7 +29,7 @@ void Particles_Reset(void) {
     nextSlot = 0;
 }
 
-// ---- internal spawn --------------------------------------------------------
+// ---- internal helpers ------------------------------------------------------
 
 static Particle *AllocParticle(void) {
     // Prefer a free slot; fall back to overwriting the ring head.
@@ -74,120 +69,189 @@ static Vector3 RandCone(Vector3 axis, float halfAngle) {
     return Vector3Normalize(v);
 }
 
-// ---- typed spawners --------------------------------------------------------
+// ---- generic emitter API ---------------------------------------------------
 
-void Particles_MuzzleFlash(Vector3 pos, Vector3 dir) {
-    // 2-4 short-lived additive flash/spark particles along fire dir.
-    int n = 2 + (rand() % 3);
-    for (int i = 0; i < n; i++) {
+void Eng_FxEmit(EngEmitterDesc desc) {
+    for (int i = 0; i < desc.count; i++) {
         Particle *p = AllocParticle();
-        Vector3 d    = RandCone(dir, 0.35f);
-        float speed  = RandfRange(3.5f, 9.0f);
-        float life   = RandfRange(0.04f, 0.10f);
+
+        Vector3 d = (desc.halfAngle > 0.0f)
+            ? RandCone(desc.dir, desc.halfAngle)
+            : desc.dir;
+        float speed = RandfRange(desc.speedMin, desc.speedMax);
+        float life  = RandfRange(desc.ttlMin,   desc.ttlMax);
+        float sz    = RandfRange(desc.sizeMin,  desc.sizeMax);
+
+        Vector3 jitter = {
+            RandfRange(-desc.posJitterX, desc.posJitterX),
+            RandfRange(-desc.posJitterY, desc.posJitterY),
+            RandfRange(-desc.posJitterZ, desc.posJitterZ),
+        };
+
         *p = (Particle){
             .active     = true,
-            .blend      = PBLEND_ADDITIVE,
-            .pos        = pos,
+            .blend      = desc.blend,
+            .pos        = Vector3Add(desc.pos, jitter),
             .vel        = Vector3Scale(d, speed),
-            .size       = RandfRange(0.06f, 0.14f),
+            .size       = sz,
             .life       = life,
             .maxLife    = life,
-            .colorStart = (Color){ 255, 210, 110, 255 },
-            .colorEnd   = (Color){ 255, 130,  30,   0 },
-            .gravity    = 0.0f,
+            .colorStart = desc.colorStart,
+            .colorEnd   = desc.colorEnd,
+            .gravity    = desc.gravity,
         };
     }
 }
 
+// ---- typed spawners (thin wrappers over Eng_FxEmit) -----------------------
+
+void Particles_MuzzleFlash(Vector3 pos, Vector3 dir) {
+    // 2-4 short-lived additive flash/spark particles along fire dir.
+    Eng_FxEmit((EngEmitterDesc){
+        .pos        = pos,
+        .dir        = dir,
+        .count      = 2 + (rand() % 3),
+        .halfAngle  = 0.35f,
+        .speedMin   = 3.5f,
+        .speedMax   = 9.0f,
+        .sizeMin    = 0.06f,
+        .sizeMax    = 0.14f,
+        .ttlMin     = 0.04f,
+        .ttlMax     = 0.10f,
+        .colorStart = (Color){ 255, 210, 110, 255 },
+        .colorEnd   = (Color){ 255, 130,  30,   0 },
+        .gravity    = 0.0f,
+        .blend      = ENG_PBLEND_ADDITIVE,
+    });
+}
+
 void Particles_CasingEject(Vector3 pos, Vector3 right) {
-    // One warm-brass alpha particle popped up and to the right, falls under gravity.
-    Particle *p = AllocParticle();
-    Vector3 up   = { 0, 1, 0 };
-    Vector3 vel  = Vector3Add(
+    // One warm-brass alpha particle: compound right+up velocity, falls under gravity.
+    // Build the velocity manually (it's not a simple cone) then normalise to get a
+    // direction + speed to pass into the generic desc.
+    Vector3 up  = { 0, 1, 0 };
+    Vector3 vel = Vector3Add(
         Vector3Scale(right, RandfRange(1.8f, 3.0f)),
         Vector3Scale(up,    RandfRange(2.0f, 3.5f)));
-    vel = Vector3Add(vel, Vector3Scale((Vector3){
-        RandfRange(-0.4f, 0.4f), 0, RandfRange(-0.4f, 0.4f)}, 1.0f));
-    float life = RandfRange(0.5f, 0.9f);
-    *p = (Particle){
-        .active     = true,
-        .blend      = PBLEND_ALPHA,
+    vel.x += RandfRange(-0.4f, 0.4f);
+    vel.z += RandfRange(-0.4f, 0.4f);
+
+    float   speed = Vector3Length(vel);
+    Vector3 dir   = (speed > 1e-4f) ? Vector3Scale(vel, 1.0f / speed) : up;
+    float   life  = RandfRange(0.5f, 0.9f);
+    float   sz    = RandfRange(0.025f, 0.040f);
+
+    // halfAngle=0: Eng_FxEmit uses desc.dir exactly (no cone randomisation),
+    // so speedMin == speedMax == speed gives us our pre-built velocity vector.
+    Eng_FxEmit((EngEmitterDesc){
         .pos        = pos,
-        .vel        = vel,
-        .size       = RandfRange(0.025f, 0.040f),
-        .life       = life,
-        .maxLife    = life,
+        .dir        = dir,
+        .count      = 1,
+        .halfAngle  = 0.0f,
+        .speedMin   = speed,
+        .speedMax   = speed,
+        .sizeMin    = sz,
+        .sizeMax    = sz,
+        .ttlMin     = life,
+        .ttlMax     = life,
         .colorStart = (Color){ 210, 160,  60, 220 },
         .colorEnd   = (Color){ 120,  80,  20,   0 },
         .gravity    = 9.8f,
-    };
+        .blend      = ENG_PBLEND_ALPHA,
+    });
 }
 
 void Particles_BloodMist(Vector3 pos, Vector3 dir, bool headshot) {
     // A few dark-red alpha puffs; a couple extra on headshot.
-    int n = headshot ? (4 + (rand() % 3)) : (2 + (rand() % 2));
-    for (int i = 0; i < n; i++) {
-        Particle *p = AllocParticle();
-        Vector3 d    = RandCone(dir, 0.80f);
-        float speed  = RandfRange(0.8f, 2.8f);
-        float life   = RandfRange(0.20f, 0.45f);
-        *p = (Particle){
-            .active     = true,
-            .blend      = PBLEND_ALPHA,
-            .pos        = pos,
-            .vel        = Vector3Scale(d, speed),
-            .size       = RandfRange(0.07f, headshot ? 0.20f : 0.14f),
-            .life       = life,
-            .maxLife    = life,
-            .colorStart = (Color){ 150, 10, 10, 200 },
-            .colorEnd   = (Color){  70,  0,  0,   0 },
-            .gravity    = 1.5f,
-        };
-    }
+    Eng_FxEmit((EngEmitterDesc){
+        .pos        = pos,
+        .dir        = dir,
+        .count      = headshot ? (4 + (rand() % 3)) : (2 + (rand() % 2)),
+        .halfAngle  = 0.80f,
+        .speedMin   = 0.8f,
+        .speedMax   = 2.8f,
+        .sizeMin    = 0.07f,
+        .sizeMax    = headshot ? 0.20f : 0.14f,
+        .ttlMin     = 0.20f,
+        .ttlMax     = 0.45f,
+        .colorStart = (Color){ 150, 10, 10, 200 },
+        .colorEnd   = (Color){  70,  0,  0,   0 },
+        .gravity    = 1.5f,
+        .blend      = ENG_PBLEND_ALPHA,
+    });
 }
 
 void Particles_Explosion(Vector3 pos) {
-    // Additive orange/yellow fire sparks.
+    // Additive orange/yellow fire sparks — two hot/warm variants interleaved.
     int sparks = 18 + (rand() % 8);
-    for (int i = 0; i < sparks; i++) {
-        Particle *p = AllocParticle();
-        Vector3 d    = RandCone((Vector3){0,1,0}, 1.40f);
-        float speed  = RandfRange(3.0f, 10.0f);
-        float life   = RandfRange(0.25f, 0.70f);
-        bool hot     = (rand() % 2);
-        *p = (Particle){
-            .active     = true,
-            .blend      = PBLEND_ADDITIVE,
-            .pos        = Vector3Add(pos, (Vector3){ RandfRange(-0.15f,0.15f), 0.1f, RandfRange(-0.15f,0.15f) }),
-            .vel        = Vector3Scale(d, speed),
-            .size       = RandfRange(0.05f, 0.16f),
-            .life       = life,
-            .maxLife    = life,
-            .colorStart = hot ? (Color){ 255, 200, 80, 255 } : (Color){ 255, 120, 30, 255 },
-            .colorEnd   = (Color){ 255,  60,  0,   0 },
-            .gravity    = 4.0f,
-        };
-    }
+    // Alternate hot/warm per spark to get the mixed look without a conditional
+    // inside Eng_FxEmit. Emit hot and warm halves separately.
+    int hot_n  = sparks / 2;
+    int warm_n = sparks - hot_n;
+
+    // Spark origin is slightly above ground (+0.1 Y); smoke at +0.2 Y.
+    Vector3 posLow  = { pos.x, pos.y + 0.1f, pos.z };
+    Vector3 posHigh = { pos.x, pos.y + 0.2f, pos.z };
+
+    Eng_FxEmit((EngEmitterDesc){
+        .pos        = posLow,
+        .dir        = (Vector3){ 0, 1, 0 },
+        .count      = hot_n,
+        .halfAngle  = 1.40f,
+        .speedMin   = 3.0f,
+        .speedMax   = 10.0f,
+        .sizeMin    = 0.05f,
+        .sizeMax    = 0.16f,
+        .ttlMin     = 0.25f,
+        .ttlMax     = 0.70f,
+        .colorStart = (Color){ 255, 200, 80, 255 },
+        .colorEnd   = (Color){ 255,  60,  0,  0 },
+        .gravity    = 4.0f,
+        .blend      = ENG_PBLEND_ADDITIVE,
+        .posJitterX = 0.15f,
+        .posJitterY = 0.0f,
+        .posJitterZ = 0.15f,
+    });
+    Eng_FxEmit((EngEmitterDesc){
+        .pos        = posLow,
+        .dir        = (Vector3){ 0, 1, 0 },
+        .count      = warm_n,
+        .halfAngle  = 1.40f,
+        .speedMin   = 3.0f,
+        .speedMax   = 10.0f,
+        .sizeMin    = 0.05f,
+        .sizeMax    = 0.16f,
+        .ttlMin     = 0.25f,
+        .ttlMax     = 0.70f,
+        .colorStart = (Color){ 255, 120, 30, 255 },
+        .colorEnd   = (Color){ 255,  60,  0,  0 },
+        .gravity    = 4.0f,
+        .blend      = ENG_PBLEND_ADDITIVE,
+        .posJitterX = 0.15f,
+        .posJitterY = 0.0f,
+        .posJitterZ = 0.15f,
+    });
+
     // Alpha smoke/grey puffs rising upward.
-    int puffs = 5 + (rand() % 4);
-    for (int i = 0; i < puffs; i++) {
-        Particle *p = AllocParticle();
-        Vector3 d    = RandCone((Vector3){0,1,0}, 0.60f);
-        float speed  = RandfRange(1.5f, 4.0f);
-        float life   = RandfRange(0.35f, 0.80f);
-        *p = (Particle){
-            .active     = true,
-            .blend      = PBLEND_ALPHA,
-            .pos        = Vector3Add(pos, (Vector3){ RandfRange(-0.2f,0.2f), 0.2f, RandfRange(-0.2f,0.2f) }),
-            .vel        = Vector3Scale(d, speed),
-            .size       = RandfRange(0.12f, 0.28f),
-            .life       = life,
-            .maxLife    = life,
-            .colorStart = (Color){ 90, 80, 70, 180 },
-            .colorEnd   = (Color){ 50, 45, 40,   0 },
-            .gravity    = -1.2f,   // smoke rises
-        };
-    }
+    Eng_FxEmit((EngEmitterDesc){
+        .pos        = posHigh,
+        .dir        = (Vector3){ 0, 1, 0 },
+        .count      = 5 + (rand() % 4),
+        .halfAngle  = 0.60f,
+        .speedMin   = 1.5f,
+        .speedMax   = 4.0f,
+        .sizeMin    = 0.12f,
+        .sizeMax    = 0.28f,
+        .ttlMin     = 0.35f,
+        .ttlMax     = 0.80f,
+        .colorStart = (Color){ 90, 80, 70, 180 },
+        .colorEnd   = (Color){ 50, 45, 40,   0 },
+        .gravity    = -1.2f,  // smoke rises
+        .blend      = ENG_PBLEND_ALPHA,
+        .posJitterX = 0.2f,
+        .posJitterY = 0.0f,
+        .posJitterZ = 0.2f,
+    });
 }
 
 // ---- update ----------------------------------------------------------------
@@ -231,14 +295,14 @@ void Particles_Draw(Camera camera) {
 
     // Draw additive pass first, then alpha — avoids sorting.
     for (int pass = 0; pass < 2; pass++) {
-        ParticleBlend wantBlend = (pass == 0) ? PBLEND_ADDITIVE : PBLEND_ALPHA;
+        EngParticleBlend wantBlend = (pass == 0) ? ENG_PBLEND_ADDITIVE : ENG_PBLEND_ALPHA;
         bool hasAny = false;
         for (int i = 0; i < MAX_PARTICLES; i++) {
             if (particles[i].active && particles[i].blend == wantBlend) { hasAny = true; break; }
         }
         if (!hasAny) continue;
 
-        if (wantBlend == PBLEND_ADDITIVE) BeginBlendMode(PBLEND_ADDITIVE);
+        if (wantBlend == ENG_PBLEND_ADDITIVE) BeginBlendMode(BLEND_ADDITIVE);
         rlBegin(RL_TRIANGLES);
         for (int i = 0; i < MAX_PARTICLES; i++) {
             Particle *p = &particles[i];
@@ -269,7 +333,7 @@ void Particles_Draw(Camera camera) {
             rlVertex3f(tr.x, tr.y, tr.z);
         }
         rlEnd();
-        if (wantBlend == PBLEND_ADDITIVE) EndBlendMode();
+        if (wantBlend == ENG_PBLEND_ADDITIVE) EndBlendMode();
     }
 
     rlEnableBackfaceCulling();

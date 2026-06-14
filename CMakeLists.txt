@@ -40,27 +40,12 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(enet)
 
-# ---- executable ------------------------------------------------------------
-add_executable(shooter
-    src/main.c
-    src/world.c
-    src/level.c
-    src/player.c
-    src/weapons.c
-    src/perks.c
-    src/entities.c
-    src/interact.c
-    src/game.c
-    src/protocol.c
-    src/render.c
-    src/viewmodel.c
-    src/devtools.c
-    src/hud.c
-    src/menu.c
-    src/audio_director.c
-    src/settings.c
-    src/assets.c
-    # ---- engine/ : reusable, game-clean modules (engine/game split, Phase 3+7a) --
+# ---- engine static library (src/engine/ only — ZERO game sources) ----------
+# libengine.a is the reusable runtime: window/loop, render GL facade, audio
+# mixer, animation, particles/decals, input, net transport, map document.
+# The §2 cardinal rule (no game header in engine) is enforced by seam-check;
+# this add_library is the link-time half — it physically contains no game .c.
+add_library(engine STATIC
     src/engine/audio.c
     src/engine/net.c
     src/engine/mapdoc.c
@@ -72,37 +57,64 @@ add_executable(shooter
     src/engine/gfx.c
     src/engine/app.c
 )
-target_include_directories(shooter PRIVATE
-    ${CMAKE_SOURCE_DIR}/src
+target_include_directories(engine PUBLIC
     ${CMAKE_SOURCE_DIR}/src/engine
     ${raygui_SOURCE_DIR}/src
     ${enet_SOURCE_DIR}/include
 )
-target_link_libraries(shooter PRIVATE raylib enet)
+target_link_libraries(engine PUBLIC raylib enet)
 
-# ---- warning flags (shooter only, not FetchContent deps) -------------------
+# ---- game executable (src/game/ — rules + content, links the engine) -------
+add_executable(shooter
+    src/game/main.c
+    src/game/world.c
+    src/game/level.c
+    src/game/player.c
+    src/game/weapons.c
+    src/game/perks.c
+    src/game/entities.c
+    src/game/interact.c
+    src/game/game.c
+    src/game/protocol.c
+    src/game/render.c
+    src/game/viewmodel.c
+    src/game/devtools.c
+    src/game/hud.c
+    src/game/menu.c
+    src/game/audio_director.c
+    src/game/settings.c
+    src/game/assets.c
+)
+target_include_directories(shooter PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/game
+)
+target_link_libraries(shooter PRIVATE engine)
+
+# ---- warning flags (our code only, not FetchContent deps) ------------------
 if(NOT MSVC)
+    target_compile_options(engine  PRIVATE -Wall -Wextra -Wno-unused-parameter)
     target_compile_options(shooter PRIVATE -Wall -Wextra -Wno-unused-parameter)
 endif()
 
 # ---- AddressSanitizer / UBSan (opt-in) -------------------------------------
 option(SHOOTER_ASAN "Build with AddressSanitizer/UBSan" OFF)
 if(SHOOTER_ASAN AND NOT MSVC)
+    target_compile_options(engine  PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
     target_compile_options(shooter PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
     target_link_options(shooter PRIVATE -fsanitize=address,undefined)
 endif()
 
 # ---- engine/game seam check ------------------------------------------------
 # Verifies that no src/engine/ file includes a game header (§2 cardinal rule).
-# The seam-check target runs the script; shooter depends on it so a normal
-# cmake --build fails immediately on a seam violation before any C is compiled.
+# The engine library depends on it, so a normal cmake --build fails immediately
+# on a seam violation before any engine C is compiled.
 add_custom_target(seam-check
     COMMAND ${CMAKE_COMMAND} -E echo "-- Running seam check..."
     COMMAND bash ${CMAKE_SOURCE_DIR}/scripts/check-seam.sh
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
     COMMENT "Checking engine/game seam (cardinal rule: no game headers in src/engine/)"
 )
-add_dependencies(shooter seam-check)
+add_dependencies(engine seam-check)
 
 # ---- data files ------------------------------------------------------------
 # Copy data/ next to the executable at build time so map files load from a

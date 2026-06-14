@@ -1,5 +1,5 @@
 #include "assets.h"
-#include "gfx.h"     // Eng_GfxDefaultShaderId — keeps rlgl.h inside the engine
+#include "gfx.h"     // Eng_GfxDefaultShaderId — low-level GL stays engine-side
 #include <stdio.h>
 #include <string.h>
 

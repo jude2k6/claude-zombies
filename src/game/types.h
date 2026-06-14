@@ -50,7 +50,7 @@
 
 #define MAX_BULLETS       192
 #define BULLET_TAIL_MAX     2.0f   // tracer visual length cap (m)
-#define MAX_DECALS         96
+// MAX_DECALS now lives in engine/decals.h (decals is an engine subsystem).
 #define MAX_THROWABLES     16
 
 #define MAX_OBSTACLES      64

@@ -1,7 +1,9 @@
 #ifndef SHOOTER_DECALS_H
 #define SHOOTER_DECALS_H
 
-#include "types.h"
+#include "raylib.h"   // Vector3 — decals is engine-side, owns no game types
+
+#define MAX_DECALS 96   // engine-internal cap (mirrors the game's old types.h value)
 
 // ---- decal kind ------------------------------------------------------------
 // Names kept stable so existing call sites (entities.c etc.) compile unchanged.

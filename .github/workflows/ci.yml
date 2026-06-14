@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  seam:
+    # The cardinal rule of the engine/game split (§2): no src/engine/ file may
+    # include a game header. Cheap, runs without building anything.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Engine/game seam check
+        run: bash scripts/check-seam.sh
+
+  build-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install X11 dev headers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxrandr-dev libxinerama-dev libxcursor-dev \
+                                  libxi-dev libxkbcommon-dev libwayland-dev libgl1-mesa-dev
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+      - name: Build (also runs the seam-check target + builds libengine.a)
+        run: cmake --build build -j
+      - name: Validate every shipped map
+        run: |
+          status=0
+          for m in data/maps/*.map; do
+            echo "== validating $m =="
+            ./build/shooter --validate "$m" || status=1
+          done
+          exit $status
+      - name: Headless simulation tick (no window / no GL)
+        run: |
+          # xvfb not needed: --sim-tick opens no window. Proves the sim is
+          # renderer-independent (§15 litmus).
+          status=0
+          for m in data/maps/*.map; do
+            ./build/shooter --sim-tick "$m" 600 || status=1
+          done
+          exit $status

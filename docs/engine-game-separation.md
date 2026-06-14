@@ -54,6 +54,12 @@ Status: **in progress**. This is the target architecture and the incremental
 path to it. The goal is a clean, reusable **engine** that owns
 
 > **Progress (2026-06-14)**
+> - ✅ **Phase 5 start (fx submission, §6)** — generic game-agnostic
+>   `EngEmitterDesc` + `Eng_FxEmit` in `engine/particles` and `Eng_FxDecal` in
+>   `engine/decals`; the concrete helpers (`Particles_MuzzleFlash/BloodMist/
+>   CasingEject/Explosion`) now fill a desc and route through it, signatures
+>   unchanged. Behaviour-preserving, seam-clean. (Done by a subagent in an
+>   isolated worktree, merged to main.)
 > - ✅ **Phase 3 (clean-module relocation)** — `mapdoc, net, anim, particles,
 >   decals, pad, fx` moved to `src/engine/` (commit `cefdae3`). `src/engine`
 >   is on the include path so includers were untouched. Cardinal-rule grep

@@ -1,8 +1,34 @@
 # Multi-Floor / Vertical Maps — Design & Plan
 
-Status: **proposed** (no code yet). How to add verticality (ramps, platforms,
-and true stacked floors) to a world whose collision and navigation are
-currently flat (XZ-plane).
+> ## ▶ Status (updated 2026-06-14): approach B core is IMPLEMENTED
+> Vertical + true overlapping floors now work for the **player**. Landed:
+> - `FloorRegion` (axis-aligned XZ slab, flat or ramp) in `g_world.floors[]`,
+>   and `Level_FloorHeightAt(x,z,feetY)` — the §2 "ground height is a query"
+>   idea — returning the highest walkable surface at/just above the feet
+>   (within `STEP_UP_HEIGHT`), with an implicit Y=0 ground plane fallback so
+>   flat maps are unchanged. `player.c` ground snap uses it (stairs auto-climb,
+>   stacked floors resolve to the right one).
+> - MapDoc `FLOOR x z sx sz y` (flat) / `FLOOR x z sx sz yLow yHigh X|Z` (ramp)
+>   entries: parsed, saved (canonical round-trip), `MapDoc_Equal`, and
+>   instantiated into `g_world.floors`.
+> - Rendering of decks (textured top + slab body) and ramps (sloped quad) in
+>   `render.c DrawArena`.
+> - `data/maps/multifloor.map` demo (ground + overlapping Y4 deck + ramp + Y8
+>   catwalk) and a `--screenshot-map <file.map>` dev harness to eyeball any map.
+>
+> **Deferred (still flat / TODO):** floor-slab **collision** — you can currently
+> walk off a deck edge (gravity catches you on the ground below, which is fine)
+> but bullets and enemies still ignore floor slabs (§4: add slabs as XZ-at-Y
+> blockers + segment blockers). And **AI navigation is still XZ-only** (§5) — a
+> zombie can't yet path *across* floors to a player upstairs; it needs the
+> region/portal nav graph. These are the remaining items for full multi-floor
+> *gameplay*. The spatial-query layer they build on (`Level_FloorHeightAt`,
+> `FloorRegion`) now exists.
+
+Status of the rest of this doc: **design reference** for the deferred work
+(collision + AI nav) and the engine-seam framing. How to add verticality
+(ramps, platforms, and true stacked floors) to a world whose collision and
+navigation are currently flat (XZ-plane).
 
 This pairs with [engine-game-separation.md](engine-game-separation.md): the
 spatial queries below are **engine services** the game *and* the future map

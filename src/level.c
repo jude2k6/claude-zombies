@@ -323,6 +323,28 @@ static int DoorIndexByName(const char *name) {
     return -1;
 }
 
+// World-space floor Y for a doc entity placed in sector `sid` at (x,z). Every
+// placed entity belongs to a sector and takes its height from that sector's
+// surface (flat: yLow; ramp: interpolated), so overlapping floors are
+// unambiguous. Defensive: an out-of-range sector falls back to ground (Y0).
+static float DocSectorY(const MapDoc *doc, int sid, float x, float z) {
+    if (sid < 0 || sid >= doc->sectorCount) return 0.0f;
+    const MapDocSector *s = &doc->sectors[sid];
+    if (s->kind == SECTOR_RAMP) {
+        if (s->rampAxis == 1 && s->sx > 0.0001f) {
+            float t = (x - (s->x - s->sx * 0.5f)) / s->sx;
+            t = t < 0 ? 0 : (t > 1 ? 1 : t);
+            return s->yLow + (s->yHigh - s->yLow) * t;
+        }
+        if (s->rampAxis == 2 && s->sz > 0.0001f) {
+            float t = (z - (s->z - s->sz * 0.5f)) / s->sz;
+            t = t < 0 ? 0 : (t > 1 ? 1 : t);
+            return s->yLow + (s->yHigh - s->yLow) * t;
+        }
+    }
+    return s->yLow;
+}
+
 // ============================================================================
 //  Level_InstantiateDoc — copy a MapDoc into the live game globals.
 //  Warns to stderr if any map cap is exceeded and clamps rather than
@@ -380,8 +402,9 @@ void Level_InstantiateDoc(const MapDoc *doc) {
                     doc->spawnCount, NET_MAX_PLAYERS);
             break;
         }
+        float sx = doc->spawns[i].x, sz = doc->spawns[i].z;
         mapSpawns[mapSpawnCount++] = (Vector3){
-            doc->spawns[i].x, PLAYER_EYE, doc->spawns[i].z
+            sx, DocSectorY(doc, doc->spawns[i].sectorId, sx, sz) + PLAYER_EYE, sz
         };
     }
     if (mapSpawnCount == 0)
@@ -473,7 +496,9 @@ void Level_InstantiateDoc(const MapDoc *doc) {
                         dw->lockedBy);
         }
         g_world.windows[g_world.windowCount++] = (Window3D){
-            .pos = (Vector3){ dw->x, WALL_HEIGHT * 0.5f, dw->z },
+            .pos = (Vector3){ dw->x,
+                              DocSectorY(doc, dw->sectorId, dw->x, dw->z) + WALL_HEIGHT * 0.5f,
+                              dw->z },
             .normal = normal, .tangent = tangent,
             .boards = MAX_BOARDS_PER_WIN,
             .repairProgress = 0, .repairPlayer = -1,
@@ -490,25 +515,30 @@ void Level_InstantiateDoc(const MapDoc *doc) {
         }
         const MapDocObstacle *o = &doc->obstacles[i];
         int obIdx = g_world.obstacleCount++;
-        g_world.obstacles[obIdx] = (Box){ { o->x, o->h * 0.5f, o->z }, { o->sx, o->h, o->sz } };
+        float oy = DocSectorY(doc, o->sectorId, o->x, o->z);
+        g_world.obstacles[obIdx] = (Box){ { o->x, oy + o->h * 0.5f, o->z }, { o->sx, o->h, o->sz } };
         obstacleTexHandle[obIdx] = (o->texName[0])
             ? Assets_GetTextureByName(o->texName) : -1;
     }
 
-    // Floor regions (multi-floor maps): MapDocFloor (full XZ size) -> FloorRegion
-    // (XZ half-extents). Flat slabs and ramps both come through here.
-    for (int i = 0; i < doc->floorCount; i++) {
+    // Sectors -> walkable FloorRegions. The ground (a flat sector at Y0) is
+    // already the arena floor (drawn by DrawArena, walkable via the implicit
+    // ground plane), so only elevated decks and ramps become regions.
+    for (int i = 0; i < doc->sectorCount; i++) {
+        const MapDocSector *s = &doc->sectors[i];
+        bool elevated = (s->kind == SECTOR_RAMP) ||
+                        fabsf(s->yLow) > 0.001f || fabsf(s->yHigh) > 0.001f;
+        if (!elevated) continue;
         if (g_world.floorCount >= MAX_FLOORS) {
-            fprintf(stderr, "map: warning: too many floors (MAX_FLOORS=%d) — ignoring extras\n",
+            fprintf(stderr, "map: warning: too many floor regions (MAX_FLOORS=%d) — ignoring extras\n",
                     MAX_FLOORS);
             break;
         }
-        const MapDocFloor *fl = &doc->floors[i];
         g_world.floors[g_world.floorCount++] = (FloorRegion){
-            .cx = fl->x, .cz = fl->z,
-            .halfX = fl->sx * 0.5f, .halfZ = fl->sz * 0.5f,
-            .yLow = fl->yLow, .yHigh = fl->yHigh,
-            .rampAxis = (RampAxis)fl->rampAxis,
+            .cx = s->x, .cz = s->z,
+            .halfX = s->sx * 0.5f, .halfZ = s->sz * 0.5f,
+            .yLow = s->yLow, .yHigh = s->yHigh,
+            .rampAxis = (RampAxis)s->rampAxis,
         };
     }
 
@@ -524,7 +554,7 @@ void Level_InstantiateDoc(const MapDoc *doc) {
         if (widx < 0) continue;
         Vector3 normal = DirToNormal(wb->dir);
         wallBuys[wallBuyCount++] = (WallBuy){
-            .pos = (Vector3){ wb->x, 2.0f, wb->z },
+            .pos = (Vector3){ wb->x, DocSectorY(doc, wb->sectorId, wb->x, wb->z) + 2.0f, wb->z },
             .normal = normal,
             .weaponIdx = widx,
         };
@@ -540,13 +570,14 @@ void Level_InstantiateDoc(const MapDoc *doc) {
         const MapDocPerk *pk = &doc->perks[i];
         int pidx = PerkNameToIdx(pk->perk);
         if (pidx < 0) continue;
-        perkMachines[perkMachineCount++] = (PerkMachine){ {pk->x, 0, pk->z}, pidx };
+        perkMachines[perkMachineCount++] =
+            (PerkMachine){ {pk->x, DocSectorY(doc, pk->sectorId, pk->x, pk->z), pk->z}, pidx };
     }
 
     // Pack-a-Punch
     if (doc->hasPap) {
         g_world.pap = (PackAPunch){
-            .pos = { doc->pap.x, 0, doc->pap.z },
+            .pos = { doc->pap.x, DocSectorY(doc, doc->pap.sectorId, doc->pap.x, doc->pap.z), doc->pap.z },
             .phase = PAP_IDLE, .slotInProgress = -1,
             .ownerPlayer = -1, .weaponIdx = -1
         };
@@ -555,7 +586,10 @@ void Level_InstantiateDoc(const MapDoc *doc) {
     // Mystery Box
     if (doc->mbox.present) {
         g_world.mbox = (MysteryBox){
-            .placed = true, .pos = { doc->mbox.x, 0.5f, doc->mbox.z },
+            .placed = true,
+            .pos = { doc->mbox.x,
+                     DocSectorY(doc, doc->mbox.sectorId, doc->mbox.x, doc->mbox.z) + 0.5f,
+                     doc->mbox.z },
             .state = MBOX_IDLE, .timer = 0,
             .showingWeapon = 0, .finalWeapon = 0,
             .ownerPlayer = -1, .bob = 0
@@ -577,13 +611,14 @@ void Level_InstantiateDoc(const MapDoc *doc) {
         }
         Vector3 he = def->halfExtent;
         float   sc = pr->scale;
+        float   py = DocSectorY(doc, pr->sectorId, pr->x, pr->z);
         mapProps[mapPropCount++] = (MapProp){
             .propId = def->propId,
-            .pos    = (Vector3){ pr->x, 0, pr->z },
+            .pos    = (Vector3){ pr->x, py, pr->z },
             .yawDeg = pr->yawDeg,
             .scale  = sc,
             .collider = (Box){
-                { pr->x, def->footYOffset * sc, pr->z },
+                { pr->x, py + def->footYOffset * sc, pr->z },
                 { he.x * 2 * sc, he.y * 2 * sc, he.z * 2 * sc },
             },
         };

@@ -1,18 +1,20 @@
 # Claude Zombies - default map
 #
-# Format reference (see also data/models/ASSETS.md and src/level.c):
+# Format reference (see also src/engine/mapdoc.c):
 #
 #   NAME <text...>
-#   ATMOSPHERE
-#     fog R G B START END                    (RGB 0-255, distances in m)
-#     sky_tint R G B                         (reserved)
-#     music <name>                           (reserved)
+#   ARENA halfX halfZ                        (optional; default 40 40)
+#   ATMOSPHERE ... END                       (fog/sky_tint/music)
+#   TEXTURES ... END                         (per-map slot overrides)
+#
+#   SECTOR <name> x z sx sz y                (flat floor area at height y)
+#   RAMP   <name> x z sx sz yLow yHigh X|Z [LINK a b]  (slope/stair, nav edge)
+#     ...placed entities (below) live inside a SECTOR/RAMP block and take
+#        their floor height from it...
 #   END
-#   ROOM <name>                              (organisational; no coord shift)
-#     ...
-#   END
+#
 #   SPAWN x z
-#   WALL  x1 z1 x2 z2 [DOOR center width cost [AS name]]
+#   WALL  x1 z1 x2 z2 [DOOR center width cost [AS name]] [TEX name]
 #   WINDOW x z <+x|-x|+z|-z> [LOCKED_BY <door_name>]
 #   WALLBUY x z <+x|-x|+z|-z> WEAPON         (PISTOL/SMG/SHOTGUN/RIFLE/RAYGUN)
 #   PERK    x z PERK                         (JUG/SPEED/DTAP/STAMIN)
@@ -28,43 +30,38 @@ ATMOSPHERE
     sky_tint  255 255 255
 END
 
-# --- Spawns -------------------------------------------------------------
-SPAWN  0 0
-SPAWN  2 0
-SPAWN -2 0
-SPAWN  0 2
+SECTOR ground  0 0  80 80  0
+    SPAWN  0 0
+    SPAWN  2 0
+    SPAWN -2 0
+    SPAWN  0 2
 
-# --- Obstacles ---------------------------------------------------------
-OBSTACLE  10  5    4 4 3
-OBSTACLE -12 -8    6 3
-OBSTACLE -10 -16   4 4 3
-OBSTACLE  18 -15   3 6
-OBSTACLE -20  12   5 5 3
-OBSTACLE   8  20   7 2
-OBSTACLE  -6  26   3 3 3
-OBSTACLE  25   2   2 8
+    OBSTACLE  10  5    4 4 3
+    OBSTACLE -12 -8    6 3
+    OBSTACLE -10 -16   4 4 3
+    OBSTACLE  18 -15   3 6
+    OBSTACLE -20  12   5 5 3
+    OBSTACLE   8  20   7 2
+    OBSTACLE  -6  26   3 3 3
+    OBSTACLE  25   2   2 8
 
-# --- North/south divider with a central $1500 door ---------------------
-WALL -40 -20  40 -20  DOOR 0 2 1500 AS central_door
+    WALL -40 -20  40 -20  DOOR 0 2 1500 AS central_door
 
-# --- Wall buys ---------------------------------------------------------
-WALLBUY  15    39.45  -z  SHOTGUN
-WALLBUY  39.45 -10    -x  SMG
-WALLBUY -15   -39.45  +z  RIFLE
-WALLBUY -39.45 18     +x  RAYGUN
+    WALLBUY  15    39.45  -z  SHOTGUN
+    WALLBUY  39.45 -10    -x  SMG
+    WALLBUY -15   -39.45  +z  RIFLE
+    WALLBUY -39.45 18     +x  RAYGUN
 
-# --- Windows ----------------------------------------------------------
-WINDOW -18   40   -z
-WINDOW  40   18   -x
-WINDOW  18  -40   +z LOCKED_BY central_door
-WINDOW -40   -8   +x
+    WINDOW -18   40   -z
+    WINDOW  40   18   -x
+    WINDOW  18  -40   +z LOCKED_BY central_door
+    WINDOW -40   -8   +x
 
-# --- Perks ------------------------------------------------------------
-PERK  -8  12 JUG
-PERK   4  -8 SPEED
-PERK  22  25 DTAP
-PERK -25 -22 STAMIN
+    PERK  -8  12 JUG
+    PERK   4  -8 SPEED
+    PERK  22  25 DTAP
+    PERK -25 -22 STAMIN
 
-# --- Mystery box + Pack-a-Punch ---------------------------------------
-MBOX -22 15
-PAP   0 -28
+    MBOX -22 15
+    PAP   0 -28
+END

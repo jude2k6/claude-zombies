@@ -58,17 +58,25 @@ static bool ParseDir(const char *s, char dir[4]) {
 
 static float Fabsf(float x) { return x < 0.0f ? -x : x; }
 
-/* Find or add a room name; returns index, -1 on cap overflow. */
-static int FindOrAddRoom(MapDoc *doc, const char *name, FILE *errs, int lineNo) {
-    for (int i = 0; i < doc->roomCount; i++)
-        if (strcmp(doc->rooms[i], name) == 0) return i;
-    if (doc->roomCount >= MAPDOC_MAX_ROOMS) {
-        fprintf(errs, "map: line %d: too many rooms (max %d)\n", lineNo, MAPDOC_MAX_ROOMS);
+/* Add a new sector; returns its index, -1 on cap overflow. */
+static int AddSector(MapDoc *doc, const char *name, FILE *errs, int lineNo) {
+    if (doc->sectorCount >= MAPDOC_MAX_SECTORS) {
+        fprintf(errs, "map: line %d: too many sectors (max %d)\n", lineNo, MAPDOC_MAX_SECTORS);
         return -1;
     }
-    strncpy(doc->rooms[doc->roomCount], name, MAPDOC_NAME_LEN - 1);
-    doc->rooms[doc->roomCount][MAPDOC_NAME_LEN - 1] = '\0';
-    return doc->roomCount++;
+    MapDocSector *s = &doc->sectors[doc->sectorCount];
+    memset(s, 0, sizeof *s);
+    strncpy(s->name, name, MAPDOC_NAME_LEN - 1);
+    s->name[MAPDOC_NAME_LEN - 1] = '\0';
+    s->linkA = s->linkB = -1;
+    return doc->sectorCount++;
+}
+
+/* Find a sector index by name; -1 if none. */
+static int FindSector(const MapDoc *doc, const char *name) {
+    for (int i = 0; i < doc->sectorCount; i++)
+        if (strcmp(doc->sectors[i].name, name) == 0) return i;
+    return -1;
 }
 
 /* ---- MapDoc_Parse ---- */
@@ -86,8 +94,8 @@ int MapDoc_Parse(const char *path, MapDoc *out, FILE *errs) {
     out->arenaHalfZ = 40.0f;
 
     int errors = 0;
-    enum { BLK_NONE, BLK_ATMOS, BLK_ROOM, BLK_TEX } block = BLK_NONE;
-    int  curRoomIdx = -1;
+    enum { BLK_NONE, BLK_ATMOS, BLK_SECTOR, BLK_TEX } block = BLK_NONE;
+    int  curSectorIdx = -1;
 
     /* deferred window→door name resolution */
     struct { int winIdx; char name[MAPDOC_DOOR_NAME_LEN]; } pending[MAPDOC_MAX_WINDOWS];
@@ -121,17 +129,62 @@ int MapDoc_Parse(const char *path, MapDoc *out, FILE *errs) {
             }
             block = BLK_TEX; continue;
         }
-        if (strcmp(key, "ROOM") == 0) {
+        /* SECTOR <name> <x> <z> <sx> <sz> <y>
+         * RAMP   <name> <x> <z> <sx> <sz> <yLow> <yHigh> <X|Z> [LINK <a> <b>]
+         * Opens a block; placed entities until END belong to this sector. */
+        if (strcmp(key, "SECTOR") == 0 || strcmp(key, "RAMP") == 0) {
+            bool isRamp = (key[0] == 'R');
             if (block != BLK_NONE) {
-                fprintf(errs, "map: line %d: ROOM inside another block\n", lineNo);
+                fprintf(errs, "map: line %d: %s inside another block\n", lineNo, key);
                 errors++; continue;
             }
-            if (n < 2) {
-                fprintf(errs, "map: line %d: ROOM expects a name\n", lineNo);
+            int need = isRamp ? 9 : 7;
+            if (n < need) {
+                fprintf(errs, "map: line %d: %s expects %s\n", lineNo, key,
+                        isRamp ? "name x z sx sz yLow yHigh X|Z [LINK a b]"
+                               : "name x z sx sz y");
                 errors++; continue;
             }
-            curRoomIdx = FindOrAddRoom(out, toks[1], errs, lineNo);
-            block = BLK_ROOM; continue;
+            float x, z, sx, sz, yLow, yHigh;
+            if (!ParseFloat(toks[2], &x)  || !ParseFloat(toks[3], &z) ||
+                !ParseFloat(toks[4], &sx) || !ParseFloat(toks[5], &sz) ||
+                !ParseFloat(toks[6], &yLow)) {
+                fprintf(errs, "map: line %d: %s bad number\n", lineNo, key);
+                errors++; continue;
+            }
+            int rampAxis = 0, linkA = -1, linkB = -1;
+            yHigh = yLow;
+            if (isRamp) {
+                if (!ParseFloat(toks[7], &yHigh)) {
+                    fprintf(errs, "map: line %d: RAMP bad yHigh\n", lineNo);
+                    errors++; continue;
+                }
+                if      (strcmp(toks[8], "X") == 0) rampAxis = 1;
+                else if (strcmp(toks[8], "Z") == 0) rampAxis = 2;
+                else {
+                    fprintf(errs, "map: line %d: RAMP axis must be X or Z\n", lineNo);
+                    errors++; continue;
+                }
+                /* optional LINK a b — sectors must already be defined above */
+                if (n >= 12 && strcmp(toks[9], "LINK") == 0) {
+                    linkA = FindSector(out, toks[10]);
+                    linkB = FindSector(out, toks[11]);
+                    if (linkA < 0 || linkB < 0) {
+                        fprintf(errs, "map: line %d: RAMP LINK references unknown sector "
+                                "(define linked sectors before the ramp)\n", lineNo);
+                        errors++; continue;
+                    }
+                }
+            }
+            int si = AddSector(out, toks[1], errs, lineNo);
+            if (si < 0) { errors++; continue; }
+            MapDocSector *s = &out->sectors[si];
+            s->kind = isRamp ? SECTOR_RAMP : SECTOR_FLAT;
+            s->x = x; s->z = z; s->sx = sx; s->sz = sz;
+            s->yLow = yLow; s->yHigh = yHigh;
+            s->rampAxis = rampAxis; s->linkA = linkA; s->linkB = linkB;
+            curSectorIdx = si;
+            block = BLK_SECTOR; continue;
         }
         if (strcmp(key, "END") == 0) {
             if (block == BLK_NONE) {
@@ -139,7 +192,7 @@ int MapDoc_Parse(const char *path, MapDoc *out, FILE *errs) {
                 errors++;
             }
             block = BLK_NONE;
-            curRoomIdx = -1;
+            curSectorIdx = -1;
             continue;
         }
 
@@ -221,6 +274,14 @@ int MapDoc_Parse(const char *path, MapDoc *out, FILE *errs) {
             continue;
         }
 
+        /* Everything below is a placed entity and must live inside a sector,
+           which is where it gets its floor Y from. */
+        if (block != BLK_SECTOR) {
+            fprintf(errs, "map: line %d: '%s' must be inside a SECTOR or RAMP block\n",
+                    lineNo, key);
+            errors++; continue;
+        }
+
         if (strcmp(key, "SPAWN") == 0) {
             if (n != 3) {
                 fprintf(errs, "map: line %d: SPAWN expects x z\n", lineNo);
@@ -236,7 +297,7 @@ int MapDoc_Parse(const char *path, MapDoc *out, FILE *errs) {
                         lineNo, MAPDOC_MAX_SPAWNS);
                 errors++; continue;
             }
-            out->spawns[out->spawnCount++] = (MapDocSpawn){ x, z, curRoomIdx };
+            out->spawns[out->spawnCount++] = (MapDocSpawn){ x, z, curSectorIdx };
             continue;
         }
 
@@ -270,7 +331,7 @@ int MapDoc_Parse(const char *path, MapDoc *out, FILE *errs) {
             MapDocWall w;
             memset(&w, 0, sizeof w);
             w.x1 = x1; w.z1 = z1; w.x2 = x2; w.z2 = z2;
-            w.roomIdx = curRoomIdx;
+            w.sectorId = curSectorIdx;
 
             /* optional DOOR clause */
             int ti = 5;
@@ -346,7 +407,7 @@ int MapDoc_Parse(const char *path, MapDoc *out, FILE *errs) {
             MapDocObstacle ob;
             memset(&ob, 0, sizeof ob);
             ob.x = x; ob.z = z; ob.sx = sx; ob.sz = sz; ob.h = h;
-            ob.roomIdx = curRoomIdx;
+            ob.sectorId = curSectorIdx;
             /* optional TEX clause */
             if (oi + 1 < n && strcmp(toks[oi], "TEX") == 0) {
                 strncpy(ob.texName, toks[oi+1], MAPDOC_TEX_NAME_LEN - 1);
@@ -356,48 +417,6 @@ int MapDoc_Parse(const char *path, MapDoc *out, FILE *errs) {
                 errors++; continue;
             }
             out->obstacles[out->obstacleCount++] = ob;
-            continue;
-        }
-
-        if (strcmp(key, "FLOOR") == 0) {
-            /* FLOOR x z sx sz y                  (flat surface at y)
-             * FLOOR x z sx sz yLow yHigh X|Z     (ramp sloping low->high) */
-            if (n < 6) {
-                fprintf(errs, "map: line %d: FLOOR expects x z sx sz y [yHigh X|Z]\n", lineNo);
-                errors++; continue;
-            }
-            float x, z, sx, sz, yLow;
-            if (!ParseFloat(toks[1], &x)  || !ParseFloat(toks[2], &z) ||
-                !ParseFloat(toks[3], &sx) || !ParseFloat(toks[4], &sz) ||
-                !ParseFloat(toks[5], &yLow)) {
-                fprintf(errs, "map: line %d: FLOOR bad number\n", lineNo);
-                errors++; continue;
-            }
-            float yHigh = yLow;
-            int   rampAxis = 0;
-            if (n >= 8) {  /* ramp form: yHigh + axis */
-                if (!ParseFloat(toks[6], &yHigh)) {
-                    fprintf(errs, "map: line %d: FLOOR bad ramp height\n", lineNo);
-                    errors++; continue;
-                }
-                if      (strcmp(toks[7], "X") == 0) rampAxis = 1;
-                else if (strcmp(toks[7], "Z") == 0) rampAxis = 2;
-                else {
-                    fprintf(errs, "map: line %d: FLOOR ramp axis must be X or Z\n", lineNo);
-                    errors++; continue;
-                }
-            }
-            if (out->floorCount >= MAPDOC_MAX_FLOORS) {
-                fprintf(errs, "map: line %d: too many floors (max %d)\n",
-                        lineNo, MAPDOC_MAX_FLOORS);
-                errors++; continue;
-            }
-            MapDocFloor fl;
-            memset(&fl, 0, sizeof fl);
-            fl.x = x; fl.z = z; fl.sx = sx; fl.sz = sz;
-            fl.yLow = yLow; fl.yHigh = yHigh; fl.rampAxis = rampAxis;
-            fl.roomIdx = curRoomIdx;
-            out->floors[out->floorCount++] = fl;
             continue;
         }
 
@@ -431,7 +450,7 @@ int MapDoc_Parse(const char *path, MapDoc *out, FILE *errs) {
             wb.x = x; wb.z = z;
             memcpy(wb.dir, dir, 4);
             strncpy(wb.weapon, wn, sizeof wb.weapon - 1);
-            wb.roomIdx = curRoomIdx;
+            wb.sectorId = curSectorIdx;
             out->wallbuys[out->wallbuyCount++] = wb;
             continue;
         }
@@ -461,7 +480,7 @@ int MapDoc_Parse(const char *path, MapDoc *out, FILE *errs) {
             memset(&pk, 0, sizeof pk);
             pk.x = x; pk.z = z;
             strncpy(pk.perk, pn, sizeof pk.perk - 1);
-            pk.roomIdx = curRoomIdx;
+            pk.sectorId = curSectorIdx;
             out->perks[out->perkCount++] = pk;
             continue;
         }
@@ -477,7 +496,7 @@ int MapDoc_Parse(const char *path, MapDoc *out, FILE *errs) {
                 errors++; continue;
             }
             out->hasPap = true;
-            out->pap = (MapDocPap){ x, z, curRoomIdx };
+            out->pap = (MapDocPap){ x, z, curSectorIdx };
             continue;
         }
 
@@ -493,7 +512,7 @@ int MapDoc_Parse(const char *path, MapDoc *out, FILE *errs) {
             }
             out->mbox.present = true;
             out->mbox.x = x; out->mbox.z = z;
-            out->mbox.roomIdx = curRoomIdx;
+            out->mbox.sectorId = curSectorIdx;
             continue;
         }
 
@@ -526,7 +545,7 @@ int MapDoc_Parse(const char *path, MapDoc *out, FILE *errs) {
             win.x = x; win.z = z;
             memcpy(win.dir, dir, 4);
             strncpy(win.lockedBy, lockedBy, MAPDOC_DOOR_NAME_LEN - 1);
-            win.roomIdx = curRoomIdx;
+            win.sectorId = curSectorIdx;
             int widx = out->windowCount++;
             out->windows[widx] = win;
 
@@ -580,7 +599,7 @@ int MapDoc_Parse(const char *path, MapDoc *out, FILE *errs) {
             strncpy(pr.name, toks[1], MAPDOC_PROP_NAME_LEN - 1);
             pr.x = x; pr.z = z;
             pr.yawDeg = yaw; pr.scale = scale;
-            pr.roomIdx = curRoomIdx;
+            pr.sectorId = curSectorIdx;
             out->props[out->propCount++] = pr;
             continue;
         }
@@ -611,9 +630,9 @@ int MapDoc_Parse(const char *path, MapDoc *out, FILE *errs) {
         }
     }
 
-    /* Ensure at least one spawn exists */
+    /* Ensure at least one spawn exists (sector -1 => ground at Y0) */
     if (out->spawnCount == 0)
-        out->spawns[out->spawnCount++] = (MapDocSpawn){ 0.0f, 0.0f };
+        out->spawns[out->spawnCount++] = (MapDocSpawn){ 0.0f, 0.0f, -1 };
 
     return errors;
 }
@@ -624,18 +643,18 @@ static const char *DirStr(const char dir[4]) {
     return dir; /* already "+x"/"-x"/"+z"/"-z" */
 }
 
-/* Emit all entities for a given roomIdx (-1 = ungrouped). */
-static void EmitEntities(FILE *f, const MapDoc *doc, int roomIdx) {
-    const char *ind = (roomIdx == -1) ? "" : "    ";
+/* Emit all entities belonging to a given sector (indented inside its block). */
+static void EmitEntities(FILE *f, const MapDoc *doc, int sectorId) {
+    const char *ind = "    ";
 
     for (int i = 0; i < doc->spawnCount; i++) {
-        if (doc->spawns[i].roomIdx != roomIdx) continue;
+        if (doc->spawns[i].sectorId != sectorId) continue;
         fprintf(f, "%sSPAWN %.4g %.4g\n", ind, doc->spawns[i].x, doc->spawns[i].z);
     }
 
     for (int i = 0; i < doc->wallCount; i++) {
         const MapDocWall *w = &doc->walls[i];
-        if (w->roomIdx != roomIdx) continue;
+        if (w->sectorId != sectorId) continue;
         if (w->door.present) {
             fprintf(f, "%sWALL %.4g %.4g  %.4g %.4g  DOOR %.4g %.4g %d",
                     ind, w->x1, w->z1, w->x2, w->z2,
@@ -653,7 +672,7 @@ static void EmitEntities(FILE *f, const MapDoc *doc, int roomIdx) {
 
     for (int i = 0; i < doc->obstacleCount; i++) {
         const MapDocObstacle *o = &doc->obstacles[i];
-        if (o->roomIdx != roomIdx) continue;
+        if (o->sectorId != sectorId) continue;
         if (Fabsf(o->h - 2.0f) < 0.001f)
             fprintf(f, "%sOBSTACLE %.4g %.4g  %.4g %.4g",
                     ind, o->x, o->z, o->sx, o->sz);
@@ -665,21 +684,9 @@ static void EmitEntities(FILE *f, const MapDoc *doc, int roomIdx) {
         fprintf(f, "\n");
     }
 
-    for (int i = 0; i < doc->floorCount; i++) {
-        const MapDocFloor *fl = &doc->floors[i];
-        if (fl->roomIdx != roomIdx) continue;
-        if (fl->rampAxis == 0)
-            fprintf(f, "%sFLOOR %.4g %.4g  %.4g %.4g  %.4g\n",
-                    ind, fl->x, fl->z, fl->sx, fl->sz, fl->yLow);
-        else
-            fprintf(f, "%sFLOOR %.4g %.4g  %.4g %.4g  %.4g %.4g %s\n",
-                    ind, fl->x, fl->z, fl->sx, fl->sz, fl->yLow, fl->yHigh,
-                    fl->rampAxis == 1 ? "X" : "Z");
-    }
-
     for (int i = 0; i < doc->windowCount; i++) {
         const MapDocWindow *w = &doc->windows[i];
-        if (w->roomIdx != roomIdx) continue;
+        if (w->sectorId != sectorId) continue;
         if (w->lockedBy[0])
             fprintf(f, "%sWINDOW %.4g %.4g  %s  LOCKED_BY %s\n",
                     ind, w->x, w->z, DirStr(w->dir), w->lockedBy);
@@ -690,26 +697,26 @@ static void EmitEntities(FILE *f, const MapDoc *doc, int roomIdx) {
 
     for (int i = 0; i < doc->wallbuyCount; i++) {
         const MapDocWallbuy *wb = &doc->wallbuys[i];
-        if (wb->roomIdx != roomIdx) continue;
+        if (wb->sectorId != sectorId) continue;
         fprintf(f, "%sWALLBUY %.4g %.4g  %s  %s\n",
                 ind, wb->x, wb->z, DirStr(wb->dir), wb->weapon);
     }
 
     for (int i = 0; i < doc->perkCount; i++) {
         const MapDocPerk *pk = &doc->perks[i];
-        if (pk->roomIdx != roomIdx) continue;
+        if (pk->sectorId != sectorId) continue;
         fprintf(f, "%sPERK %.4g %.4g %s\n", ind, pk->x, pk->z, pk->perk);
     }
 
-    if (doc->hasPap && doc->pap.roomIdx == roomIdx)
+    if (doc->hasPap && doc->pap.sectorId == sectorId)
         fprintf(f, "%sPAP %.4g %.4g\n", ind, doc->pap.x, doc->pap.z);
 
-    if (doc->mbox.present && doc->mbox.roomIdx == roomIdx)
+    if (doc->mbox.present && doc->mbox.sectorId == sectorId)
         fprintf(f, "%sMBOX %.4g %.4g\n", ind, doc->mbox.x, doc->mbox.z);
 
     for (int i = 0; i < doc->propCount; i++) {
         const MapDocProp *pr = &doc->props[i];
-        if (pr->roomIdx != roomIdx) continue;
+        if (pr->sectorId != sectorId) continue;
         fprintf(f, "%sPROP %s %.4g %.4g", ind, pr->name, pr->x, pr->z);
         if (Fabsf(pr->yawDeg) > 0.001f)
             fprintf(f, " yaw %.4g", pr->yawDeg);
@@ -755,15 +762,23 @@ int MapDoc_Save(const char *path, const MapDoc *doc) {
         fprintf(f, "END\n\n");
     }
 
-    /* ungrouped entities (roomIdx == -1) */
-    fprintf(f, "# --- ungrouped ---\n");
-    EmitEntities(f, doc, -1);
-
-    /* per-room blocks */
-    for (int r = 0; r < doc->roomCount; r++) {
-        fprintf(f, "\n# --- ROOM %s ---\n", doc->rooms[r]);
-        fprintf(f, "ROOM %s\n", doc->rooms[r]);
-        EmitEntities(f, doc, r);
+    /* One block per sector: header line carries the floor surface + footprint,
+       then the entities placed on it. */
+    for (int s = 0; s < doc->sectorCount; s++) {
+        const MapDocSector *sc = &doc->sectors[s];
+        if (sc->kind == SECTOR_RAMP) {
+            fprintf(f, "\nRAMP %s  %.4g %.4g  %.4g %.4g  %.4g %.4g %s",
+                    sc->name, sc->x, sc->z, sc->sx, sc->sz,
+                    sc->yLow, sc->yHigh, sc->rampAxis == 1 ? "X" : "Z");
+            if (sc->linkA >= 0 && sc->linkB >= 0)
+                fprintf(f, "  LINK %s %s",
+                        doc->sectors[sc->linkA].name, doc->sectors[sc->linkB].name);
+            fprintf(f, "\n");
+        } else {
+            fprintf(f, "\nSECTOR %s  %.4g %.4g  %.4g %.4g  %.4g\n",
+                    sc->name, sc->x, sc->z, sc->sx, sc->sz, sc->yLow);
+        }
+        EmitEntities(f, doc, s);
         fprintf(f, "END\n");
     }
 
@@ -779,16 +794,16 @@ static bool SEq(const char *a, const char *b) { return strcmp(a, b) == 0; }
 /* Entity order is not semantically meaningful (MapDoc_Save canonicalises it:
  * ungrouped first, then per-room), so each per-type comparison below is a
  * greedy unordered match: every element of a must pair with a distinct,
- * field-equal element of b. Room order IS preserved by Save, so roomIdx
+ * field-equal element of b. Room order IS preserved by Save, so sectorId
  * values remain directly comparable. */
 
 static bool SpawnEq(const MapDocSpawn *x, const MapDocSpawn *y) {
-    return FEq(x->x, y->x) && FEq(x->z, y->z) && x->roomIdx == y->roomIdx;
+    return FEq(x->x, y->x) && FEq(x->z, y->z) && x->sectorId == y->sectorId;
 }
 static bool WallEq(const MapDocWall *x, const MapDocWall *y) {
     if (!FEq(x->x1, y->x1) || !FEq(x->z1, y->z1)) return false;
     if (!FEq(x->x2, y->x2) || !FEq(x->z2, y->z2)) return false;
-    if (x->roomIdx != y->roomIdx) return false;
+    if (x->sectorId != y->sectorId) return false;
     if (x->door.present != y->door.present) return false;
     if (x->door.present) {
         if (!FEq(x->door.center, y->door.center)) return false;
@@ -800,30 +815,32 @@ static bool WallEq(const MapDocWall *x, const MapDocWall *y) {
     return true;
 }
 static bool WindowEq(const MapDocWindow *x, const MapDocWindow *y) {
-    return FEq(x->x, y->x) && FEq(x->z, y->z) && x->roomIdx == y->roomIdx &&
+    return FEq(x->x, y->x) && FEq(x->z, y->z) && x->sectorId == y->sectorId &&
            SEq(x->dir, y->dir) && SEq(x->lockedBy, y->lockedBy);
 }
 static bool ObstacleEq(const MapDocObstacle *x, const MapDocObstacle *y) {
-    return FEq(x->x, y->x) && FEq(x->z, y->z) && x->roomIdx == y->roomIdx &&
+    return FEq(x->x, y->x) && FEq(x->z, y->z) && x->sectorId == y->sectorId &&
            FEq(x->sx, y->sx) && FEq(x->sz, y->sz) && FEq(x->h, y->h) &&
            SEq(x->texName, y->texName);
 }
-static bool FloorEq(const MapDocFloor *x, const MapDocFloor *y) {
-    return FEq(x->x, y->x) && FEq(x->z, y->z) && x->roomIdx == y->roomIdx &&
+static bool SectorEq(const MapDocSector *x, const MapDocSector *y) {
+    return SEq(x->name, y->name) && x->kind == y->kind &&
+           FEq(x->x, y->x) && FEq(x->z, y->z) &&
            FEq(x->sx, y->sx) && FEq(x->sz, y->sz) &&
            FEq(x->yLow, y->yLow) && FEq(x->yHigh, y->yHigh) &&
-           x->rampAxis == y->rampAxis;
+           x->rampAxis == y->rampAxis &&
+           x->linkA == y->linkA && x->linkB == y->linkB;
 }
 static bool WallbuyEq(const MapDocWallbuy *x, const MapDocWallbuy *y) {
-    return FEq(x->x, y->x) && FEq(x->z, y->z) && x->roomIdx == y->roomIdx &&
+    return FEq(x->x, y->x) && FEq(x->z, y->z) && x->sectorId == y->sectorId &&
            SEq(x->dir, y->dir) && SEq(x->weapon, y->weapon);
 }
 static bool PerkEq(const MapDocPerk *x, const MapDocPerk *y) {
-    return FEq(x->x, y->x) && FEq(x->z, y->z) && x->roomIdx == y->roomIdx &&
+    return FEq(x->x, y->x) && FEq(x->z, y->z) && x->sectorId == y->sectorId &&
            SEq(x->perk, y->perk);
 }
 static bool PropEq(const MapDocProp *x, const MapDocProp *y) {
-    return SEq(x->name, y->name) && x->roomIdx == y->roomIdx &&
+    return SEq(x->name, y->name) && x->sectorId == y->sectorId &&
            FEq(x->x, y->x) && FEq(x->z, y->z) &&
            FEq(x->yawDeg, y->yawDeg) && FEq(x->scale, y->scale);
 }
@@ -851,7 +868,6 @@ static bool SpawnEqV(const void *a, const void *b)    { return SpawnEq(a, b); }
 static bool WallEqV(const void *a, const void *b)     { return WallEq(a, b); }
 static bool WindowEqV(const void *a, const void *b)   { return WindowEq(a, b); }
 static bool ObstacleEqV(const void *a, const void *b) { return ObstacleEq(a, b); }
-static bool FloorEqV(const void *a, const void *b)    { return FloorEq(a, b); }
 static bool WallbuyEqV(const void *a, const void *b)  { return WallbuyEq(a, b); }
 static bool PerkEqV(const void *a, const void *b)     { return PerkEq(a, b); }
 static bool PropEqV(const void *a, const void *b)     { return PropEq(a, b); }
@@ -898,10 +914,6 @@ bool MapDoc_Equal(const MapDoc *a, const MapDoc *b) {
     if (!UnorderedMatch(a->obstacles, b->obstacles, a->obstacleCount,
                         sizeof a->obstacles[0], ObstacleEqV)) return false;
 
-    if (a->floorCount != b->floorCount) return false;
-    if (!UnorderedMatch(a->floors, b->floors, a->floorCount,
-                        sizeof a->floors[0], FloorEqV)) return false;
-
     if (a->wallbuyCount != b->wallbuyCount) return false;
     if (!UnorderedMatch(a->wallbuys, b->wallbuys, a->wallbuyCount,
                         sizeof a->wallbuys[0], WallbuyEqV)) return false;
@@ -927,10 +939,10 @@ bool MapDoc_Equal(const MapDoc *a, const MapDoc *b) {
     if (!UnorderedMatch(a->props, b->props, a->propCount,
                         sizeof a->props[0], PropEqV)) return false;
 
-    /* rooms (names and count) */
-    if (a->roomCount != b->roomCount) return false;
-    for (int i = 0; i < a->roomCount; i++)
-        if (!SEq(a->rooms[i], b->rooms[i])) return false;
+    /* sectors (ordered: indices are stable references) */
+    if (a->sectorCount != b->sectorCount) return false;
+    for (int i = 0; i < a->sectorCount; i++)
+        if (!SectorEq(&a->sectors[i], &b->sectors[i])) return false;
 
     return true;
 }

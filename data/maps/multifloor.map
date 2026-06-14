@@ -1,13 +1,12 @@
 # Claude Zombies - multi-floor demo map
 #
 # Demonstrates vertical / overlapping floors (docs/multi-floor-maps.md).
-# New map entry:
-#   FLOOR x z sx sz y               flat walkable surface at height y
-#   FLOOR x z sx sz yLow yHigh X|Z  ramp sloping yLow->yHigh along X or Z
-# An implicit ground plane at Y=0 always exists, so the arena floor is the
-# downstairs; FLOOR lines add decks/ramps above it. Standing on the ground
-# under the deck keeps you at Y=0; walking up the ramp puts you on the deck
-# at Y=4 — a true overlapping upstairs/downstairs.
+# A map is a list of SECTORs (flat floor areas at a height) joined by RAMPs
+# (slopes that are also the AI nav edges via LINK). Every placed entity lives
+# inside a sector and takes its floor height from it, so a perk on the deck
+# stands at the deck's height automatically.
+#   SECTOR <name> x z sx sz y
+#   RAMP   <name> x z sx sz yLow yHigh X|Z [LINK a b]
 
 NAME Multi-Floor Demo
 
@@ -16,41 +15,47 @@ ATMOSPHERE
     sky_tint  255 255 255
 END
 
-# --- Spawns (ground level) --------------------------------------------
-SPAWN  0 0
-SPAWN  2 0
-SPAWN -2 0
-SPAWN  0 2
+# Ground level (spawns + ground gameplay)
+SECTOR ground  0 0  80 80  0
+    SPAWN  0 0
+    SPAWN  2 0
+    SPAWN -2 0
+    SPAWN  0 2
 
-# --- Elevated deck over the eastern half (Y = 4) ----------------------
-FLOOR  15 -10   18 18   4
+    OBSTACLE -12 -8    6 3
+    OBSTACLE -20  12   5 5 3
+    OBSTACLE -10  20   4 4 3
 
-# --- Ramp from the ground (Y0) up to the deck (Y4), sloping along +X ---
-# spans x[-2..6] at z=-10; low edge meets the ground, high edge meets deck.
-FLOOR   2 -10    8 6    0 4 X
+    WALLBUY -39.45 18     +x  SMG
+    WALLBUY -15   -39.45  +z  RIFLE
 
-# --- A smaller catwalk higher still, reached from the deck ------------
-FLOOR  15  12   12 8    4
-FLOOR  15   2    8 4    4 8 Z      # ramp from deck (Y4) up to catwalk (Y8)
-FLOOR  15  20   12 6    8          # top catwalk at Y8
+    WINDOW -40   -8   +x
+    WINDOW -18   40   -z
 
-# --- A few ground obstacles for cover ---------------------------------
-OBSTACLE -12 -8    6 3
-OBSTACLE -20  12   5 5 3
-OBSTACLE -10  20   4 4 3
+    PERK  -8  12 JUG
+    PERK   4  -8 SPEED
 
-# --- Wall buys --------------------------------------------------------
-WALLBUY -39.45 18     +x  SMG
-WALLBUY -15   -39.45  +z  RIFLE
+    MBOX -22 15
+    PAP  -25 -20
+END
 
-# --- Windows (zombie entries) -----------------------------------------
-WINDOW -40   -8   +x
-WINDOW -18   40   -z
+# Elevated deck over the eastern half (Y=4) — overlaps the ground in XZ.
+# The mystery-box and a perk up here sit at deck height automatically.
+SECTOR deck  15 -10  18 18  4
+    PERK 15 -10 DTAP
+    MBOX 20 -6
+END
 
-# --- Perks ------------------------------------------------------------
-PERK  -8  12 JUG
-PERK   4  -8 SPEED
+# Ramp from the ground (Y0) up to the deck (Y4), sloping along +X, and the
+# nav edge that lets zombies chase the player up onto the deck.
+RAMP ramp_deck  2 -10  8 6  0 4 X  LINK ground deck
+END
 
-# --- Mystery box + Pack-a-Punch ---------------------------------------
-MBOX -22 15
-PAP  -25 -20
+# A higher catwalk (Y=8) reached from the deck by a second ramp.
+SECTOR catwalk  15 20  12 6  8
+    WALLBUY 21 20  -x  RAYGUN
+    PERK    15 20  STAMIN
+END
+
+RAMP ramp_catwalk  15 6  8 8  4 8 Z  LINK deck catwalk
+END

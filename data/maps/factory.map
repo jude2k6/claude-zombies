@@ -9,22 +9,36 @@ ATMOSPHERE
     sky_tint  255 245 220
 END
 
-SPAWN  0 0
-SPAWN  3 0
-SPAWN -3 0
-SPAWN  0 3
+SECTOR ground  0 0  80 80  0
+    SPAWN  0 0
+    SPAWN  3 0
+    SPAWN -3 0
+    SPAWN  0 3
 
-# --- Floor clutter ---------------------------------------------------
-OBSTACLE   6   6   3 3
-OBSTACLE  -6   6   3 3 3
-OBSTACLE  14  -4   2 6
-OBSTACLE -14  -4   2 6
-OBSTACLE   0 -10   8 2 3
-OBSTACLE  22  18   4 4
-OBSTACLE -22  18   4 4
-OBSTACLE  -8  28  16 2 1
+    # --- Floor clutter ---------------------------------------------------
+    OBSTACLE   6   6   3 3
+    OBSTACLE  -6   6   3 3 3
+    OBSTACLE  14  -4   2 6
+    OBSTACLE -14  -4   2 6
+    OBSTACLE   0 -10   8 2 3
+    OBSTACLE  22  18   4 4
+    OBSTACLE -22  18   4 4
+    OBSTACLE  -8  28  16 2 1
 
-ROOM east_room
+    # --- Open arena perimeter --------------------------------------------
+    WALLBUY  10    39.45  -z  SHOTGUN
+    WALLBUY -10   -39.45  +z  RIFLE
+
+    WINDOW  -10  40   -z
+    WINDOW   40   -8  -x
+    WINDOW    8  -40  +z
+    WINDOW  -40   16  +x LOCKED_BY west_door
+
+    PERK   0  -22 DTAP
+    PERK  24  -22 STAMIN
+END
+
+SECTOR east_room  28 27  24 26  0
     # East/west walls split the map at z=14 with $1000 doorways.
     WALL  16 14   40 14  DOOR 22 2 1000 AS east_door
 
@@ -33,22 +47,10 @@ ROOM east_room
     PAP      28 22
 END
 
-ROOM west_room
+SECTOR west_room  -28 27  24 26  0
     WALL -40 14  -16 14  DOOR -22 2 1000 AS west_door
 
     WALLBUY -39.45 -6  +x  RAYGUN
     PERK    -20 24  JUG
     MBOX    -28 22
 END
-
-# --- Open arena perimeter --------------------------------------------
-WALLBUY  10    39.45  -z  SHOTGUN
-WALLBUY -10   -39.45  +z  RIFLE
-
-WINDOW  -10  40   -z
-WINDOW   40   -8  -x
-WINDOW    8  -40  +z
-WINDOW  -40   16  +x LOCKED_BY west_door
-
-PERK   0  -22 DTAP
-PERK  24  -22 STAMIN

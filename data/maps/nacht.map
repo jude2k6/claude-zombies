@@ -13,7 +13,7 @@ ATMOSPHERE
     music     nacht_loop
 END
 
-ROOM bunker
+SECTOR bunker  -32 -32  16 16  0
     # --- SW SPAWN BUNKER (x: -40..-25, z: -40..-25) ---
 
     SPAWN -32 -32
@@ -45,7 +45,7 @@ ROOM bunker
     PERK -32 -28 SPEED
 END
 
-ROOM main_hall
+SECTOR main_hall  0 0  60 50  0
     # Everything between the bunker and the back room.
 
     OBSTACLE -10 -18  3 3
@@ -74,7 +74,7 @@ ROOM main_hall
     PROP sandbag_stack  4 4 yaw 0
 END
 
-ROOM back_room
+SECTOR back_room  27 27  26 26  0
     # --- BACK ROOM (NE corner, x: 15..40, z: 15..40) holding the PaP ---
 
     # South wall (z=15), full width

@@ -27,49 +27,51 @@ TEXTURES
     ceiling   ceiling_wood
 END
 
-SPAWN  0 0
-SPAWN  2 0
-SPAWN -2 0
-SPAWN  0 2
+SECTOR ground  0 0  80 80  0
+    SPAWN  0 0
+    SPAWN  2 0
+    SPAWN -2 0
+    SPAWN  0 2
 
-# --- Interior walls (per-surface TEX overrides on two of them) -----------
-# A north/south divider.  East half uses ceiling_wood per-surface (Tier 1).
-# West half falls through to TEX_WALL_INT map-slot (wall_plaster, Tier 2).
-WALL -40 -20  0 -20  TEX ceiling_wood
-WALL   0 -20  40 -20  DOOR 20 3 1500 AS central_door
+    # --- Interior walls (per-surface TEX overrides on two of them) -------
+    # A north/south divider.  East half uses ceiling_wood per-surface (Tier 1).
+    # West half falls through to TEX_WALL_INT map-slot (wall_plaster, Tier 2).
+    WALL -40 -20  0 -20  TEX ceiling_wood
+    WALL   0 -20  40 -20  DOOR 20 3 1500 AS central_door
 
-# --- Obstacles ------------------------------------------------------------
-# obstacle 1: explicit TEX wall_plaster (Tier 1 – overrides everything)
-OBSTACLE  10  5    4 4 3  TEX wall_plaster
-# obstacle 2: explicit TEX wall_brick (Tier 1)
-OBSTACLE -12 -8    6 3    TEX wall_brick
-# obstacle 3: no TEX — uses map-slot wall_ext = floor_concrete (Tier 2)
-OBSTACLE -10 -16   4 4 3
-# obstacle 4: no TEX, model likely present — falls through to model/cube
-OBSTACLE  18 -15   3 6
-OBSTACLE -20  12   5 5 3
-OBSTACLE   8  20   7 2
-OBSTACLE  -6  26   3 3 3
-OBSTACLE  25   2   2 8
+    # --- Obstacles ------------------------------------------------------
+    # obstacle 1: explicit TEX wall_plaster (Tier 1 – overrides everything)
+    OBSTACLE  10  5    4 4 3  TEX wall_plaster
+    # obstacle 2: explicit TEX wall_brick (Tier 1)
+    OBSTACLE -12 -8    6 3    TEX wall_brick
+    # obstacle 3: no TEX — uses map-slot wall_ext = floor_concrete (Tier 2)
+    OBSTACLE -10 -16   4 4 3
+    # obstacle 4: no TEX, model likely present — falls through to model/cube
+    OBSTACLE  18 -15   3 6
+    OBSTACLE -20  12   5 5 3
+    OBSTACLE   8  20   7 2
+    OBSTACLE  -6  26   3 3 3
+    OBSTACLE  25   2   2 8
 
-# --- Wall buys -----------------------------------------------------------
-WALLBUY  15    39.45  -z  SHOTGUN
-WALLBUY  39.45 -10    -x  SMG
-WALLBUY -15   -39.45  +z  RIFLE
-WALLBUY -39.45 18     +x  RAYGUN
+    # --- Wall buys ------------------------------------------------------
+    WALLBUY  15    39.45  -z  SHOTGUN
+    WALLBUY  39.45 -10    -x  SMG
+    WALLBUY -15   -39.45  +z  RIFLE
+    WALLBUY -39.45 18     +x  RAYGUN
 
-# --- Windows -------------------------------------------------------------
-WINDOW -18   40   -z
-WINDOW  40   18   -x
-WINDOW  18  -40   +z LOCKED_BY central_door
-WINDOW -40   -8   +x
+    # --- Windows --------------------------------------------------------
+    WINDOW -18   40   -z
+    WINDOW  40   18   -x
+    WINDOW  18  -40   +z LOCKED_BY central_door
+    WINDOW -40   -8   +x
 
-# --- Perks ---------------------------------------------------------------
-PERK  -8  12 JUG
-PERK   4  -8 SPEED
-PERK  22  25 DTAP
-PERK -25 -22 STAMIN
+    # --- Perks ----------------------------------------------------------
+    PERK  -8  12 JUG
+    PERK   4  -8 SPEED
+    PERK  22  25 DTAP
+    PERK -25 -22 STAMIN
 
-# --- Mystery box + Pack-a-Punch ------------------------------------------
-MBOX -22 15
-PAP   0 -28
+    # --- Mystery box + Pack-a-Punch -------------------------------------
+    MBOX -22 15
+    PAP   0 -28
+END

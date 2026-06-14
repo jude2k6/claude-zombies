@@ -225,6 +225,7 @@ static int PerkNameToIdx(const char *s) {
 
 static void ClearLevel(void) {
     g_world.obstacleCount = 0;
+    g_world.floorCount = 0;
     for (int i = 0; i < MAX_OBSTACLES; i++) obstacleTexHandle[i] = -1;
     interiorWallCount = 0;
     memset(interiorWallNoClip, 0, sizeof interiorWallNoClip);
@@ -446,7 +447,7 @@ void Level_InstantiateDoc(const MapDoc *doc) {
     // Windows — resolve LOCKED_BY after doors are built
     for (int i = 0; i < doc->windowCount; i++) {
         if (g_world.windowCount >= MAX_WINDOWS) {
-            fprintf(stderr, "map: warning: too many g_world.windows (MAX_WINDOWS=%d) — ignoring extras\n",
+            fprintf(stderr, "map: warning: too many windows (MAX_WINDOWS=%d) — ignoring extras\n",
                     MAX_WINDOWS);
             break;
         }
@@ -472,7 +473,7 @@ void Level_InstantiateDoc(const MapDoc *doc) {
     // Obstacles
     for (int i = 0; i < doc->obstacleCount; i++) {
         if (g_world.obstacleCount >= MAX_OBSTACLES) {
-            fprintf(stderr, "map: warning: too many g_world.obstacles (MAX_OBSTACLES=%d) — ignoring extras\n",
+            fprintf(stderr, "map: warning: too many obstacles (MAX_OBSTACLES=%d) — ignoring extras\n",
                     MAX_OBSTACLES);
             break;
         }
@@ -481,6 +482,23 @@ void Level_InstantiateDoc(const MapDoc *doc) {
         g_world.obstacles[obIdx] = (Box){ { o->x, o->h * 0.5f, o->z }, { o->sx, o->h, o->sz } };
         obstacleTexHandle[obIdx] = (o->texName[0])
             ? Assets_GetTextureByName(o->texName) : -1;
+    }
+
+    // Floor regions (multi-floor maps): MapDocFloor (full XZ size) -> FloorRegion
+    // (XZ half-extents). Flat slabs and ramps both come through here.
+    for (int i = 0; i < doc->floorCount; i++) {
+        if (g_world.floorCount >= MAX_FLOORS) {
+            fprintf(stderr, "map: warning: too many floors (MAX_FLOORS=%d) — ignoring extras\n",
+                    MAX_FLOORS);
+            break;
+        }
+        const MapDocFloor *fl = &doc->floors[i];
+        g_world.floors[g_world.floorCount++] = (FloorRegion){
+            .cx = fl->x, .cz = fl->z,
+            .halfX = fl->sx * 0.5f, .halfZ = fl->sz * 0.5f,
+            .yLow = fl->yLow, .yHigh = fl->yHigh,
+            .rampAxis = (RampAxis)fl->rampAxis,
+        };
     }
 
     // Wallbuys
@@ -566,7 +584,7 @@ bool Level_LoadFromFile(const char *path) {
     int errs = MapDoc_Parse(path, &doc, stderr);
     if (errs == 0 || doc.wallCount + doc.obstacleCount + doc.windowCount > 0) {
         Level_InstantiateDoc(&doc);
-        fprintf(stderr, "map: loaded '%s' from %s (%d walls, %d doors, %d g_world.windows, %d props)\n",
+        fprintf(stderr, "map: loaded '%s' from %s (%d walls, %d doors, %d windows, %d props)\n",
                 g_world.mapName, path, interiorWallCount, doorCount, g_world.windowCount, mapPropCount);
         return true;
     }

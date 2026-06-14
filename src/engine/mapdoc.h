@@ -25,6 +25,7 @@
 #define MAPDOC_MAX_WALLBUYS   16
 #define MAPDOC_MAX_PERKS       8
 #define MAPDOC_MAX_ROOMS      16
+#define MAPDOC_MAX_FLOORS     32
 #define MAPDOC_NAME_LEN       64
 #define MAPDOC_DOOR_NAME_LEN  24
 #define MAPDOC_PROP_NAME_LEN  32
@@ -81,6 +82,17 @@ typedef struct {
     /* optional TEX override; "" = unset */
     char  texName[MAPDOC_TEX_NAME_LEN];
 } MapDocObstacle;
+
+/* A walkable floor region (multi-floor maps): an axis-aligned XZ rectangle at
+ * a surface Y. Flat when yLow == yHigh; a ramp/stair otherwise, sloping
+ * yLow -> yHigh along rampAxis (0 = flat, 1 = +X, 2 = +Z). x,z = center;
+ * sx,sz = full XZ size. The game turns this into a FloorRegion. */
+typedef struct {
+    float x, z, sx, sz;
+    float yLow, yHigh;
+    int   rampAxis;
+    int   roomIdx;
+} MapDocFloor;
 
 typedef struct {
     char  name[MAPDOC_PROP_NAME_LEN];
@@ -157,6 +169,9 @@ typedef struct {
 
     int             obstacleCount;
     MapDocObstacle  obstacles[MAPDOC_MAX_OBSTACLES];
+
+    int          floorCount;
+    MapDocFloor  floors[MAPDOC_MAX_FLOORS];
 
     int          propCount;
     MapDocProp   props[MAPDOC_MAX_PROPS];

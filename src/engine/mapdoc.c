@@ -359,6 +359,48 @@ int MapDoc_Parse(const char *path, MapDoc *out, FILE *errs) {
             continue;
         }
 
+        if (strcmp(key, "FLOOR") == 0) {
+            /* FLOOR x z sx sz y                  (flat surface at y)
+             * FLOOR x z sx sz yLow yHigh X|Z     (ramp sloping low->high) */
+            if (n < 6) {
+                fprintf(errs, "map: line %d: FLOOR expects x z sx sz y [yHigh X|Z]\n", lineNo);
+                errors++; continue;
+            }
+            float x, z, sx, sz, yLow;
+            if (!ParseFloat(toks[1], &x)  || !ParseFloat(toks[2], &z) ||
+                !ParseFloat(toks[3], &sx) || !ParseFloat(toks[4], &sz) ||
+                !ParseFloat(toks[5], &yLow)) {
+                fprintf(errs, "map: line %d: FLOOR bad number\n", lineNo);
+                errors++; continue;
+            }
+            float yHigh = yLow;
+            int   rampAxis = 0;
+            if (n >= 8) {  /* ramp form: yHigh + axis */
+                if (!ParseFloat(toks[6], &yHigh)) {
+                    fprintf(errs, "map: line %d: FLOOR bad ramp height\n", lineNo);
+                    errors++; continue;
+                }
+                if      (strcmp(toks[7], "X") == 0) rampAxis = 1;
+                else if (strcmp(toks[7], "Z") == 0) rampAxis = 2;
+                else {
+                    fprintf(errs, "map: line %d: FLOOR ramp axis must be X or Z\n", lineNo);
+                    errors++; continue;
+                }
+            }
+            if (out->floorCount >= MAPDOC_MAX_FLOORS) {
+                fprintf(errs, "map: line %d: too many floors (max %d)\n",
+                        lineNo, MAPDOC_MAX_FLOORS);
+                errors++; continue;
+            }
+            MapDocFloor fl;
+            memset(&fl, 0, sizeof fl);
+            fl.x = x; fl.z = z; fl.sx = sx; fl.sz = sz;
+            fl.yLow = yLow; fl.yHigh = yHigh; fl.rampAxis = rampAxis;
+            fl.roomIdx = curRoomIdx;
+            out->floors[out->floorCount++] = fl;
+            continue;
+        }
+
         if (strcmp(key, "WALLBUY") == 0) {
             if (n != 5) {
                 fprintf(errs, "map: line %d: WALLBUY expects x z <dir> WEAPON\n", lineNo);
@@ -623,6 +665,18 @@ static void EmitEntities(FILE *f, const MapDoc *doc, int roomIdx) {
         fprintf(f, "\n");
     }
 
+    for (int i = 0; i < doc->floorCount; i++) {
+        const MapDocFloor *fl = &doc->floors[i];
+        if (fl->roomIdx != roomIdx) continue;
+        if (fl->rampAxis == 0)
+            fprintf(f, "%sFLOOR %.4g %.4g  %.4g %.4g  %.4g\n",
+                    ind, fl->x, fl->z, fl->sx, fl->sz, fl->yLow);
+        else
+            fprintf(f, "%sFLOOR %.4g %.4g  %.4g %.4g  %.4g %.4g %s\n",
+                    ind, fl->x, fl->z, fl->sx, fl->sz, fl->yLow, fl->yHigh,
+                    fl->rampAxis == 1 ? "X" : "Z");
+    }
+
     for (int i = 0; i < doc->windowCount; i++) {
         const MapDocWindow *w = &doc->windows[i];
         if (w->roomIdx != roomIdx) continue;
@@ -754,6 +808,12 @@ static bool ObstacleEq(const MapDocObstacle *x, const MapDocObstacle *y) {
            FEq(x->sx, y->sx) && FEq(x->sz, y->sz) && FEq(x->h, y->h) &&
            SEq(x->texName, y->texName);
 }
+static bool FloorEq(const MapDocFloor *x, const MapDocFloor *y) {
+    return FEq(x->x, y->x) && FEq(x->z, y->z) && x->roomIdx == y->roomIdx &&
+           FEq(x->sx, y->sx) && FEq(x->sz, y->sz) &&
+           FEq(x->yLow, y->yLow) && FEq(x->yHigh, y->yHigh) &&
+           x->rampAxis == y->rampAxis;
+}
 static bool WallbuyEq(const MapDocWallbuy *x, const MapDocWallbuy *y) {
     return FEq(x->x, y->x) && FEq(x->z, y->z) && x->roomIdx == y->roomIdx &&
            SEq(x->dir, y->dir) && SEq(x->weapon, y->weapon);
@@ -791,6 +851,7 @@ static bool SpawnEqV(const void *a, const void *b)    { return SpawnEq(a, b); }
 static bool WallEqV(const void *a, const void *b)     { return WallEq(a, b); }
 static bool WindowEqV(const void *a, const void *b)   { return WindowEq(a, b); }
 static bool ObstacleEqV(const void *a, const void *b) { return ObstacleEq(a, b); }
+static bool FloorEqV(const void *a, const void *b)    { return FloorEq(a, b); }
 static bool WallbuyEqV(const void *a, const void *b)  { return WallbuyEq(a, b); }
 static bool PerkEqV(const void *a, const void *b)     { return PerkEq(a, b); }
 static bool PropEqV(const void *a, const void *b)     { return PropEq(a, b); }
@@ -836,6 +897,10 @@ bool MapDoc_Equal(const MapDoc *a, const MapDoc *b) {
     if (a->obstacleCount != b->obstacleCount) return false;
     if (!UnorderedMatch(a->obstacles, b->obstacles, a->obstacleCount,
                         sizeof a->obstacles[0], ObstacleEqV)) return false;
+
+    if (a->floorCount != b->floorCount) return false;
+    if (!UnorderedMatch(a->floors, b->floors, a->floorCount,
+                        sizeof a->floors[0], FloorEqV)) return false;
 
     if (a->wallbuyCount != b->wallbuyCount) return false;
     if (!UnorderedMatch(a->wallbuys, b->wallbuys, a->wallbuyCount,

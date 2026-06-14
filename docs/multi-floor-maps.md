@@ -29,7 +29,12 @@
 >   in ~1.8s on multifloor.map). On flat maps none of this fires (queries return
 >   0), so AI is byte-identical.
 >
-> **Still TODO (refinements, not blockers):** the nav is *greedy* — it climbs
+> > **Map format is now the sector model** (see the SECTOR/RAMP grammar in
+> `data/maps/default.map`'s header): a map is a list of sectors, every entity
+> belongs to one and derives its floor Y from it, and `RAMP … LINK a b` records
+> the nav edges. The flat 2D-entity + ROOM format is gone.
+
+**Still TODO (refinements, not blockers):** the nav is *greedy* — it climbs
 > level-by-level and can dead-end on maps needing down-then-up routing (a real
 > region/portal BFS, §5, would fix that); ramp bullet-blocking uses one AABB
 > spanning yLow..yHigh (slightly over-blocks the air beside a ramp); grenades

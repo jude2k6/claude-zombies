@@ -9,31 +9,21 @@
 #include <string.h>
 #include <ctype.h>
 
+// Collision-free level globals (interiorWalls, doors, wallBuys, perkMachines,
+// mapSpawns, mapProps + counts/handles) now live in g_world, reached via the
+// alias macros in world.h. The colliders below stay here until Slice B.
+//
+// NOTE: interiorWallNoClip per-wall flag — header/lintel segments above door
+// openings are drawn and block bullets (the 3D segment test is Y-aware) but
+// must NOT block XZ movement, or the doorway is walled off whether the door is
+// open or shut.
 Box         obstacles[MAX_OBSTACLES];
 int         obstacleCount = 0;
-int         obstacleTexHandle[MAX_OBSTACLES];
-Box         interiorWalls[MAX_INTERIOR_WALLS];
-int         interiorWallCount = 0;
-// Per-wall flag: header/lintel segments above door openings are drawn and
-// block bullets (the 3D segment test is Y-aware) but must NOT block XZ
-// movement, or the doorway is walled off whether the door is open or shut.
-bool        interiorWallNoClip[MAX_INTERIOR_WALLS];
-int         interiorWallTexHandle[MAX_INTERIOR_WALLS];
-Door        doors[MAX_DOORS];
-int         doorCount = 0;
-WallBuy     wallBuys[MAX_WALLBUYS];
-int         wallBuyCount = 0;
 Window3D    windows[MAX_WINDOWS];
 int         windowCount = 0;
-PerkMachine perkMachines[PERK_COUNT];
-int         perkMachineCount = 0;
 PackAPunch  pap;
 MysteryBox  mbox;
-Vector3     mapSpawns[NET_MAX_PLAYERS];
-int         mapSpawnCount = 0;
 char        mapName[64] = "Default";
-MapProp     mapProps[MAX_MAP_PROPS];
-int         mapPropCount = 0;
 
 // Per-map arena half-extents (runtime; defaults 40 x 40).
 // X = left/right, Z = front/back.

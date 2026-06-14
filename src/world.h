@@ -29,8 +29,39 @@ typedef struct {
     int       roundNum;
     float     doublePointsTimer;
     float     instaKillTimer;
-    // TODO (Phase 0, real threading): players[], level state, mbox, mapName,
-    // netMode.
+
+    // ---- level geometry / state (relocated from level.c) ------------------
+    // Collision-free names below are aliased by macros at the bottom of this
+    // header; collider names (`obstacles`, `obstacleCount`, `windows`,
+    // `windowCount`, `pap`, `mbox`, `mapName`, `arenaHalfX`, `arenaHalfZ`)
+    // also appear as MapDoc/Pkt struct fields so they are accessed explicitly
+    // as g_world.X with no macro (see note above).
+    Box         obstacles[MAX_OBSTACLES];
+    int         obstacleCount;
+    int         obstacleTexHandle[MAX_OBSTACLES];     /* -1 = no override */
+    Box         interiorWalls[MAX_INTERIOR_WALLS];
+    int         interiorWallCount;
+    bool        interiorWallNoClip[MAX_INTERIOR_WALLS];
+    int         interiorWallTexHandle[MAX_INTERIOR_WALLS]; /* -1 = no override */
+    Door        doors[MAX_DOORS];
+    int         doorCount;
+    WallBuy     wallBuys[MAX_WALLBUYS];
+    int         wallBuyCount;
+    Window3D    windows[MAX_WINDOWS];
+    int         windowCount;
+    PerkMachine perkMachines[PERK_COUNT];
+    int         perkMachineCount;
+    PackAPunch  pap;
+    MysteryBox  mbox;
+    Vector3     mapSpawns[NET_MAX_PLAYERS];
+    int         mapSpawnCount;
+    char        mapName[64];
+    MapProp     mapProps[MAX_MAP_PROPS];
+    int         mapPropCount;
+    float       arenaHalfX;   // per-map arena half-extents (default 40 x 40)
+    float       arenaHalfZ;
+
+    // TODO (Phase 0, real threading): players[], netMode.
 } World;
 
 // The single live world instance. Defined in world.c.
@@ -47,5 +78,22 @@ extern World g_world;
 #define powerUps       (g_world.powerUps)
 #define localPlayerIdx (g_world.localPlayerIdx)
 #define gamePhase      (g_world.gamePhase)
+
+// Collision-free level globals (verified: never struct fields or locals).
+#define obstacleTexHandle     (g_world.obstacleTexHandle)
+#define interiorWalls         (g_world.interiorWalls)
+#define interiorWallCount     (g_world.interiorWallCount)
+#define interiorWallNoClip    (g_world.interiorWallNoClip)
+#define interiorWallTexHandle (g_world.interiorWallTexHandle)
+#define doors                 (g_world.doors)
+#define doorCount             (g_world.doorCount)
+#define wallBuys              (g_world.wallBuys)
+#define wallBuyCount          (g_world.wallBuyCount)
+#define perkMachines          (g_world.perkMachines)
+#define perkMachineCount      (g_world.perkMachineCount)
+#define mapSpawns             (g_world.mapSpawns)
+#define mapSpawnCount         (g_world.mapSpawnCount)
+#define mapProps              (g_world.mapProps)
+#define mapPropCount          (g_world.mapPropCount)
 
 #endif

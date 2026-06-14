@@ -3,29 +3,20 @@
 
 #include "types.h"
 #include "mapdoc.h"
+#include "world.h"   // level state now lives in g_world (Phase 0)
 
+// Collision-free level globals (interiorWalls, doors, wallBuys, perkMachines,
+// mapSpawns, mapProps + their counts/handles) now live in g_world and are
+// reached through the alias macros in world.h. The colliders below still need
+// externs until they are relocated (Slice B): their names also appear as
+// MapDoc/Pkt struct fields, so they can't be macro-aliased.
 extern Box         obstacles[MAX_OBSTACLES];
 extern int         obstacleCount;
-extern int         obstacleTexHandle[MAX_OBSTACLES];     /* -1 = no override */
-extern Box         interiorWalls[MAX_INTERIOR_WALLS];
-extern int         interiorWallCount;
-extern bool        interiorWallNoClip[MAX_INTERIOR_WALLS];
-extern int         interiorWallTexHandle[MAX_INTERIOR_WALLS]; /* -1 = no override */
-extern Door        doors[MAX_DOORS];
-extern int         doorCount;
-extern WallBuy     wallBuys[MAX_WALLBUYS];
-extern int         wallBuyCount;
 extern Window3D    windows[MAX_WINDOWS];
 extern int         windowCount;
-extern PerkMachine perkMachines[PERK_COUNT];
-extern int         perkMachineCount;
 extern PackAPunch  pap;
 extern MysteryBox  mbox;
-extern Vector3     mapSpawns[NET_MAX_PLAYERS];
-extern int         mapSpawnCount;
 extern char        mapName[64];
-extern MapProp     mapProps[MAX_MAP_PROPS];
-extern int         mapPropCount;
 
 /* Per-map arena half-extents (runtime; default 40 x 40). */
 extern float arenaHalfX;

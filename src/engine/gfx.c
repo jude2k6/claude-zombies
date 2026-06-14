@@ -7,6 +7,7 @@ void Eng_GfxDepthTest(bool on)             { if (on) rlEnableDepthTest();       
 void Eng_GfxBackfaceCull(bool on)          { if (on) rlEnableBackfaceCulling();  else rlDisableBackfaceCulling(); }
 void Eng_GfxUseShader(Shader s)            { rlSetShader(s.id, s.locs); }
 void Eng_GfxUseDefaultShader(void)         { rlSetShader(rlGetShaderIdDefault(), rlGetShaderLocsDefault()); }
+unsigned int Eng_GfxDefaultShaderId(void)  { return rlGetShaderIdDefault(); }
 void Eng_GfxBeginQuads(unsigned int texId) { rlSetTexture(texId); rlBegin(RL_QUADS); }
 void Eng_GfxColor(Color c)                 { rlColor4ub(c.r, c.g, c.b, c.a); }
 void Eng_GfxNormal(float x, float y, float z)  { rlNormal3f(x, y, z); }

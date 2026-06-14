@@ -1,5 +1,5 @@
 #include "assets.h"
-#include "rlgl.h"
+#include "gfx.h"     // Eng_GfxDefaultShaderId — keeps rlgl.h inside the engine
 #include <stdio.h>
 #include <string.h>
 
@@ -113,7 +113,7 @@ static bool TryLoadShader(const char *prefix, const char *vsName,
     snprintf(fsPath, sizeof fsPath, "%s%s", prefix, fsName);
     if (!FileExists(vsPath) || !FileExists(fsPath)) return false;
     *out = LoadShader(vsPath, fsPath);
-    return out->id != 0 && out->id != rlGetShaderIdDefault();
+    return out->id != 0 && out->id != Eng_GfxDefaultShaderId();
 }
 
 // ---- common loader ------------------------------------------------------
@@ -254,7 +254,7 @@ void Assets_Load(void) {
         if (!FileExists(fsPath)) continue;
         // NULL vertex shader = raylib's built-in passthrough VS
         postfxShader = LoadShader(NULL, fsPath);
-        if (postfxShader.id == 0 || postfxShader.id == rlGetShaderIdDefault()) continue;
+        if (postfxShader.id == 0 || postfxShader.id == Eng_GfxDefaultShaderId()) continue;
         postfxShaderLoaded         = true;
         postfxShader_resolutionLoc = GetShaderLocation(postfxShader, "resolution");
         postfxShader_timeLoc       = GetShaderLocation(postfxShader, "time");

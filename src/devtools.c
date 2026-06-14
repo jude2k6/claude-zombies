@@ -611,6 +611,60 @@ static int Dev_ScreenshotPostFX(void) {
     return 0;
 }
 
+// ---- --screenshot-map <file.map> -------------------------------------------
+// Loads an arbitrary map and renders it from a few vantage points so map
+// geometry — including multi-floor decks/ramps — can be eyeballed headless.
+
+static int Dev_ScreenshotMap(int argc, char **argv) {
+    if (argc < 3) { fprintf(stderr, "usage: --screenshot-map <file.map>\n"); return 1; }
+    const char *path = argv[2];
+    SetTraceLogLevel(LOG_WARNING);
+    SetConfigFlags(FLAG_MSAA_4X_HINT);
+    InitWindow(1280, 720, "Map screenshot");
+    SetTargetFPS(60);
+    Weapons_Load();
+    Assets_Load();
+    Assets_ApplyWorldShader();
+    Render_LoadPlayerAnim();
+    if (!Level_LoadFromFile(path)) {
+        fprintf(stderr, "failed to load map: %s\n", path);
+        Render_UnloadPlayerAnim(); Assets_Unload(); Weapons_Unload();
+        CloseWindow();
+        return 1;
+    }
+
+    localPlayerIdx = 0;
+    for (int i = 0; i < NET_MAX_PLAYERS; i++) memset(&players[i], 0, sizeof players[i]);
+    players[0].active = true; players[0].alive = true;
+    players[0].pos = (Vector3){ 0, PLAYER_EYE, 6 };
+
+    // A 3/4 aerial that frames the whole arena, and a low angle that shows
+    // floor elevation in profile. Targets the arena centre-ish.
+    struct { const char *name; Vector3 pos, target; } shots[] = {
+        { "map_aerial", (Vector3){ 38, 42, 46 }, (Vector3){ 8, 4, 0 } },
+        { "map_profile",(Vector3){ -6, 6, 26 },  (Vector3){ 12, 4, -6 } },
+    };
+    for (int s = 0; s < 2; s++) {
+        Camera cam = {
+            .position = shots[s].pos, .target = shots[s].target,
+            .up = (Vector3){ 0, 1, 0 }, .fovy = 60.0f, .projection = CAMERA_PERSPECTIVE,
+        };
+        BeginDrawing();
+        ClearBackground((Color){ 50, 52, 60, 255 });
+        Render_World3D(cam);
+        DrawText(TextFormat("%s  (%d floor regions)", path, g_world.floorCount),
+                 20, 20, 24, (Color){240,240,240,255});
+        EndDrawing();
+        char fn[96]; snprintf(fn, sizeof fn, "%s.png", shots[s].name);
+        TakeScreenshot(fn);
+        fprintf(stderr, "wrote %s\n", fn);
+    }
+    Render_UnloadPlayerAnim();
+    Assets_Unload(); Weapons_Unload();
+    CloseWindow();
+    return 0;
+}
+
 // ---- dispatcher ------------------------------------------------------------
 
 bool Devtools_HandleCLI(int argc, char **argv, int *exitCode) {
@@ -648,6 +702,10 @@ bool Devtools_HandleCLI(int argc, char **argv, int *exitCode) {
     }
     if (argc >= 3 && strcmp(argv[1], "--map-roundtrip") == 0) {
         *exitCode = Dev_MapRoundtrip(argc, argv);
+        return true;
+    }
+    if (argc >= 3 && strcmp(argv[1], "--screenshot-map") == 0) {
+        *exitCode = Dev_ScreenshotMap(argc, argv);
         return true;
     }
     return false;

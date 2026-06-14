@@ -1,0 +1,56 @@
+# Claude Zombies - multi-floor demo map
+#
+# Demonstrates vertical / overlapping floors (docs/multi-floor-maps.md).
+# New map entry:
+#   FLOOR x z sx sz y               flat walkable surface at height y
+#   FLOOR x z sx sz yLow yHigh X|Z  ramp sloping yLow->yHigh along X or Z
+# An implicit ground plane at Y=0 always exists, so the arena floor is the
+# downstairs; FLOOR lines add decks/ramps above it. Standing on the ground
+# under the deck keeps you at Y=0; walking up the ramp puts you on the deck
+# at Y=4 — a true overlapping upstairs/downstairs.
+
+NAME Multi-Floor Demo
+
+ATMOSPHERE
+    fog       18 22 35  14 70
+    sky_tint  255 255 255
+END
+
+# --- Spawns (ground level) --------------------------------------------
+SPAWN  0 0
+SPAWN  2 0
+SPAWN -2 0
+SPAWN  0 2
+
+# --- Elevated deck over the eastern half (Y = 4) ----------------------
+FLOOR  15 -10   18 18   4
+
+# --- Ramp from the ground (Y0) up to the deck (Y4), sloping along +X ---
+# spans x[-2..6] at z=-10; low edge meets the ground, high edge meets deck.
+FLOOR   2 -10    8 6    0 4 X
+
+# --- A smaller catwalk higher still, reached from the deck ------------
+FLOOR  15  12   12 8    4
+FLOOR  15   2    8 4    4 8 Z      # ramp from deck (Y4) up to catwalk (Y8)
+FLOOR  15  20   12 6    8          # top catwalk at Y8
+
+# --- A few ground obstacles for cover ---------------------------------
+OBSTACLE -12 -8    6 3
+OBSTACLE -20  12   5 5 3
+OBSTACLE -10  20   4 4 3
+
+# --- Wall buys --------------------------------------------------------
+WALLBUY -39.45 18     +x  SMG
+WALLBUY -15   -39.45  +z  RIFLE
+
+# --- Windows (zombie entries) -----------------------------------------
+WINDOW -40   -8   +x
+WINDOW -18   40   -z
+
+# --- Perks ------------------------------------------------------------
+PERK  -8  12 JUG
+PERK   4  -8 SPEED
+
+# --- Mystery box + Pack-a-Punch ---------------------------------------
+MBOX -22 15
+PAP  -25 -20

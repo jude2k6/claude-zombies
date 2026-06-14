@@ -250,6 +250,37 @@ static void DrawWallZSeg(float z0, float z1, float fixedX, Color c) {
                     TEX_WALL_EXT, WHITE, c);
 }
 
+// Walkable floor regions for multi-floor maps. Flat slabs draw as a textured
+// top plane plus a thin body for a depth cue; ramps draw as a sloped quad
+// (both windings so the surface shows from either side). The implicit ground
+// plane at Y=0 is the arena floor below, drawn by DrawArena itself.
+static void DrawFloors(void) {
+    for (int i = 0; i < g_world.floorCount; i++) {
+        const FloorRegion *f = &g_world.floors[i];
+        float x0 = f->cx - f->halfX, x1 = f->cx + f->halfX;
+        float z0 = f->cz - f->halfZ, z1 = f->cz + f->halfZ;
+        if (f->rampAxis == RAMP_FLAT) {
+            DrawTexturedFloor((Vector3){ f->cx, f->yLow, f->cz },
+                              f->halfX * 2, f->halfZ * 2,
+                              TEX_FLOOR, WHITE, (Color){ 70, 80, 95, 255 });
+            DrawCubeV((Vector3){ f->cx, f->yLow - 0.1f, f->cz },
+                      (Vector3){ f->halfX * 2, 0.2f, f->halfZ * 2 },
+                      (Color){ 45, 50, 60, 255 });
+            DrawCubeWiresV((Vector3){ f->cx, f->yLow - 0.1f, f->cz },
+                           (Vector3){ f->halfX * 2, 0.2f, f->halfZ * 2 },
+                           (Color){ 25, 28, 34, 255 });
+        } else {
+            Vector3 a = { x0, Level_RegionSurfaceY(f, x0, z0), z0 };
+            Vector3 b = { x1, Level_RegionSurfaceY(f, x1, z0), z0 };
+            Vector3 c = { x1, Level_RegionSurfaceY(f, x1, z1), z1 };
+            Vector3 d = { x0, Level_RegionSurfaceY(f, x0, z1), z1 };
+            Color rc = (Color){ 90, 95, 110, 255 };
+            DrawTriangle3D(a, b, c, rc); DrawTriangle3D(a, c, d, rc);
+            DrawTriangle3D(a, c, b, rc); DrawTriangle3D(a, d, c, rc);
+        }
+    }
+}
+
 static void DrawArena(void) {
     DrawTexturedFloor((Vector3){0,0,0}, g_world.arenaHalfX*2, g_world.arenaHalfZ*2,
                       TEX_FLOOR, WHITE, (Color){55,65,75,255});
@@ -302,6 +333,8 @@ static void DrawArena(void) {
             DrawCubeWiresV(g_world.obstacles[i].center, g_world.obstacles[i].size, (Color){40,30,20,255});
         }
     }
+
+    DrawFloors();
 }
 
 // Map-authored props placed via the `PROP` line in .map files. Each entry

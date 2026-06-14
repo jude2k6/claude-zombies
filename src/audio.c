@@ -1,9 +1,4 @@
 #include "audio.h"
-#include "weapons.h"
-#include "game.h"
-#include "level.h"
-#include "entities.h"
-#include "player.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -14,9 +9,6 @@ float audioMasterVol = 0.7f;
 #define SAMPLE_RATE   22050
 #define MAX_ALIASES   6   // simultaneous variants per slot (rapid fire reuse)
 
-// Ducking multiplier applied to non-heartbeat sounds while local player is downed.
-#define DOWNED_DUCK   0.28f
-
 typedef struct {
     Sound base;
     Sound aliases[MAX_ALIASES];
@@ -24,42 +16,13 @@ typedef struct {
     bool  loaded;
 } SoundSlot;
 
-// ---- original sound bank -------------------------------------------------
-static SoundSlot sfx_shot;
-static SoundSlot sfx_shotgun;
-static SoundSlot sfx_raygun;
-static SoundSlot sfx_hit;
-static SoundSlot sfx_head;
-static SoundSlot sfx_kill;
-static SoundSlot sfx_dmg;
-static SoundSlot sfx_reload;
-static SoundSlot sfx_roundStart;
-static SoundSlot sfx_roundEnd;
-static SoundSlot sfx_buy;
-static SoundSlot sfx_powerup;
-static SoundSlot sfx_mboxRoll;
-static SoundSlot sfx_mboxStop;
-static SoundSlot sfx_jump;
-static SoundSlot sfx_perk;
+// ---- sound bank ----------------------------------------------------------
+// One slot per SfxId. Filled by Audio_Init, played by Audio_Play* via id.
+static SoundSlot sfx[SFX_COUNT];
 
-// ---- new sound slots ------------------------------------------------------
-// Footstep variants (3 timbre variants to avoid machine-gun effect)
+// Footsteps come in STEP_VARIANTS timbres (SFX_STEP0..2) to avoid a
+// machine-gun effect when the same step fires repeatedly.
 #define STEP_VARIANTS 3
-static SoundSlot sfx_step[STEP_VARIANTS];
-
-// Reload two-stage: mag-out click, mag-in clack
-static SoundSlot sfx_magOut;
-static SoundSlot sfx_magIn;
-
-// Zombie vocalisation per type
-static SoundSlot sfx_groan;    // ZT_NORMAL
-static SoundSlot sfx_growl;    // ZT_RUNNER
-static SoundSlot sfx_hiss;     // ZT_CRAWLER
-static SoundSlot sfx_roar;     // ZT_BOSS
-static SoundSlot sfx_snarl;    // melee-range attack snarl (any type)
-
-// Downed heartbeat
-static SoundSlot sfx_heartbeat;
 
 // ----- procedural wave generators -----------------------------------------
 
@@ -527,6 +490,10 @@ static void FreeSlot(SoundSlot *slot) {
 
 // ----- positional audio helpers -------------------------------------------
 
+// Listener (local player camera), set once per frame by Audio_SetListener.
+static Vector3 listenerPos = { 0 };
+static float   listenerYaw = 0.0f;
+
 // Compute volume attenuation and stereo pan for a world-space position
 // relative to the local player camera. `camPos` is camera world pos,
 // `camYaw` is the camera yaw angle (rad). `maxDist` is the audible radius.
@@ -555,12 +522,32 @@ static bool PositionalAudio(Vector3 camPos, float camYaw,
     return true;
 }
 
+// ----- public one-shot + listener API -------------------------------------
+
+void Audio_Play(SfxId id, float vol, float pitch) {
+    if (id < 0 || id >= SFX_COUNT) return;
+    PlaySlot(&sfx[id], vol, pitch);
+}
+
+void Audio_PlayPanned(SfxId id, float vol, float pitch, float pan) {
+    if (id < 0 || id >= SFX_COUNT) return;
+    PlaySlotPanned(&sfx[id], vol, pitch, pan);
+}
+
+void Audio_SetListener(Vector3 pos, float yaw) {
+    listenerPos = pos;
+    listenerYaw = yaw;
+}
+
+bool Audio_Positional(Vector3 srcPos, float maxDist, float *outVol, float *outPan) {
+    return PositionalAudio(listenerPos, listenerYaw, srcPos, maxDist, outVol, outPan);
+}
+
 // ----- map music state ----------------------------------------------------
 
 static Music  bgMusic;
 static bool   bgMusicLoaded  = false;
 static char   bgMusicName[64] = {0};  // currently-loaded music name (track key)
-static char   lastMapName[64] = {0};  // mapName snapshot for change detection
 
 // Try to load music stream from a few candidate paths.
 // Returns true on success. Writes the loaded stream into bgMusic.
@@ -588,663 +575,80 @@ static bool TryLoadMusic(const char *name) {
     return false;
 }
 
-// Parse a map file to find the 'music' key inside ATMOSPHERE block.
-// Fills `outName` (max `nameMax` bytes including NUL). Returns true if found.
-static bool ParseMapMusicName(const char *path, char *outName, int nameMax) {
-    FILE *f = fopen(path, "r");
-    if (!f) return false;
-    char raw[256];
-    bool inAtmos = false;
-    bool found   = false;
-    while (!found && fgets(raw, sizeof raw, f)) {
-        // Strip comments.
-        char *hash = strchr(raw, '#');
-        if (hash) *hash = 0;
-        // Tokenise in place.
-        char *toks[8];
-        int n = 0;
-        char *s = raw;
-        while (*s) {
-            while (*s && (*s == ' ' || *s == '\t' || *s == '\r' || *s == '\n')) s++;
-            if (!*s) break;
-            if (n < 8) toks[n] = s;
-            n++;
-            while (*s && *s != ' ' && *s != '\t' && *s != '\r' && *s != '\n') s++;
-            if (*s) *s++ = 0;
-        }
-        if (n == 0) continue;
-        if (strcmp(toks[0], "ATMOSPHERE") == 0) { inAtmos = true; continue; }
-        if (strcmp(toks[0], "END") == 0)         { inAtmos = false; continue; }
-        if (inAtmos && strcmp(toks[0], "music") == 0 && n >= 2) {
-            strncpy(outName, toks[1], (size_t)(nameMax - 1));
-            outName[nameMax - 1] = 0;
-            found = true;
-        }
-    }
-    fclose(f);
-    return found;
-}
-
-// Resolve the map file path from mapName and the known map search dirs.
-// Writes path into `outPath` (max `pathMax` bytes). Returns true if found.
-static bool FindMapFile(char *outPath, int pathMax) {
-    // Maps are stored under data/maps/ (relative to the working dir).
-    // We scan known filenames in each search dir, parsing NAME to match mapName.
-    // This only runs on map change (once per load), so the cost is acceptable.
-    const char *dirs[] = { "data/maps", "../data/maps", "./data/maps" };
-    const char *known[] = { "nacht", "factory", "default", "map" };
-    for (int d = 0; d < 3; d++) {
-        for (int k = 0; k < 4; k++) {
-            snprintf(outPath, (size_t)pathMax, "%s/%s.map", dirs[d], known[k]);
-            FILE *f = fopen(outPath, "r");
-            if (!f) continue;
-            char raw[256];
-            bool matched = false;
-            while (!matched && fgets(raw, sizeof raw, f)) {
-                char *hash = strchr(raw, '#');
-                if (hash) *hash = 0;
-                char *toks[16];
-                int n = 0;
-                char *p = raw;
-                while (*p) {
-                    while (*p && (*p==' '||*p=='\t'||*p=='\r'||*p=='\n')) p++;
-                    if (!*p) break;
-                    if (n < 16) toks[n] = p;
-                    n++;
-                    while (*p && *p!=' '&&*p!='\t'&&*p!='\r'&&*p!='\n') p++;
-                    if (*p) *p++ = 0;
-                }
-                if (n == 0) continue;
-                if (strcmp(toks[0], "NAME") == 0 && n >= 2) {
-                    char assembled[64] = {0};
-                    for (int i = 1; i < n && i < 8; i++) {
-                        if (i > 1) strncat(assembled, " ", sizeof assembled - strlen(assembled) - 1);
-                        strncat(assembled, toks[i], sizeof assembled - strlen(assembled) - 1);
-                    }
-                    if (strcmp(assembled, mapName) == 0) matched = true;
-                    // Either way, NAME found — no need to keep scanning this file.
-                    break;
-                }
-            }
-            fclose(f);
-            if (matched) return true;
-        }
-    }
-    outPath[0] = 0;
-    return false;
-}
-
-// Called when mapName changes. Look up the music track for the new map,
-// unload any previous stream, try to load the new one.
-static void Audio_LoadMapMusic(void) {
-    // Unload previous music if any.
+void Audio_StopMusic(void) {
     if (bgMusicLoaded) {
         StopMusicStream(bgMusic);
         UnloadMusicStream(bgMusic);
         bgMusicLoaded = false;
         bgMusicName[0] = 0;
     }
+}
 
-    if (mapName[0] == 0) return;  // no map loaded
+void Audio_PlayMusicTrack(const char *trackName) {
+    // Unload any current track first.
+    Audio_StopMusic();
+    if (!trackName || trackName[0] == 0) return;
+    if (!TryLoadMusic(trackName)) return;   // file not present — silent skip
 
-    // Find the map file to parse for the music name.
-    char mapPath[256] = {0};
-    if (!FindMapFile(mapPath, (int)sizeof mapPath)) return;
-
-    // Extract the music name from the ATMOSPHERE block.
-    char musicTrack[64] = {0};
-    if (!ParseMapMusicName(mapPath, musicTrack, (int)sizeof musicTrack)) return;
-    if (musicTrack[0] == 0) return;
-
-    // Attempt to stream the audio file.
-    if (!TryLoadMusic(musicTrack)) return;  // file not present — silent skip
-
-    strncpy(bgMusicName, musicTrack, sizeof bgMusicName - 1);
+    strncpy(bgMusicName, trackName, sizeof bgMusicName - 1);
+    bgMusicName[sizeof bgMusicName - 1] = 0;
     SetMusicVolume(bgMusic, 0.25f);
     PlayMusicStream(bgMusic);
     bgMusicLoaded = true;
 }
 
-// ----- footstep state -----------------------------------------------------
-
-// Per-player footstep cadence state.
-// Index 0 = local player; 1..NET_MAX_PLAYERS-1 = others (by player slot).
-#define MAX_STEP_PLAYERS  NET_MAX_PLAYERS
-
-typedef struct {
-    float timer;          // time until next step is allowed
-    Vector3 lastPos;      // previous frame position (for remote players)
-    bool  lastPosValid;
-    int   variantIdx;     // rotates through STEP_VARIANTS
-} StepState;
-
-static StepState stepState[MAX_STEP_PLAYERS];
-
-// ----- reload two-stage state ---------------------------------------------
-
-// Per-player: track the reload timer and schedule the mag-in click.
-typedef struct {
-    float lastReloadTimer;
-    float magInTimer;     // countdown; when it reaches 0 we play mag-in
-    bool  magInPending;
-} ReloadState;
-
-static ReloadState reloadState[MAX_STEP_PLAYERS];
-
-// ----- zombie groan state -------------------------------------------------
-
-// Per-enemy: countdown timer until next vocalization.
-typedef struct {
-    float timer;           // seconds until next vocalization
-    bool  initialized;
-    bool  lastInMeleeRange; // for snarl edge detection
-} EnemyVoxState;
-
-static EnemyVoxState enemyVox[MAX_ENEMIES];
-
-// Maximum concurrent zombie sounds we'll play per tick to avoid blasting.
-#define MAX_GROAN_PER_TICK   2
-
-// Distance beyond which zombie groans are inaudible.
-#define GROAN_MAX_DIST       20.0f
-// Distance at which a zombie is considered in melee range for the snarl.
-#define MELEE_SNARL_DIST      2.5f
-
-// ----- downed heartbeat state ---------------------------------------------
-
-static bool  heartbeatActive  = false;
-static float heartbeatTimer   = 0.0f;  // countdown to next thump
-static bool  lastDowned       = false;
-
-// Interval range for heartbeat in seconds (at full health → fast bleed).
-#define HB_INTERVAL_SLOW   1.30f   // start of bleed (bleedTimer near BLEED_TIME)
-#define HB_INTERVAL_FAST   0.55f   // end of bleed (bleedTimer near 0)
-
-// Duck multiplier: applied to all non-heartbeat volumes while downed.
-static float duckMul = 1.0f;   // 1 = normal; DOWNED_DUCK while downed
+void Audio_Update(void) {
+    if (bgMusicLoaded) UpdateMusicStream(bgMusic);
+}
 
 // ----- public API ---------------------------------------------------------
 
 void Audio_Init(void) {
     InitAudioDevice();
     if (!IsAudioDeviceReady()) return;
-    LoadSlot(&sfx_shot,       GenGunshot(0.13f, 2200.0f, 0.020f));
-    LoadSlot(&sfx_shotgun,    GenGunshot(0.20f, 1400.0f, 0.030f));
-    LoadSlot(&sfx_raygun,     GenGunshot(0.18f, 6000.0f, 0.040f));
-    LoadSlot(&sfx_hit,        GenHit());
-    LoadSlot(&sfx_head,       GenHeadshot());
-    LoadSlot(&sfx_kill,       GenKill());
-    LoadSlot(&sfx_dmg,        GenDamage());
-    LoadSlot(&sfx_reload,     GenReload());
-    LoadSlot(&sfx_roundStart, GenChime(440.0f, 554.0f, 659.0f, 0.18f));
-    LoadSlot(&sfx_roundEnd,   GenChime(659.0f, 554.0f, 440.0f, 0.20f));
-    LoadSlot(&sfx_buy,        GenBuy());
-    LoadSlot(&sfx_powerup,    GenPowerup());
-    LoadSlot(&sfx_mboxRoll,   GenMBoxRoll());
-    LoadSlot(&sfx_mboxStop,   GenMBoxStop());
-    LoadSlot(&sfx_jump,       GenJump());
-    LoadSlot(&sfx_perk,       GenPerk());
+    LoadSlot(&sfx[SFX_SHOT],        GenGunshot(0.13f, 2200.0f, 0.020f));
+    LoadSlot(&sfx[SFX_SHOTGUN],     GenGunshot(0.20f, 1400.0f, 0.030f));
+    LoadSlot(&sfx[SFX_RAYGUN],      GenGunshot(0.18f, 6000.0f, 0.040f));
+    LoadSlot(&sfx[SFX_HIT],         GenHit());
+    LoadSlot(&sfx[SFX_HEAD],        GenHeadshot());
+    LoadSlot(&sfx[SFX_KILL],        GenKill());
+    LoadSlot(&sfx[SFX_DMG],         GenDamage());
+    LoadSlot(&sfx[SFX_RELOAD],      GenReload());
+    LoadSlot(&sfx[SFX_ROUND_START], GenChime(440.0f, 554.0f, 659.0f, 0.18f));
+    LoadSlot(&sfx[SFX_ROUND_END],   GenChime(659.0f, 554.0f, 440.0f, 0.20f));
+    LoadSlot(&sfx[SFX_BUY],         GenBuy());
+    LoadSlot(&sfx[SFX_POWERUP],     GenPowerup());
+    LoadSlot(&sfx[SFX_MBOX_ROLL],   GenMBoxRoll());
+    LoadSlot(&sfx[SFX_MBOX_STOP],   GenMBoxStop());
+    LoadSlot(&sfx[SFX_JUMP],        GenJump());
+    LoadSlot(&sfx[SFX_PERK],        GenPerk());
 
-    // Footstep variants.
+    // Footstep variants (SFX_STEP0..2).
     for (int v = 0; v < STEP_VARIANTS; v++) {
-        LoadSlot(&sfx_step[v], GenFootstep(v));
+        LoadSlot(&sfx[SFX_STEP0 + v], GenFootstep(v));
     }
 
     // Reload two-stage.
-    LoadSlot(&sfx_magOut, GenMagOut());
-    LoadSlot(&sfx_magIn,  GenMagIn());
+    LoadSlot(&sfx[SFX_MAG_OUT], GenMagOut());
+    LoadSlot(&sfx[SFX_MAG_IN],  GenMagIn());
 
     // Zombie vocalisation.
-    LoadSlot(&sfx_groan,  GenGroan());
-    LoadSlot(&sfx_growl,  GenGrowl());
-    LoadSlot(&sfx_hiss,   GenHiss());
-    LoadSlot(&sfx_roar,   GenRoar());
-    LoadSlot(&sfx_snarl,  GenSnarl());
+    LoadSlot(&sfx[SFX_GROAN], GenGroan());
+    LoadSlot(&sfx[SFX_GROWL], GenGrowl());
+    LoadSlot(&sfx[SFX_HISS],  GenHiss());
+    LoadSlot(&sfx[SFX_ROAR],  GenRoar());
+    LoadSlot(&sfx[SFX_SNARL], GenSnarl());
 
     // Heartbeat.
-    LoadSlot(&sfx_heartbeat, GenHeartbeat());
+    LoadSlot(&sfx[SFX_HEARTBEAT], GenHeartbeat());
 
-    // Zero all runtime state.
-    memset(stepState,   0, sizeof stepState);
-    memset(reloadState, 0, sizeof reloadState);
-    memset(enemyVox,    0, sizeof enemyVox);
-    heartbeatActive = false;
-    heartbeatTimer  = 0.0f;
-    lastDowned      = false;
-    duckMul         = 1.0f;
-    bgMusicLoaded   = false;
-    bgMusicName[0]  = 0;
-    lastMapName[0]  = 0;
+    bgMusicLoaded  = false;
+    bgMusicName[0] = 0;
 }
 
 void Audio_Shutdown(void) {
     if (!IsAudioDeviceReady()) return;
-    FreeSlot(&sfx_shot);    FreeSlot(&sfx_shotgun); FreeSlot(&sfx_raygun);
-    FreeSlot(&sfx_hit);     FreeSlot(&sfx_head);    FreeSlot(&sfx_kill);
-    FreeSlot(&sfx_dmg);     FreeSlot(&sfx_reload);
-    FreeSlot(&sfx_roundStart); FreeSlot(&sfx_roundEnd);
-    FreeSlot(&sfx_buy);     FreeSlot(&sfx_powerup);
-    FreeSlot(&sfx_mboxRoll); FreeSlot(&sfx_mboxStop);
-    FreeSlot(&sfx_jump);    FreeSlot(&sfx_perk);
-
-    for (int v = 0; v < STEP_VARIANTS; v++) FreeSlot(&sfx_step[v]);
-    FreeSlot(&sfx_magOut);  FreeSlot(&sfx_magIn);
-    FreeSlot(&sfx_groan);   FreeSlot(&sfx_growl);
-    FreeSlot(&sfx_hiss);    FreeSlot(&sfx_roar);
-    FreeSlot(&sfx_snarl);   FreeSlot(&sfx_heartbeat);
-
-    if (bgMusicLoaded) {
-        StopMusicStream(bgMusic);
-        UnloadMusicStream(bgMusic);
-        bgMusicLoaded = false;
-    }
-
+    for (int i = 0; i < SFX_COUNT; i++) FreeSlot(&sfx[i]);
+    Audio_StopMusic();
     CloseAudioDevice();
-}
-
-void Audio_Buy(void)  { PlaySlot(&sfx_buy, 0.7f, 1.0f); }
-
-void Audio_Tick(Player *me) {
-    // Per-local-player diff state. Static so it lives across frames.
-    static int       lastShotsFired = -1, lastShotsHit = -1, lastHeadshots = -1, lastKills = -1;
-    static int       lastHp = -1, lastPoints = -1, lastPerks = -1;
-    static GamePhase lastPhase = GS_PRE_GAME;
-    static int       lastMBoxState = -1;
-    static float     lastDoublePoints = 0.0f, lastInstakill = 0.0f;
-    static bool      lastOnGround = true;
-    static float     killGrace = 0.0f;
-
-    float dt = GetFrameTime();
-    if (dt <= 0.0f) dt = 0.016f;
-
-    // ---- first-frame seed -----------------------------------------------
-    if (lastShotsFired < 0) {
-        lastShotsFired = me->shotsFired; lastShotsHit = me->shotsHit;
-        lastHeadshots = me->headshots;   lastKills = me->kills;
-        lastHp = me->hp;                 lastPoints = me->points;
-        lastPhase = gamePhase;           lastMBoxState = mbox.state;
-        lastDoublePoints = doublePointsTimer; lastInstakill = instaKillTimer;
-        int mask = 0;
-        for (int k = 0; k < PERK_COUNT; k++) if (me->hasPerk[k]) mask |= 1 << k;
-        lastPerks = mask;
-        lastOnGround = me->onGround;
-
-        // Seed footstep last positions for all players.
-        for (int i = 0; i < NET_MAX_PLAYERS; i++) {
-            stepState[i].lastPos = players[i].pos;
-            stepState[i].lastPosValid = players[i].active;
-            stepState[i].timer = 0.0f;
-            stepState[i].variantIdx = i % STEP_VARIANTS;
-        }
-        // Seed reload state for all players.
-        for (int i = 0; i < NET_MAX_PLAYERS; i++) {
-            reloadState[i].lastReloadTimer = players[i].inventory[players[i].currentSlot].reloadTimer;
-            reloadState[i].magInPending    = false;
-            reloadState[i].magInTimer      = 0.0f;
-        }
-        // Stagger enemy vocalization timers so they don't all fire at once.
-        for (int i = 0; i < MAX_ENEMIES; i++) {
-            enemyVox[i].timer = 1.0f + (float)(i % 7) * 0.55f;
-            enemyVox[i].initialized = true;
-            enemyVox[i].lastInMeleeRange = false;
-        }
-        lastMapName[0] = 0;
-        return;
-    }
-
-    // ---- map music: detect mapName change --------------------------------
-    if (strcmp(mapName, lastMapName) != 0) {
-        strncpy(lastMapName, mapName, sizeof lastMapName - 1);
-        lastMapName[sizeof lastMapName - 1] = 0;
-        Audio_LoadMapMusic();
-    }
-    if (bgMusicLoaded) {
-        UpdateMusicStream(bgMusic);
-    }
-
-    // ---- downed heartbeat / duck setup ----------------------------------
-    bool meDowned = me->alive && me->downed;
-    if (meDowned && !lastDowned) {
-        // Just went down.
-        heartbeatActive = true;
-        heartbeatTimer  = 0.0f;
-        duckMul         = DOWNED_DUCK;
-    } else if (!meDowned && lastDowned) {
-        // Came back up (revived or round ended).
-        heartbeatActive = false;
-        duckMul         = 1.0f;
-    }
-    lastDowned = meDowned;
-
-    if (heartbeatActive) {
-        heartbeatTimer -= dt;
-        if (heartbeatTimer <= 0.0f) {
-            // Bleed progress 0..1 (0 = just downed, 1 = nearly dead).
-            float bleedProg = 0.0f;
-            if (me->bleedTimer > 0.0f) {
-                bleedProg = 1.0f - (me->bleedTimer / BLEED_TIME);
-                if (bleedProg < 0.0f) bleedProg = 0.0f;
-                if (bleedProg > 1.0f) bleedProg = 1.0f;
-            }
-            float interval = HB_INTERVAL_SLOW + (HB_INTERVAL_FAST - HB_INTERVAL_SLOW) * bleedProg;
-            // Heartbeat is NOT ducked — it needs to cut through.
-            if (sfx_heartbeat.loaded) {
-                Sound s = sfx_heartbeat.aliases[sfx_heartbeat.next];
-                sfx_heartbeat.next = (sfx_heartbeat.next + 1) % MAX_ALIASES;
-                SetSoundVolume(s, 0.9f * audioMasterVol);
-                SetSoundPitch(s, 1.0f);
-                PlaySound(s);
-            }
-            heartbeatTimer = interval;
-        }
-    }
-
-    // ---- shooting ---------------------------------------------------------
-    if (me->shotsFired > lastShotsFired) {
-        WeaponSlot *cur = &me->inventory[me->currentSlot];
-        SoundSlot *slot = &sfx_shot;
-        float vol = 0.6f, pitch = 1.0f;
-        // Bank + volume + pitch are data-driven (`sfx` key in the .weapon file).
-        if (cur->weaponIdx >= 0 && cur->weaponIdx < W_COUNT) {
-            const WeaponDef *w = &WEAPONS[cur->weaponIdx];
-            switch (w->sfxKind) {
-                case WSFX_SHOTGUN: slot = &sfx_shotgun; break;
-                case WSFX_RAYGUN:  slot = &sfx_raygun;  break;
-                default:           slot = &sfx_shot;    break;
-            }
-            if (w->sfxVol   > 0.0f) vol   = w->sfxVol;
-            if (w->sfxPitch > 0.0f) pitch = w->sfxPitch;
-        }
-        PlaySlot(slot, vol * duckMul, pitch);
-    }
-
-    // ---- hit / headshot / kill --------------------------------------------
-    if (me->shotsHit > lastShotsHit) {
-        bool head = (me->headshots > lastHeadshots);
-        PlaySlot(head ? &sfx_head : &sfx_hit,
-                 (head ? 0.8f : 0.45f) * duckMul, 1.0f);
-    }
-    if (me->kills > lastKills) {
-        killGrace = 0.04f;
-        PlaySlot(&sfx_kill, 0.45f * duckMul, 1.0f);
-    }
-    if (killGrace > 0) killGrace -= dt;
-
-    // ---- player damage ----------------------------------------------------
-    if (me->hp < lastHp && me->alive) {
-        PlaySlot(&sfx_dmg, 0.9f * duckMul, 1.0f);
-    }
-
-    // ---- buy / perk / phase / mbox / powerup (unchanged logic) -----------
-    if (me->points < lastPoints) {
-        int delta = lastPoints - me->points;
-        if (delta >= 50 && delta < 20000)
-            PlaySlot(&sfx_buy, 0.6f * duckMul, 1.0f);
-    }
-
-    int mask = 0;
-    for (int k = 0; k < PERK_COUNT; k++) if (me->hasPerk[k]) mask |= 1 << k;
-    if (mask & ~lastPerks) PlaySlot(&sfx_perk, 0.8f * duckMul, 1.0f);
-    lastPerks = mask;
-
-    if (gamePhase != lastPhase) {
-        if (gamePhase == GS_ROUND_BREAK)
-            PlaySlot(&sfx_roundEnd, 0.8f * duckMul, 1.0f);
-        else if (gamePhase == GS_PLAY && lastPhase == GS_ROUND_BREAK)
-            PlaySlot(&sfx_roundStart, 0.8f * duckMul, 1.0f);
-        lastPhase = gamePhase;
-    }
-
-    if (mbox.state != lastMBoxState) {
-        if (mbox.state == MBOX_ROLLING)
-            PlaySlot(&sfx_mboxRoll, 0.7f * duckMul, 1.0f);
-        else if (mbox.state == MBOX_WAITING)
-            PlaySlot(&sfx_mboxStop, 0.8f * duckMul, 1.0f);
-        lastMBoxState = mbox.state;
-    }
-
-    if (doublePointsTimer > lastDoublePoints + 5.0f ||
-        instaKillTimer    > lastInstakill    + 5.0f) {
-        PlaySlot(&sfx_powerup, 0.8f * duckMul, 1.0f);
-    }
-    lastDoublePoints = doublePointsTimer;
-    lastInstakill    = instaKillTimer;
-
-    // ---- jump foley -------------------------------------------------------
-    if (lastOnGround && !me->onGround && me->alive) {
-        PlaySlot(&sfx_jump, 0.4f * duckMul, 1.0f);
-    }
-    lastOnGround = me->onGround;
-
-    // ==== NEW FEATURES ====================================================
-
-    // ---- reload two-stage (local player) ---------------------------------
-    // The existing code plays the old combined sfx_reload. We now replace that
-    // with a two-stage mag-out / mag-in pair. We keep sfx_reload for
-    // backward-compat but don't play it for the local player here; the per-
-    // player loop below handles the local player too.
-    // (sfx_reload is still loaded and available; it's just not played below.)
-
-    // ---- per-player footsteps + two-stage reload -------------------------
-    // Camera position = local player eye position.
-    Vector3 camPos = me->pos;  // close enough; y used only for world-to-cam
-    float   camYaw = me->yaw;
-
-    for (int i = 0; i < NET_MAX_PLAYERS; i++) {
-        Player *p = &players[i];
-        if (!p->active || !p->alive || p->downed) {
-            // Keep last pos valid so there's no phantom step when they re-activate.
-            stepState[i].lastPos = p->pos;
-            stepState[i].timer = 0.0f;
-            continue;
-        }
-
-        bool isLocal = (i == localPlayerIdx);
-
-        // ---- footsteps --------------------------------------------------
-        StepState *ss = &stepState[i];
-        ss->timer -= dt;
-
-        float speedH;
-        if (isLocal) {
-            // Local player: use moveBlend + sprintBlend directly.
-            // moveBlend drives how fast we step; sprintBlend determines cadence.
-            speedH = p->moveBlend * BASE_MOVE_SPEED * (1.0f + 0.6f * p->sprintBlend);
-        } else {
-            // Remote players: derive from pos delta.
-            float dx = p->pos.x - ss->lastPos.x;
-            float dz = p->pos.z - ss->lastPos.z;
-            speedH = sqrtf(dx * dx + dz * dz) / dt;
-        }
-        ss->lastPos = p->pos;
-
-        // Detect crouch: pos.y is the eye height; crouching lowers it ~0.6m.
-        bool isCrouching = (p->pos.y < (PLAYER_EYE - 0.3f));
-        bool isAirborne  = !p->onGround;
-
-        // Step cadence: faster when sprinting (~0.28s), walk ~0.42s,
-        // crouch walk ~0.55s. No steps while airborne or standing still.
-        float stepInterval = 0.0f;
-        if (!isAirborne && speedH > 0.8f) {
-            float sprint = (isLocal ? p->sprintBlend : 0.0f);
-            float baseCadence = isCrouching ? 0.55f : (0.42f - 0.14f * sprint);
-            stepInterval = baseCadence;
-        }
-
-        if (stepInterval > 0.0f && ss->timer <= 0.0f) {
-            // Time to play a step.
-            int v = ss->variantIdx;
-            ss->variantIdx = (ss->variantIdx + 1) % STEP_VARIANTS;
-            ss->timer = stepInterval;
-
-            // Pitch variation: slight random spread ±5%.
-            float pitch = 0.95f + (float)rand() / (float)RAND_MAX * 0.10f;
-
-            if (isLocal) {
-                float vol = isCrouching ? 0.28f : 0.42f;
-                PlaySlot(&sfx_step[v], vol * duckMul, pitch);
-            } else {
-                // Positional for remote players.
-                float vol, pan;
-                if (PositionalAudio(camPos, camYaw, p->pos, 18.0f, &vol, &pan)) {
-                    float finalVol = vol * 0.50f * duckMul;
-                    PlaySlotPanned(&sfx_step[v], finalVol, pitch, pan);
-                }
-            }
-        }
-
-        // ---- reload two-stage -------------------------------------------
-        ReloadState *rs = &reloadState[i];
-        WeaponSlot *wslot = &p->inventory[p->currentSlot];
-        float rt = wslot->reloadTimer;
-        float reloadTime = 1.0f;  // fallback; normally driven by weapon def
-        // Use the weapon definition's reloadTime (WEAPONS[] declared in weapons.h).
-        if (wslot->weaponIdx >= 0 && wslot->weaponIdx < W_COUNT) {
-            reloadTime = WEAPONS[wslot->weaponIdx].reloadTime;
-            if (reloadTime < 0.1f) reloadTime = 0.1f;
-        }
-
-        // Detect reload start: timer rising edge (was 0, now > 0).
-        if (rs->lastReloadTimer <= 0.0f && rt > 0.0f) {
-            // Play mag-out immediately.
-            if (isLocal) {
-                PlaySlot(&sfx_magOut, 0.70f * duckMul, 1.0f);
-            } else {
-                float vol, pan;
-                if (PositionalAudio(camPos, camYaw, p->pos, 12.0f, &vol, &pan)) {
-                    PlaySlotPanned(&sfx_magOut, vol * 0.55f * duckMul, 1.0f, pan);
-                }
-            }
-            // Schedule mag-in at 55% through the reload duration.
-            rs->magInPending = true;
-            rs->magInTimer   = reloadTime * 0.55f;
-        }
-        rs->lastReloadTimer = rt;
-
-        // Count down mag-in timer.
-        if (rs->magInPending) {
-            rs->magInTimer -= dt;
-            if (rs->magInTimer <= 0.0f) {
-                rs->magInPending = false;
-                // Only play if reload is still in progress.
-                if (rt > 0.0f) {
-                    if (isLocal) {
-                        PlaySlot(&sfx_magIn, 0.75f * duckMul, 1.0f);
-                    } else {
-                        float vol, pan;
-                        if (PositionalAudio(camPos, camYaw, p->pos, 12.0f, &vol, &pan)) {
-                            PlaySlotPanned(&sfx_magIn, vol * 0.60f * duckMul, 1.0f, pan);
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // ---- zombie groans --------------------------------------------------
-    // Pick a groan slot for a zombie type.
-    // Budget: max MAX_GROAN_PER_TICK groans per frame (avoids audio explosion
-    // when a big horde all expire timers simultaneously).
-    int groanBudget = MAX_GROAN_PER_TICK;
-
-    for (int i = 0; i < MAX_ENEMIES && groanBudget > 0; i++) {
-        Enemy *en = &enemies[i];
-        if (!en->alive) {
-            // Reset state when enemy slot is freed so stale data doesn't
-            // trigger sounds for new enemies that occupy the slot.
-            enemyVox[i].initialized = false;
-            enemyVox[i].lastInMeleeRange = false;
-            continue;
-        }
-
-        EnemyVoxState *evs = &enemyVox[i];
-        if (!evs->initialized) {
-            // Stagger new enemy timers by slot index for natural spread.
-            evs->timer = 1.5f + (float)(i % 9) * 0.40f;
-            evs->initialized = true;
-            evs->lastInMeleeRange = false;
-        }
-
-        // Compute distance from enemy to local player camera.
-        float dx = en->pos.x - camPos.x;
-        float dz = en->pos.z - camPos.z;
-        float dist = sqrtf(dx * dx + dz * dz);
-
-        // ---- melee-range snarl ------------------------------------------
-        bool inMelee = (dist < MELEE_SNARL_DIST);
-        if (inMelee && !evs->lastInMeleeRange) {
-            // Just entered melee range: play attack snarl.
-            float vol, pan;
-            if (PositionalAudio(camPos, camYaw, en->pos, GROAN_MAX_DIST, &vol, &pan)) {
-                float finalVol = (vol * 0.80f + 0.20f) * duckMul;  // min floor so close ones are loud
-                PlaySlotPanned(&sfx_snarl, finalVol, 1.0f, pan);
-            }
-        }
-        evs->lastInMeleeRange = inMelee;
-
-        // ---- periodic vocalization --------------------------------------
-        evs->timer -= dt;
-        if (evs->timer > 0.0f) continue;
-
-        // Timer expired. If out of earshot, just reset and skip.
-        if (dist >= GROAN_MAX_DIST) {
-            // Reset with a shorter wait — they might walk into range soon.
-            evs->timer = 2.0f + (float)(rand() % 300) / 100.0f;
-            continue;
-        }
-
-        // Compute positional.
-        float vol, pan;
-        if (!PositionalAudio(camPos, camYaw, en->pos, GROAN_MAX_DIST, &vol, &pan)) {
-            evs->timer = 2.5f + (float)(rand() % 200) / 100.0f;
-            continue;
-        }
-
-        // Select sound by zombie type.
-        SoundSlot *voxSlot = &sfx_groan;
-        float voxPitch = 1.0f;
-        float voxVol   = vol * 0.65f;
-        float nextTimerLo = 3.0f, nextTimerHi = 6.0f;
-
-        switch (en->type) {
-            case ZT_NORMAL:
-                voxSlot = &sfx_groan;
-                voxPitch = 0.90f + (float)(rand() % 200) / 1000.0f; // 0.90–1.10
-                nextTimerLo = 3.5f; nextTimerHi = 7.0f;
-                break;
-            case ZT_RUNNER:
-                voxSlot = &sfx_growl;
-                voxPitch = 1.05f + (float)(rand() % 200) / 1000.0f; // 1.05–1.25 (faster)
-                nextTimerLo = 2.0f; nextTimerHi = 5.0f;
-                break;
-            case ZT_CRAWLER:
-                voxSlot = &sfx_hiss;
-                voxPitch = 1.10f + (float)(rand() % 300) / 1000.0f; // higher sibilant
-                nextTimerLo = 2.5f; nextTimerHi = 5.5f;
-                break;
-            case ZT_BOSS:
-                voxSlot = &sfx_roar;
-                voxPitch = 0.80f + (float)(rand() % 150) / 1000.0f; // deep, 0.80–0.95
-                voxVol   = vol * 0.90f;  // bosses are louder
-                nextTimerLo = 4.0f; nextTimerHi = 8.0f;
-                break;
-            default:
-                break;
-        }
-
-        PlaySlotPanned(voxSlot, voxVol * duckMul, voxPitch, pan);
-        groanBudget--;
-
-        // Randomise next timer.
-        float range = nextTimerHi - nextTimerLo;
-        evs->timer = nextTimerLo + (float)(rand() % (int)(range * 100 + 1)) / 100.0f;
-    }
-
-    // ---- update tail state -----------------------------------------------
-    lastShotsFired  = me->shotsFired;
-    lastShotsHit    = me->shotsHit;
-    lastHeadshots   = me->headshots;
-    lastKills       = me->kills;
-    lastHp          = me->hp;
-    lastPoints      = me->points;
 }

@@ -57,6 +57,7 @@ add_executable(shooter
     src/hud.c
     src/menu.c
     src/audio.c
+    src/audio_director.c
     src/settings.c
     src/assets.c
     # ---- engine/ : reusable, game-clean modules (engine/game split, Phase 3) --

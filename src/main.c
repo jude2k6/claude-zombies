@@ -23,6 +23,7 @@
 #include "settings.h"
 #include "fx.h"
 #include "audio.h"
+#include "audio_director.h"
 #include "decals.h"
 #include "particles.h"
 #include "assets.h"
@@ -343,7 +344,7 @@ int main(int argc, char **argv) {
         }
 
         Fx_Tick(dt);
-        if (uiState == UI_PLAY) Audio_Tick(me);
+        if (uiState == UI_PLAY) AudioDirector_Tick(me);
 
         // ---- Post-FX state update -------------------------------------------
         // Only when in gameplay (UI_PLAY or UI_PAUSE) and me is a valid player.

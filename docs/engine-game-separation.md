@@ -34,9 +34,20 @@ path to it. The goal is a clean, reusable **engine** that owns
 >   the configurable gamepad layer (`Bind_*`) into the engine map so each site is
 >   a single call; migrate movement/look onto `Eng_InputMoveAxis/LookDelta`; the
 >   menu/HUD/debug key reads (player.c, menu.c, hud.c, settings.c) are untouched.
-> - Remaining: Phase 0 globals→`Engine`/`World` (needs real `World *` threading —
->   see note below), Phase 2 gamepad fold-in + movement/look, Phase 4 content
->   registry, Phase 5 render seam, Phase 6 `main.c` flip, Phase 7 full dir split.
+> - 🔶 **Phase 0 (state ownership) — World struct + first cluster** — `src/world.{h,c}`
+>   add the `World` struct and the live `g_world`; the six collision-free
+>   sim-state globals (`enemies, bullets, throwables, powerUps, localPlayerIdx,
+>   gamePhase`) now live in `g_world`, with old call sites bridged by
+>   transitional object-like macros in `world.h` (commit `059b638`). Pure
+>   storage relocation — linker-proven, `--screenshot-zombies` renders from
+>   `g_world.enemies`. **TODO:** the colliding names (`players`, `mbox`,
+>   `mapName`, `roundNum`, power-up timers) need real `World *` threading, not
+>   macros; then thread `World *` through the sim so it can tick headless (the §15
+>   litmus). The macros are the temporary bridge, removed as call sites are
+>   threaded.
+> - Remaining: Phase 0 colliding-name threading + headless `World` tick, Phase 2
+>   gamepad fold-in + movement/look, Phase 4 content registry, Phase 5 render
+>   seam, Phase 6 `main.c` flip, Phase 7 full dir split.
 >
 > **Note on Phase 0:** the doc's §14 macro-shim (`#define players …`) is unsafe
 > as-is — `players`, `mbox`, `mapName`, `roundNum` and the power-up timers are

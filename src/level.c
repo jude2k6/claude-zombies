@@ -9,26 +9,16 @@
 #include <string.h>
 #include <ctype.h>
 
-// Collision-free level globals (interiorWalls, doors, wallBuys, perkMachines,
-// mapSpawns, mapProps + counts/handles) now live in g_world, reached via the
-// alias macros in world.h. The colliders below stay here until Slice B.
+// All level state now lives in g_world (Phase 0). Collision-free names are
+// reached via alias macros in world.h; collider names (obstacles, windows,
+// pap, mbox, mapName, arenaHalfX/Z + the two counts) are accessed explicitly
+// as g_world.X. Non-zero defaults (mapName, arena half-extents) are set in the
+// g_world initializer in world.c.
 //
 // NOTE: interiorWallNoClip per-wall flag — header/lintel segments above door
 // openings are drawn and block bullets (the 3D segment test is Y-aware) but
 // must NOT block XZ movement, or the doorway is walled off whether the door is
 // open or shut.
-Box         obstacles[MAX_OBSTACLES];
-int         obstacleCount = 0;
-Window3D    windows[MAX_WINDOWS];
-int         windowCount = 0;
-PackAPunch  pap;
-MysteryBox  mbox;
-char        mapName[64] = "Default";
-
-// Per-map arena half-extents (runtime; defaults 40 x 40).
-// X = left/right, Z = front/back.
-float arenaHalfX = ARENA_HALF_DEFAULT;
-float arenaHalfZ = ARENA_HALF_DEFAULT;
 
 float Level_RandRange(float a, float b) {
     return a + ((float)rand() / (float)RAND_MAX) * (b - a);
@@ -94,8 +84,8 @@ static bool PushOutOfBoxXZ(Vector3 *p, float radius, Box b) {
 static void UnstickXZ(Vector3 *p, float radius) {
     for (int pass = 0; pass < 4; pass++) {
         bool moved = false;
-        for (int i = 0; i < obstacleCount; i++)
-            if (PushOutOfBoxXZ(p, radius, obstacles[i])) moved = true;
+        for (int i = 0; i < g_world.obstacleCount; i++)
+            if (PushOutOfBoxXZ(p, radius, g_world.obstacles[i])) moved = true;
         for (int i = 0; i < interiorWallCount; i++)
             if (!interiorWallNoClip[i] && PushOutOfBoxXZ(p, radius, interiorWalls[i])) moved = true;
         for (int i = 0; i < doorCount; i++)
@@ -116,8 +106,8 @@ Vector3 Level_ResolveXZ(Vector3 from, Vector3 to, float radius, bool clampArena)
 
     Vector3 candidate = to;
     if (clampArena) {
-        float limX = arenaHalfX - radius;
-        float limZ = arenaHalfZ - radius;
+        float limX = g_world.arenaHalfX - radius;
+        float limZ = g_world.arenaHalfZ - radius;
         if (candidate.x >  limX) candidate.x =  limX;
         if (candidate.x < -limX) candidate.x = -limX;
         if (candidate.z >  limZ) candidate.z =  limZ;
@@ -125,8 +115,8 @@ Vector3 Level_ResolveXZ(Vector3 from, Vector3 to, float radius, bool clampArena)
     }
 
     Vector3 stepX = (Vector3){ candidate.x, origin.y, origin.z };
-    for (int i = 0; i < obstacleCount; i++)
-        if (Level_CircleHitsBoxXZ(stepX, radius, obstacles[i])) { stepX.x = origin.x; break; }
+    for (int i = 0; i < g_world.obstacleCount; i++)
+        if (Level_CircleHitsBoxXZ(stepX, radius, g_world.obstacles[i])) { stepX.x = origin.x; break; }
     for (int i = 0; i < interiorWallCount; i++)
         if (!interiorWallNoClip[i] && Level_CircleHitsBoxXZ(stepX, radius, interiorWalls[i])) { stepX.x = origin.x; break; }
     for (int i = 0; i < doorCount; i++)
@@ -135,8 +125,8 @@ Vector3 Level_ResolveXZ(Vector3 from, Vector3 to, float radius, bool clampArena)
         if (Level_CircleHitsBoxXZ(stepX, radius, mapProps[i].collider)) { stepX.x = origin.x; break; }
 
     Vector3 stepZ = (Vector3){ stepX.x, origin.y, candidate.z };
-    for (int i = 0; i < obstacleCount; i++)
-        if (Level_CircleHitsBoxXZ(stepZ, radius, obstacles[i])) { stepZ.z = origin.z; break; }
+    for (int i = 0; i < g_world.obstacleCount; i++)
+        if (Level_CircleHitsBoxXZ(stepZ, radius, g_world.obstacles[i])) { stepZ.z = origin.z; break; }
     for (int i = 0; i < interiorWallCount; i++)
         if (!interiorWallNoClip[i] && Level_CircleHitsBoxXZ(stepZ, radius, interiorWalls[i])) { stepZ.z = origin.z; break; }
     for (int i = 0; i < doorCount; i++)
@@ -148,8 +138,8 @@ Vector3 Level_ResolveXZ(Vector3 from, Vector3 to, float radius, bool clampArena)
 }
 
 bool Level_PointBlocked(Vector3 p, float pad) {
-    for (int i = 0; i < obstacleCount; i++) {
-        Box b = obstacles[i];
+    for (int i = 0; i < g_world.obstacleCount; i++) {
+        Box b = g_world.obstacles[i];
         b.size.x += pad*2; b.size.z += pad*2;
         if (Level_CircleHitsBoxXZ(p, 0.01f, b)) return true;
     }
@@ -166,8 +156,8 @@ bool Level_PathClearXZ(Vector3 from, Vector3 dir, float radius, float dist) {
     for (int s = 1; s <= steps; s++) {
         float t = ((float)s / steps) * dist;
         Vector3 p = { from.x + dir.x * t, from.y, from.z + dir.z * t };
-        for (int i = 0; i < obstacleCount; i++)
-            if (Level_CircleHitsBoxXZ(p, radius, obstacles[i])) return false;
+        for (int i = 0; i < g_world.obstacleCount; i++)
+            if (Level_CircleHitsBoxXZ(p, radius, g_world.obstacles[i])) return false;
         for (int i = 0; i < interiorWallCount; i++)
             if (!interiorWallNoClip[i] && Level_CircleHitsBoxXZ(p, radius, interiorWalls[i])) return false;
         for (int i = 0; i < doorCount; i++)
@@ -202,22 +192,22 @@ static int PerkNameToIdx(const char *s) {
 }
 
 static void ClearLevel(void) {
-    obstacleCount = 0;
+    g_world.obstacleCount = 0;
     for (int i = 0; i < MAX_OBSTACLES; i++) obstacleTexHandle[i] = -1;
     interiorWallCount = 0;
     memset(interiorWallNoClip, 0, sizeof interiorWallNoClip);
     for (int i = 0; i < MAX_INTERIOR_WALLS; i++) interiorWallTexHandle[i] = -1;
     doorCount = 0;
     wallBuyCount = 0;
-    windowCount = 0;
+    g_world.windowCount = 0;
     perkMachineCount = 0;
     mapSpawnCount = 0;
     mapPropCount = 0;
-    mapName[0] = 0;
-    arenaHalfX = ARENA_HALF_DEFAULT;
-    arenaHalfZ = ARENA_HALF_DEFAULT;
-    pap = (PackAPunch){ .pos = {0,0,0}, .phase = PAP_IDLE, .slotInProgress = -1, .ownerPlayer = -1, .weaponIdx = -1 };
-    mbox = (MysteryBox){ .placed = false, .pos = {0,0,0}, .state = MBOX_IDLE,
+    g_world.mapName[0] = 0;
+    g_world.arenaHalfX = ARENA_HALF_DEFAULT;
+    g_world.arenaHalfZ = ARENA_HALF_DEFAULT;
+    g_world.pap = (PackAPunch){ .pos = {0,0,0}, .phase = PAP_IDLE, .slotInProgress = -1, .ownerPlayer = -1, .weaponIdx = -1 };
+    g_world.mbox = (MysteryBox){ .placed = false, .pos = {0,0,0}, .state = MBOX_IDLE,
                          .timer = 0, .showingWeapon = 0, .finalWeapon = 0, .ownerPlayer = -1, .bob = 0 };
     // Reset atmosphere globals to defaults so each map starts from the
     // same baseline; ATMOSPHERE blocks then override.
@@ -304,12 +294,12 @@ void Level_InstantiateDoc(const MapDoc *doc) {
     ClearLevel();
 
     // Name
-    strncpy(mapName, doc->name, sizeof mapName - 1);
-    mapName[sizeof mapName - 1] = '\0';
+    strncpy(g_world.mapName, doc->name, sizeof g_world.mapName - 1);
+    g_world.mapName[sizeof g_world.mapName - 1] = '\0';
 
     // Arena half-extents
-    arenaHalfX = doc->arenaHalfX;
-    arenaHalfZ = doc->arenaHalfZ;
+    g_world.arenaHalfX = doc->arenaHalfX;
+    g_world.arenaHalfZ = doc->arenaHalfZ;
 
     // Per-map texture slot overrides from TEXTURES block.
     if (doc->textures.present) {
@@ -423,8 +413,8 @@ void Level_InstantiateDoc(const MapDoc *doc) {
 
     // Windows — resolve LOCKED_BY after doors are built
     for (int i = 0; i < doc->windowCount; i++) {
-        if (windowCount >= MAX_WINDOWS) {
-            fprintf(stderr, "map: warning: too many windows (MAX_WINDOWS=%d) — ignoring extras\n",
+        if (g_world.windowCount >= MAX_WINDOWS) {
+            fprintf(stderr, "map: warning: too many g_world.windows (MAX_WINDOWS=%d) — ignoring extras\n",
                     MAX_WINDOWS);
             break;
         }
@@ -438,7 +428,7 @@ void Level_InstantiateDoc(const MapDoc *doc) {
                 fprintf(stderr, "map: warning: window references unknown door '%s'\n",
                         dw->lockedBy);
         }
-        windows[windowCount++] = (Window3D){
+        g_world.windows[g_world.windowCount++] = (Window3D){
             .pos = (Vector3){ dw->x, WALL_HEIGHT * 0.5f, dw->z },
             .normal = normal, .tangent = tangent,
             .boards = MAX_BOARDS_PER_WIN,
@@ -449,14 +439,14 @@ void Level_InstantiateDoc(const MapDoc *doc) {
 
     // Obstacles
     for (int i = 0; i < doc->obstacleCount; i++) {
-        if (obstacleCount >= MAX_OBSTACLES) {
-            fprintf(stderr, "map: warning: too many obstacles (MAX_OBSTACLES=%d) — ignoring extras\n",
+        if (g_world.obstacleCount >= MAX_OBSTACLES) {
+            fprintf(stderr, "map: warning: too many g_world.obstacles (MAX_OBSTACLES=%d) — ignoring extras\n",
                     MAX_OBSTACLES);
             break;
         }
         const MapDocObstacle *o = &doc->obstacles[i];
-        int obIdx = obstacleCount++;
-        obstacles[obIdx] = (Box){ { o->x, o->h * 0.5f, o->z }, { o->sx, o->h, o->sz } };
+        int obIdx = g_world.obstacleCount++;
+        g_world.obstacles[obIdx] = (Box){ { o->x, o->h * 0.5f, o->z }, { o->sx, o->h, o->sz } };
         obstacleTexHandle[obIdx] = (o->texName[0])
             ? Assets_GetTextureByName(o->texName) : -1;
     }
@@ -494,7 +484,7 @@ void Level_InstantiateDoc(const MapDoc *doc) {
 
     // Pack-a-Punch
     if (doc->hasPap) {
-        pap = (PackAPunch){
+        g_world.pap = (PackAPunch){
             .pos = { doc->pap.x, 0, doc->pap.z },
             .phase = PAP_IDLE, .slotInProgress = -1,
             .ownerPlayer = -1, .weaponIdx = -1
@@ -503,7 +493,7 @@ void Level_InstantiateDoc(const MapDoc *doc) {
 
     // Mystery Box
     if (doc->mbox.present) {
-        mbox = (MysteryBox){
+        g_world.mbox = (MysteryBox){
             .placed = true, .pos = { doc->mbox.x, 0.5f, doc->mbox.z },
             .state = MBOX_IDLE, .timer = 0,
             .showingWeapon = 0, .finalWeapon = 0,
@@ -544,8 +534,8 @@ bool Level_LoadFromFile(const char *path) {
     int errs = MapDoc_Parse(path, &doc, stderr);
     if (errs == 0 || doc.wallCount + doc.obstacleCount + doc.windowCount > 0) {
         Level_InstantiateDoc(&doc);
-        fprintf(stderr, "map: loaded '%s' from %s (%d walls, %d doors, %d windows, %d props)\n",
-                mapName, path, interiorWallCount, doorCount, windowCount, mapPropCount);
+        fprintf(stderr, "map: loaded '%s' from %s (%d walls, %d doors, %d g_world.windows, %d props)\n",
+                g_world.mapName, path, interiorWallCount, doorCount, g_world.windowCount, mapPropCount);
         return true;
     }
     return false;
@@ -561,7 +551,7 @@ int Level_Validate(const char *path) {
 
 void Level_LoadHardcodedFallback(void) {
     ClearLevel();
-    strncpy(mapName, "Default (fallback)", sizeof mapName - 1);
+    strncpy(g_world.mapName, "Default (fallback)", sizeof g_world.mapName - 1);
 
     mapSpawns[mapSpawnCount++] = (Vector3){  0, PLAYER_EYE,  0 };
     mapSpawns[mapSpawnCount++] = (Vector3){  2, PLAYER_EYE,  0 };
@@ -578,7 +568,7 @@ void Level_LoadHardcodedFallback(void) {
         { {  -6, 1.5f,  26 }, { 3, 3, 3 } },
         { {  25, 1.0f,   2 }, { 2, 2, 8 } },
     };
-    for (size_t i = 0; i < sizeof layout / sizeof layout[0]; i++) obstacles[obstacleCount++] = layout[i];
+    for (size_t i = 0; i < sizeof layout / sizeof layout[0]; i++) g_world.obstacles[g_world.obstacleCount++] = layout[i];
 
     interiorWalls[interiorWallCount++] = (Box){ { -21.5f, 2.5f, -20.0f }, { 37, 5, 1 } };
     interiorWalls[interiorWallCount++] = (Box){ {  21.5f, 2.5f, -20.0f }, { 37, 5, 1 } };
@@ -600,15 +590,15 @@ void Level_LoadHardcodedFallback(void) {
         { .pos = { -ARENA_HALF_DEFAULT, WALL_HEIGHT*0.5f, -8.0f }, .normal = { 1, 0, 0 }, .tangent = { 0, 0, 1 },
           .boards = MAX_BOARDS_PER_WIN, .repairPlayer = -1, .lockedByDoor = -1 },
     };
-    for (size_t i = 0; i < sizeof ws / sizeof ws[0]; i++) windows[windowCount++] = ws[i];
+    for (size_t i = 0; i < sizeof ws / sizeof ws[0]; i++) g_world.windows[g_world.windowCount++] = ws[i];
 
     perkMachines[perkMachineCount++] = (PerkMachine){ { -8.0f, 0, 12.0f }, PERK_JUG };
     perkMachines[perkMachineCount++] = (PerkMachine){ {  4.0f, 0, -8.0f }, PERK_SPEED };
     perkMachines[perkMachineCount++] = (PerkMachine){ { 22.0f, 0, 25.0f }, PERK_DTAP };
     perkMachines[perkMachineCount++] = (PerkMachine){ {-25.0f, 0,-22.0f }, PERK_STAMIN };
 
-    pap = (PackAPunch){ .pos = { 0, 0, -28.0f }, .phase = PAP_IDLE, .slotInProgress = -1, .ownerPlayer = -1, .weaponIdx = -1 };
-    mbox = (MysteryBox){ .placed = true, .pos = { -22.0f, 0.5f, 15.0f },
+    g_world.pap = (PackAPunch){ .pos = { 0, 0, -28.0f }, .phase = PAP_IDLE, .slotInProgress = -1, .ownerPlayer = -1, .weaponIdx = -1 };
+    g_world.mbox = (MysteryBox){ .placed = true, .pos = { -22.0f, 0.5f, 15.0f },
                          .state = MBOX_IDLE, .timer = 0,
                          .showingWeapon = 0, .finalWeapon = 0,
                          .ownerPlayer = -1, .bob = 0 };
@@ -631,19 +621,19 @@ void Level_Build(void) {
 
 void Level_Reset(void) {
     for (int i = 0; i < doorCount; i++) doors[i].opened = false;
-    for (int i = 0; i < windowCount; i++) {
-        windows[i].boards = MAX_BOARDS_PER_WIN;
-        windows[i].repairProgress = 0;
-        windows[i].repairPlayer = -1;
+    for (int i = 0; i < g_world.windowCount; i++) {
+        g_world.windows[i].boards = MAX_BOARDS_PER_WIN;
+        g_world.windows[i].repairProgress = 0;
+        g_world.windows[i].repairPlayer = -1;
     }
-    pap.phase = PAP_IDLE;
-    pap.timer = 0;
-    pap.slotInProgress = -1;
-    pap.ownerPlayer = -1;
-    pap.weaponIdx = -1;
-    mbox.state = MBOX_IDLE;
-    mbox.timer = 0;
-    mbox.ownerPlayer = -1;
+    g_world.pap.phase = PAP_IDLE;
+    g_world.pap.timer = 0;
+    g_world.pap.slotInProgress = -1;
+    g_world.pap.ownerPlayer = -1;
+    g_world.pap.weaponIdx = -1;
+    g_world.mbox.state = MBOX_IDLE;
+    g_world.mbox.timer = 0;
+    g_world.mbox.ownerPlayer = -1;
     Decals_ClearAll();
     Particles_Reset();
 }

@@ -275,8 +275,8 @@ static int Dev_ScreenshotPaP(void) {
     players[0].active = true; players[0].alive = true;
     players[0].pos = (Vector3){ 0, PLAYER_EYE, 6 };
 
-    pap.pos = (Vector3){ 0, 0, 0 };           // bring it to the origin
-    pap.ownerPlayer = 0; pap.slotInProgress = 0; pap.weaponIdx = W_RIFLE;
+    g_world.pap.pos = (Vector3){ 0, 0, 0 };           // bring it to the origin
+    g_world.pap.ownerPlayer = 0; g_world.pap.slotInProgress = 0; g_world.pap.weaponIdx = W_RIFLE;
 
     Camera cam = {
         .position   = (Vector3){ 1.6f, 1.7f, 3.4f },
@@ -291,8 +291,8 @@ static int Dev_ScreenshotPaP(void) {
         { "pap_3_ready",  PAP_READY,  0.0f },
     };
     for (int s = 0; s < 4; s++) {
-        pap.phase = shots[s].phase; pap.timer = shots[s].timer;
-        pap.bob = 1.2f;
+        g_world.pap.phase = shots[s].phase; g_world.pap.timer = shots[s].timer;
+        g_world.pap.bob = 1.2f;
         BeginDrawing();
         ClearBackground((Color){ 50, 52, 60, 255 });
         Render_World3D(cam);

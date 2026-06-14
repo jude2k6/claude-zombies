@@ -3,24 +3,12 @@
 
 #include "types.h"
 #include "mapdoc.h"
-#include "world.h"   // level state now lives in g_world (Phase 0)
+#include "world.h"   // all level state now lives in g_world (Phase 0)
 
-// Collision-free level globals (interiorWalls, doors, wallBuys, perkMachines,
-// mapSpawns, mapProps + their counts/handles) now live in g_world and are
-// reached through the alias macros in world.h. The colliders below still need
-// externs until they are relocated (Slice B): their names also appear as
-// MapDoc/Pkt struct fields, so they can't be macro-aliased.
-extern Box         obstacles[MAX_OBSTACLES];
-extern int         obstacleCount;
-extern Window3D    windows[MAX_WINDOWS];
-extern int         windowCount;
-extern PackAPunch  pap;
-extern MysteryBox  mbox;
-extern char        mapName[64];
-
-/* Per-map arena half-extents (runtime; default 40 x 40). */
-extern float arenaHalfX;
-extern float arenaHalfZ;
+// Level state has been fully relocated into g_world (src/world.h). Collision-
+// free names are reached via alias macros there; collider names (obstacles,
+// obstacleCount, windows, windowCount, pap, mbox, mapName, arenaHalfX/Z) are
+// accessed explicitly as g_world.X because they clash with MapDoc/Pkt fields.
 
 void  Level_Build(void);
 bool  Level_LoadFromFile(const char *path);

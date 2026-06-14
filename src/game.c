@@ -19,10 +19,10 @@ void Game_StartRound(int r) {
     Enemies_ClearAll();
     Bullets_ClearAll();
     Throwables_ClearAll();
-    for (int i = 0; i < windowCount; i++) {
-        windows[i].boards = MAX_BOARDS_PER_WIN;
-        windows[i].repairProgress = 0;
-        windows[i].repairPlayer = -1;
+    for (int i = 0; i < g_world.windowCount; i++) {
+        g_world.windows[i].boards = MAX_BOARDS_PER_WIN;
+        g_world.windows[i].repairProgress = 0;
+        g_world.windows[i].repairPlayer = -1;
     }
     for (int i = 0; i < NET_MAX_PLAYERS; i++) {
         if (!players[i].active) continue;
@@ -176,7 +176,7 @@ void Game_Tick(float dt) {
             int bonus = 50 + g_world.roundNum * 10;
             for (int i = 0; i < NET_MAX_PLAYERS; i++)
                 if (players[i].active) players[i].points += bonus;
-            for (int i = 0; i < windowCount; i++) windows[i].boards = MAX_BOARDS_PER_WIN;
+            for (int i = 0; i < g_world.windowCount; i++) g_world.windows[i].boards = MAX_BOARDS_PER_WIN;
         }
     } else if (gamePhase == GS_ROUND_BREAK) {
         roundBreakTimer -= dt;

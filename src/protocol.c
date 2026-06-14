@@ -193,14 +193,14 @@ void Protocol_HostBroadcastSnapshot(void) {
     hdr->enemiesAlive = (uint16_t)enemiesAlive;
     hdr->enemiesToSpawn = (uint16_t)enemiesToSpawn;
     for (int i = 0; i < MAX_WINDOWS; i++) {
-        hdr->windowBoards[i] = (uint8_t)windows[i].boards;
-        hdr->windowRepair[i] = windows[i].repairProgress;
+        hdr->windowBoards[i] = (uint8_t)g_world.windows[i].boards;
+        hdr->windowRepair[i] = g_world.windows[i].repairProgress;
     }
-    hdr->papPhase = (uint8_t)pap.phase;
-    hdr->papTimer = pap.timer;
-    hdr->papSlotInProgress = (int8_t)pap.slotInProgress;
-    hdr->papOwnerPlayer = (int8_t)pap.ownerPlayer;
-    hdr->papWeaponIdx = (int8_t)pap.weaponIdx;
+    hdr->papPhase = (uint8_t)g_world.pap.phase;
+    hdr->papTimer = g_world.pap.timer;
+    hdr->papSlotInProgress = (int8_t)g_world.pap.slotInProgress;
+    hdr->papOwnerPlayer = (int8_t)g_world.pap.ownerPlayer;
+    hdr->papWeaponIdx = (int8_t)g_world.pap.weaponIdx;
     {
         uint16_t mask = 0;
         for (int i = 0; i < doorCount && i < 16; i++) if (doors[i].opened) mask |= (uint16_t)(1u << i);
@@ -208,11 +208,11 @@ void Protocol_HostBroadcastSnapshot(void) {
     }
     hdr->doublePointsTimer = g_world.doublePointsTimer;
     hdr->instaKillTimer    = g_world.instaKillTimer;
-    hdr->mboxState         = (uint8_t)mbox.state;
-    hdr->mboxTimer         = mbox.timer;
-    hdr->mboxShowingWeapon = (uint8_t)mbox.showingWeapon;
-    hdr->mboxFinalWeapon   = (uint8_t)mbox.finalWeapon;
-    hdr->mboxOwnerPlayer   = (int8_t)mbox.ownerPlayer;
+    hdr->mboxState         = (uint8_t)g_world.mbox.state;
+    hdr->mboxTimer         = g_world.mbox.timer;
+    hdr->mboxShowingWeapon = (uint8_t)g_world.mbox.showingWeapon;
+    hdr->mboxFinalWeapon   = (uint8_t)g_world.mbox.finalWeapon;
+    hdr->mboxOwnerPlayer   = (int8_t)g_world.mbox.ownerPlayer;
     for (int i = 0; i < NET_MAX_PLAYERS; i++) SerializePlayer(&hdr->players[i], &players[i]);
 
     size_t off = sizeof *hdr;
@@ -293,22 +293,22 @@ void Protocol_ClientApplySnapshot(uint8_t *data, size_t len) {
     enemiesAlive = hdr->enemiesAlive;
     enemiesToSpawn = hdr->enemiesToSpawn;
     for (int i = 0; i < MAX_WINDOWS; i++) {
-        windows[i].boards = hdr->windowBoards[i];
-        windows[i].repairProgress = hdr->windowRepair[i];
+        g_world.windows[i].boards = hdr->windowBoards[i];
+        g_world.windows[i].repairProgress = hdr->windowRepair[i];
     }
-    pap.phase = hdr->papPhase;
-    pap.timer = hdr->papTimer;
-    pap.slotInProgress = hdr->papSlotInProgress;
-    pap.ownerPlayer = hdr->papOwnerPlayer;
-    pap.weaponIdx = hdr->papWeaponIdx;
+    g_world.pap.phase = hdr->papPhase;
+    g_world.pap.timer = hdr->papTimer;
+    g_world.pap.slotInProgress = hdr->papSlotInProgress;
+    g_world.pap.ownerPlayer = hdr->papOwnerPlayer;
+    g_world.pap.weaponIdx = hdr->papWeaponIdx;
     for (int i = 0; i < doorCount && i < 16; i++) doors[i].opened = (hdr->doorsOpened & (1u << i)) != 0;
     g_world.doublePointsTimer = hdr->doublePointsTimer;
     g_world.instaKillTimer    = hdr->instaKillTimer;
-    mbox.state         = hdr->mboxState;
-    mbox.timer         = hdr->mboxTimer;
-    mbox.showingWeapon = hdr->mboxShowingWeapon;
-    mbox.finalWeapon   = hdr->mboxFinalWeapon;
-    mbox.ownerPlayer   = hdr->mboxOwnerPlayer;
+    g_world.mbox.state         = hdr->mboxState;
+    g_world.mbox.timer         = hdr->mboxTimer;
+    g_world.mbox.showingWeapon = hdr->mboxShowingWeapon;
+    g_world.mbox.finalWeapon   = hdr->mboxFinalWeapon;
+    g_world.mbox.ownerPlayer   = hdr->mboxOwnerPlayer;
 
     for (int i = 0; i < NET_MAX_PLAYERS; i++)
         DeserializePlayer(&players[i], &hdr->players[i], i == localPlayerIdx);

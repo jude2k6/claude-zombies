@@ -52,16 +52,16 @@ static ZombieType PickType(int round) {
 }
 
 void Enemies_TrySpawn(int round) {
-    if (windowCount == 0) return;
+    if (g_world.windowCount == 0) return;
     int accessible[MAX_WINDOWS]; int na = 0;
-    for (int i = 0; i < windowCount; i++) {
-        int lk = windows[i].lockedByDoor;
+    for (int i = 0; i < g_world.windowCount; i++) {
+        int lk = g_world.windows[i].lockedByDoor;
         if (lk >= 0 && lk < doorCount && !doors[lk].opened) continue;
         accessible[na++] = i;
     }
     if (na == 0) return;
     int wi = accessible[rand() % na];
-    Window3D *w = &windows[wi];
+    Window3D *w = &g_world.windows[wi];
 
     Vector3 spawn = Vector3Subtract(w->pos, Vector3Scale(w->normal, Level_RandRange(4.0f, 6.0f)));
     spawn = Vector3Add(spawn, Vector3Scale(w->tangent, Level_RandRange(-1.2f, 1.2f)));
@@ -136,8 +136,8 @@ void Enemies_Separate(void) {
             }
         }
     }
-    float limX = arenaHalfX - ENEMY_RADIUS;
-    float limZ = arenaHalfZ - ENEMY_RADIUS;
+    float limX = g_world.arenaHalfX - ENEMY_RADIUS;
+    float limZ = g_world.arenaHalfZ - ENEMY_RADIUS;
     for (int i = 0; i < MAX_ENEMIES; i++) {
         if (!enemies[i].alive || enemies[i].state != ZS_INSIDE) continue;
         enemies[i].pos.x = Clamp(enemies[i].pos.x, -limX, limX);
@@ -162,7 +162,7 @@ void Enemies_Update(float dt) {
         if (e->simAttackTimer > 0) e->simAttackTimer -= dt;
 
         if (e->state == ZS_OUTSIDE) {
-            Window3D *w = &windows[e->targetWindow];
+            Window3D *w = &g_world.windows[e->targetWindow];
             Vector3 to = Vector3Subtract(w->pos, e->pos);
             to.y = 0;
             float d = Vector3Length(to);
@@ -176,7 +176,7 @@ void Enemies_Update(float dt) {
             }
         }
         else if (e->state == ZS_AT_WINDOW) {
-            Window3D *w = &windows[e->targetWindow];
+            Window3D *w = &g_world.windows[e->targetWindow];
             if (w->boards <= 0) {
                 e->pos = Vector3Add(w->pos, Vector3Scale(w->normal, 1.6f));
                 e->pos.y = ENEMY_HEIGHT*0.5f;
@@ -563,10 +563,10 @@ void Bullets_Update(float dt) {
             }
         }
 
-        // Static geometry: obstacles, interior walls, closed doors
-        for (int j = 0; j < obstacleCount; j++) {
+        // Static geometry: g_world.obstacles, interior walls, closed doors
+        for (int j = 0; j < g_world.obstacleCount; j++) {
             float t; Vector3 hp, hn;
-            if (SegmentBoxHit(a, b, obstacles[j], &t, &hp, &hn) && t < bestT) {
+            if (SegmentBoxHit(a, b, g_world.obstacles[j], &t, &hp, &hn) && t < bestT) {
                 bestT = t; hitIsEnemy = false; hitPos = hp; hitNormal = hn;
             }
         }
@@ -599,7 +599,7 @@ void Bullets_Update(float dt) {
             // No hit this step — advance and life-out on arena escape.
             bullets[i].pos = b;
             float ax = fabsf(b.x), az = fabsf(b.z);
-            if (ax > arenaHalfX + 4.0f || az > arenaHalfZ + 4.0f)
+            if (ax > g_world.arenaHalfX + 4.0f || az > g_world.arenaHalfZ + 4.0f)
                 bullets[i].alive = false;
             continue;
         }
@@ -942,7 +942,7 @@ void PowerUps_Apply(PowerUpType type) {
             g_world.instaKillTimer = 20.0f;
             break;
         case PU_CARPENTER:
-            for (int i = 0; i < windowCount; i++) windows[i].boards = MAX_BOARDS_PER_WIN;
+            for (int i = 0; i < g_world.windowCount; i++) g_world.windows[i].boards = MAX_BOARDS_PER_WIN;
             for (int i = 0; i < NET_MAX_PLAYERS; i++)
                 if (players[i].active) players[i].points += 200;
             break;

@@ -503,13 +503,13 @@ void Hud_Draw(int sw, int sh, Player *me, Interact ix) {
             DrawRectangleRounded((Rectangle){ rx - 220, ry + 30, 220, 6 }, 0.5f, 6, (Color){ 70, 40, 10, 200 });
             DrawRectangleRounded((Rectangle){ rx - 220, ry + 30, 220 * t, 6 }, 0.5f, 6, (Color){ 240, 150, 40, 255 });
         } else if (PaP_SlotLocked(localPlayerIdx, me->currentSlot)) {
-            if (pap.phase == PAP_READY) {
+            if (g_world.pap.phase == PAP_READY) {
                 HudTextR("READY - TAKE IT", rx, ry, 22, (Color){ 200, 150, 255, 255 });
             } else {
                 HudTextR("PACK-A-PUNCH", rx, ry, 22, (Color){ 200, 150, 255, 255 });
                 // Progress across both timed phases (insert + work).
                 float total  = PAP_INSERT_TIME + PAP_WORK_TIME;
-                float remain = pap.timer + (pap.phase == PAP_INSERT ? PAP_WORK_TIME : 0.0f);
+                float remain = g_world.pap.timer + (g_world.pap.phase == PAP_INSERT ? PAP_WORK_TIME : 0.0f);
                 float t = 1.0f - remain / total;
                 DrawRectangleRounded((Rectangle){ rx - 220, ry + 30, 220, 6 }, 0.5f, 6, (Color){ 40, 20, 60, 200 });
                 DrawRectangleRounded((Rectangle){ rx - 220, ry + 30, 220 * t, 6 }, 0.5f, 6, (Color){ 200, 150, 255, 255 });
@@ -637,12 +637,12 @@ void Hud_Draw(int sw, int sh, Player *me, Interact ix) {
         } else if (ix.kind == IK_PAP) {
             border = (Color){200,150,255,255};
             WeaponSlot *s = &me->inventory[me->currentSlot];
-            if (pap.phase == PAP_READY) {
-                if (pap.ownerPlayer == localPlayerIdx) snprintf(prompt, sizeof prompt, "[F]  TAKE WEAPON");
+            if (g_world.pap.phase == PAP_READY) {
+                if (g_world.pap.ownerPlayer == localPlayerIdx) snprintf(prompt, sizeof prompt, "[F]  TAKE WEAPON");
                 else { snprintf(prompt, sizeof prompt, "In use"); promptColor = GRAY; }
             }
-            else if (pap.phase != PAP_IDLE) {
-                if (pap.ownerPlayer == localPlayerIdx) snprintf(prompt, sizeof prompt, "Upgrading...");
+            else if (g_world.pap.phase != PAP_IDLE) {
+                if (g_world.pap.ownerPlayer == localPlayerIdx) snprintf(prompt, sizeof prompt, "Upgrading...");
                 else snprintf(prompt, sizeof prompt, "In use");
                 promptColor = (Color){200,150,255,255};
             }
@@ -650,7 +650,7 @@ void Hud_Draw(int sw, int sh, Player *me, Interact ix) {
             else { snprintf(prompt, sizeof prompt, "[F]  PACK-A-PUNCH  -  %d", PAP_COST);
                    if (me->points < PAP_COST) promptColor = (Color){200,80,80,255}; }
         } else if (ix.kind == IK_WINDOW) {
-            Window3D *w = &windows[ix.idx];
+            Window3D *w = &g_world.windows[ix.idx];
             border = (Color){200, 160, 80, 255};
             if (w->boards >= MAX_BOARDS_PER_WIN) { snprintf(prompt, sizeof prompt, "Window sealed"); promptColor = GRAY; }
             else snprintf(prompt, sizeof prompt, "[Hold E]  REPAIR BOARD");
@@ -670,20 +670,20 @@ void Hud_Draw(int sw, int sh, Player *me, Interact ix) {
         } else if (ix.kind == IK_MBOX) {
             border = (Color){200, 100, 200, 255};
             int meIdx = localPlayerIdx;
-            if (mbox.state == MBOX_IDLE) {
+            if (g_world.mbox.state == MBOX_IDLE) {
                 snprintf(prompt, sizeof prompt, "[F]  MYSTERY BOX  -  %d", MBOX_COST);
                 if (me->points < MBOX_COST) promptColor = (Color){200,80,80,255};
-            } else if (mbox.state == MBOX_ROLLING) {
-                snprintf(prompt, sizeof prompt, "Rolling... %.1fs", mbox.timer);
+            } else if (g_world.mbox.state == MBOX_ROLLING) {
+                snprintf(prompt, sizeof prompt, "Rolling... %.1fs", g_world.mbox.timer);
                 promptColor = (Color){220,180,220,255};
-            } else if (mbox.state == MBOX_WAITING) {
-                const WeaponDef *w = &WEAPONS[mbox.showingWeapon];
-                if (meIdx == mbox.ownerPlayer) {
-                    snprintf(prompt, sizeof prompt, "[F]  TAKE %s  (%.1fs)", w->name, mbox.timer);
+            } else if (g_world.mbox.state == MBOX_WAITING) {
+                const WeaponDef *w = &WEAPONS[g_world.mbox.showingWeapon];
+                if (meIdx == g_world.mbox.ownerPlayer) {
+                    snprintf(prompt, sizeof prompt, "[F]  TAKE %s  (%.1fs)", w->name, g_world.mbox.timer);
                 } else {
                     snprintf(prompt, sizeof prompt, "%s  -  waiting for %s",
                              w->name,
-                             players[mbox.ownerPlayer].name[0] ? players[mbox.ownerPlayer].name : "owner");
+                             players[g_world.mbox.ownerPlayer].name[0] ? players[g_world.mbox.ownerPlayer].name : "owner");
                     promptColor = GRAY;
                 }
             }
@@ -696,7 +696,7 @@ void Hud_Draw(int sw, int sh, Player *me, Interact ix) {
             DrawRectangleLines(cx - tw/2 - 16, by - 8, tw + 32, 40, border);
             DrawText(prompt, cx - tw/2, by, 26, promptColor);
             if (ix.kind == IK_WINDOW) {
-                float p = windows[ix.idx].repairProgress;
+                float p = g_world.windows[ix.idx].repairProgress;
                 if (p > 0) GuiProgressBar((Rectangle){cx - tw/2, by + 36, tw, 8}, NULL, NULL, &p, 0.0f, 1.0f);
             } else if (ix.kind == IK_REVIVE) {
                 float p = players[ix.idx].reviveAsTarget;

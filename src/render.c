@@ -251,24 +251,24 @@ static void DrawWallZSeg(float z0, float z1, float fixedX, Color c) {
 }
 
 static void DrawArena(void) {
-    DrawTexturedFloor((Vector3){0,0,0}, arenaHalfX*2, arenaHalfZ*2,
+    DrawTexturedFloor((Vector3){0,0,0}, g_world.arenaHalfX*2, g_world.arenaHalfZ*2,
                       TEX_FLOOR, WHITE, (Color){55,65,75,255});
-    float groundW = (arenaHalfX > arenaHalfZ ? arenaHalfX : arenaHalfZ) * 2 + 16;
+    float groundW = (g_world.arenaHalfX > g_world.arenaHalfZ ? g_world.arenaHalfX : g_world.arenaHalfZ) * 2 + 16;
     DrawTexturedFloor((Vector3){0, -0.01f, 0}, groundW, groundW,
                       TEX_GROUND, WHITE, (Color){30,35,40,255});
 
     Color wc = (Color){90,100,110,255};
     /* Perimeter walls — sides 0/1 are north/south (fixed z, vary x).
        Sides 2/3 are east/west (fixed x, vary z). */
-    float aX = arenaHalfX;  /* half-extent along X */
-    float aZ = arenaHalfZ;  /* half-extent along Z */
+    float aX = g_world.arenaHalfX;  /* half-extent along X */
+    float aZ = g_world.arenaHalfZ;  /* half-extent along Z */
     for (int side = 0; side < 4; side++) {
         float gapPos = 0; bool hasGap = false;
-        for (int i = 0; i < windowCount; i++) {
-            if (side == 0 && windows[i].pos.z >  aZ - 0.5f) { gapPos = windows[i].pos.x; hasGap = true; }
-            if (side == 1 && windows[i].pos.z < -aZ + 0.5f) { gapPos = windows[i].pos.x; hasGap = true; }
-            if (side == 2 && windows[i].pos.x >  aX - 0.5f) { gapPos = windows[i].pos.z; hasGap = true; }
-            if (side == 3 && windows[i].pos.x < -aX + 0.5f) { gapPos = windows[i].pos.z; hasGap = true; }
+        for (int i = 0; i < g_world.windowCount; i++) {
+            if (side == 0 && g_world.windows[i].pos.z >  aZ - 0.5f) { gapPos = g_world.windows[i].pos.x; hasGap = true; }
+            if (side == 1 && g_world.windows[i].pos.z < -aZ + 0.5f) { gapPos = g_world.windows[i].pos.x; hasGap = true; }
+            if (side == 2 && g_world.windows[i].pos.x >  aX - 0.5f) { gapPos = g_world.windows[i].pos.z; hasGap = true; }
+            if (side == 3 && g_world.windows[i].pos.x < -aX + 0.5f) { gapPos = g_world.windows[i].pos.z; hasGap = true; }
         }
         float gMin = gapPos - WINDOW_WIDTH*0.5f, gMax = gapPos + WINDOW_WIDTH*0.5f;
         /* sides 0/1: X-running wall at fixed z=+aZ or z=-aZ; runs from -aX to +aX */
@@ -279,7 +279,7 @@ static void DrawArena(void) {
         else                 { if (hasGap) { DrawWallZSeg(-aZ, gMin, -aX, wc); DrawWallZSeg(gMax, aZ, -aX, wc); } else DrawWallZSeg(-aZ, aZ, -aX, wc); }
     }
 
-    for (int i = 0; i < obstacleCount; i++) {
+    for (int i = 0; i < g_world.obstacleCount; i++) {
         // Per-surface TEX override: if set, draw the obstacle as a textured box
         // regardless of whether the crate model is loaded.  This lets map authors
         // give each obstacle a distinct look without a dedicated OBJ.
@@ -287,7 +287,7 @@ static void DrawArena(void) {
         if (h >= 0) {
             Texture2D *tex = Assets_CachedTexture(h);
             if (tex) {
-                DrawTexturedBoxTex(obstacles[i].center, obstacles[i].size,
+                DrawTexturedBoxTex(g_world.obstacles[i].center, g_world.obstacles[i].size,
                                    tex, WHITE, (Color){120,90,70,255});
                 continue;
             }
@@ -295,11 +295,11 @@ static void DrawArena(void) {
         if (propModelLoaded[PROP_OBSTACLE_CRATE]) {
             // crate.obj is unit-cube; scale to the obstacle's box size.
             DrawPropEx(PROP_OBSTACLE_CRATE,
-                       obstacles[i].center, 0.0f,
-                       obstacles[i].size, WHITE);
+                       g_world.obstacles[i].center, 0.0f,
+                       g_world.obstacles[i].size, WHITE);
         } else {
-            DrawCubeV(obstacles[i].center, obstacles[i].size, (Color){120,90,70,255});
-            DrawCubeWiresV(obstacles[i].center, obstacles[i].size, (Color){40,30,20,255});
+            DrawCubeV(g_world.obstacles[i].center, g_world.obstacles[i].size, (Color){120,90,70,255});
+            DrawCubeWiresV(g_world.obstacles[i].center, g_world.obstacles[i].size, (Color){40,30,20,255});
         }
     }
 }
@@ -369,8 +369,8 @@ static void DrawDoors(void) {
 }
 
 static void DrawWindows(void) {
-    for (int i = 0; i < windowCount; i++) {
-        Window3D *w = &windows[i];
+    for (int i = 0; i < g_world.windowCount; i++) {
+        Window3D *w = &g_world.windows[i];
         for (int b = 0; b < w->boards; b++) {
             float t = (b + 1.0f) / (MAX_BOARDS_PER_WIN + 1.0f);
             float by = t * WALL_HEIGHT;
@@ -505,19 +505,19 @@ static void DrawPerkMachines(void) {
 #define PAP_MOUTH_Y    1.99f   // top rim of the chamber (world Y)
 #define PAP_INSIDE_Y   1.70f   // weapon's resting depth inside the chamber
 static void DrawPaP(void) {
-    float px = pap.pos.x, pz = pap.pos.z;
+    float px = g_world.pap.pos.x, pz = g_world.pap.pos.z;
 
     // --- Cabinet (authored model, or primitive fallback) --------------
     if (propModelLoaded[PROP_PAP]) {
         DrawProp(PROP_PAP, (Vector3){ px, 0.0f, pz }, 0.0f, WHITE);
     } else {
-        DrawCube(pap.pos, 2.5f, 0.6f, 2.5f, (Color){25,25,30,255});
-        DrawCubeWires(pap.pos, 2.5f, 0.6f, 2.5f, BLACK);
+        DrawCube(g_world.pap.pos, 2.5f, 0.6f, 2.5f, (Color){25,25,30,255});
+        DrawCubeWires(g_world.pap.pos, 2.5f, 0.6f, 2.5f, BLACK);
         DrawCube((Vector3){ px, 1.0f, pz }, 2.0f, 0.8f, 2.0f, (Color){50,50,60,255});
         DrawCube((Vector3){ px, 1.7f, pz }, 0.9f, 0.45f, 0.7f, (Color){80,50,130,255});
     }
 
-    float workPulse = 0.5f + 0.5f * sinf(pap.bob * 9.0f);
+    float workPulse = 0.5f + 0.5f * sinf(g_world.pap.bob * 9.0f);
     Color trimHot = (Color){ 200, 150, 255, 255 };
 
     // --- Chamber shutter ----------------------------------------------
@@ -526,10 +526,10 @@ static void DrawPaP(void) {
     // and while the gun rises back out (end of WORK / READY), and SHUT in the
     // middle of the work cycle — it never collides with the weapon.
     float lidClose = 0.0f;
-    if (pap.phase == PAP_WORK) {
-        float elapsed = PAP_WORK_TIME - pap.timer;
+    if (g_world.pap.phase == PAP_WORK) {
+        float elapsed = PAP_WORK_TIME - g_world.pap.timer;
         float closeUp = elapsed / 0.5f;       if (closeUp  > 1) closeUp  = 1;
-        float openDn  = pap.timer / 0.5f;      if (openDn   > 1) openDn   = 1;
+        float openDn  = g_world.pap.timer / 0.5f;      if (openDn   > 1) openDn   = 1;
         lidClose = (closeUp < openDn) ? closeUp : openDn;  // min: seal then open
     }
     if (lidClose > 0.02f) {
@@ -540,27 +540,27 @@ static void DrawPaP(void) {
 
     // --- Phase-driven weapon animation --------------------------------
     Vector3 chamberIn = { px, PAP_INSIDE_Y, pz };
-    if (pap.phase == PAP_INSERT && pap.weaponIdx >= 0) {
+    if (g_world.pap.phase == PAP_INSERT && g_world.pap.weaponIdx >= 0) {
         // Gun descends from a hand-height point in front into the chamber
         // mouth, spinning as it drops.
-        float frac = 1.0f - pap.timer / PAP_INSERT_TIME;   // 0 -> 1
+        float frac = 1.0f - g_world.pap.timer / PAP_INSERT_TIME;   // 0 -> 1
         Vector3 handPt = { px, 2.35f, pz + 0.95f };
         Vector3 gp = Vector3Lerp(handPt, chamberIn, frac);
-        DrawWeaponDisplay(pap.weaponIdx, gp, 90.0f + frac * 180.0f, 1.0f);
-    } else if (pap.phase == PAP_WORK) {
+        DrawWeaponDisplay(g_world.pap.weaponIdx, gp, 90.0f + frac * 180.0f, 1.0f);
+    } else if (g_world.pap.phase == PAP_WORK) {
         // Sealed: sparks spit from the mouth seam, brightest at the seal.
         for (int i = 0; i < 6; i++) {
-            float a = pap.bob * 6.0f + i * 1.7f;
+            float a = g_world.pap.bob * 6.0f + i * 1.7f;
             float r = 0.18f + 0.16f * sinf(a * 1.3f);
             Vector3 sp = { px + cosf(a) * r, PAP_MOUTH_Y + sinf(a*2.0f) * 0.1f, pz + sinf(a) * r };
             DrawCubeV(sp, (Vector3){0.045f,0.045f,0.045f},
                       (Color){255, (unsigned char)(170 + 70*workPulse), 110, 255});
         }
-    } else if (pap.phase == PAP_READY && pap.weaponIdx >= 0) {
+    } else if (g_world.pap.phase == PAP_READY && g_world.pap.weaponIdx >= 0) {
         // Upgraded weapon rises out of the mouth, glowing + slowly spinning,
         // until the owner manually takes it (Use).
-        Vector3 gp = { px, 2.28f + sinf(pap.bob) * 0.06f, pz };
-        DrawWeaponDisplay(pap.weaponIdx, gp, pap.bob * 50.0f, 1.15f);
+        Vector3 gp = { px, 2.28f + sinf(g_world.pap.bob) * 0.06f, pz };
+        DrawWeaponDisplay(g_world.pap.weaponIdx, gp, g_world.pap.bob * 50.0f, 1.15f);
     }
 }
 
@@ -859,27 +859,27 @@ static const Color POWERUP_COLORS[PU_COUNT] = {
 static const char *POWERUP_LETTERS[PU_COUNT] = { "A", "N", "2x", "X", "C" };
 
 static void DrawMysteryBox(void) {
-    if (!mbox.placed) return;
-    Vector3 b = mbox.pos;
+    if (!g_world.mbox.placed) return;
+    Vector3 b = g_world.mbox.pos;
     if (propModelLoaded[PROP_MYSTERY_BOX]) {
         // mystery_box.obj has its origin at the centre of the base, but
         // mbox.pos is the centre of the 1.0 m tall crate (DrawCube's
         // anchor) — offset down by half a height so the new model lines
         // up with where the cube used to sit.
         Vector3 modelPos = { b.x, b.y - 0.5f, b.z };
-        Color tint = (mbox.state == MBOX_IDLE) ? WHITE : (Color){255, 220, 180, 255};
+        Color tint = (g_world.mbox.state == MBOX_IDLE) ? WHITE : (Color){255, 220, 180, 255};
         DrawProp(PROP_MYSTERY_BOX, modelPos, 0.0f, tint);
     } else {
-        Color crate = (mbox.state == MBOX_IDLE) ? (Color){120, 80, 50, 255} : (Color){160, 100, 60, 255};
+        Color crate = (g_world.mbox.state == MBOX_IDLE) ? (Color){120, 80, 50, 255} : (Color){160, 100, 60, 255};
         DrawCube(b, 1.8f, 1.0f, 1.2f, crate);
         DrawCubeWires(b, 1.8f, 1.0f, 1.2f, BLACK);
         // Yellow lid for visibility
         DrawCube((Vector3){ b.x, b.y + 0.55f, b.z }, 1.8f, 0.1f, 1.2f, (Color){240, 200, 80, 255});
     }
 
-    if (mbox.state == MBOX_ROLLING || mbox.state == MBOX_WAITING) {
-        Vector3 wp = { b.x, b.y + 1.4f + sinf(mbox.bob * 2.0f) * 0.1f, b.z };
-        DrawWeaponDisplay(mbox.showingWeapon, wp, mbox.bob * 60.0f, 1.0f);
+    if (g_world.mbox.state == MBOX_ROLLING || g_world.mbox.state == MBOX_WAITING) {
+        Vector3 wp = { b.x, b.y + 1.4f + sinf(g_world.mbox.bob * 2.0f) * 0.1f, b.z };
+        DrawWeaponDisplay(g_world.mbox.showingWeapon, wp, g_world.mbox.bob * 60.0f, 1.0f);
     }
 }
 
@@ -1181,9 +1181,9 @@ void Render_WorldLabels(Camera camera, int sw, int sh, Player *me) {
                  FadeColor(me->hasPerk[pm->perkIdx] ? GRAY : pd->tint, a));
     }
     {
-        float a = LabelAlpha(mePos, pap.pos);
+        float a = LabelAlpha(mePos, g_world.pap.pos);
         if (a > 0) {
-            Vector3 above = { pap.pos.x, 3.4f, pap.pos.z };
+            Vector3 above = { g_world.pap.pos.x, 3.4f, g_world.pap.pos.z };
             Vector2 sp = GetWorldToScreen(above, camera);
             if (sp.x > -200 && sp.x < sw + 200 && sp.y > -200 && sp.y < sh + 200) {
                 char label[64];

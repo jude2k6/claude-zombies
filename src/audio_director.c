@@ -143,7 +143,7 @@ static bool FindMapFile(char *outPath, int pathMax) {
                         if (i > 1) strncat(assembled, " ", sizeof assembled - strlen(assembled) - 1);
                         strncat(assembled, toks[i], sizeof assembled - strlen(assembled) - 1);
                     }
-                    if (strcmp(assembled, mapName) == 0) matched = true;
+                    if (strcmp(assembled, g_world.mapName) == 0) matched = true;
                     // Either way, NAME found — no need to keep scanning this file.
                     break;
                 }
@@ -160,7 +160,7 @@ static bool FindMapFile(char *outPath, int pathMax) {
 static void SwitchMapMusic(void) {
     char mapPath[256] = {0};
     char musicTrack[64] = {0};
-    if (mapName[0] != 0 &&
+    if (g_world.mapName[0] != 0 &&
         FindMapFile(mapPath, (int)sizeof mapPath) &&
         ParseMapMusicName(mapPath, musicTrack, (int)sizeof musicTrack)) {
         Audio_PlayMusicTrack(musicTrack);   // empty/missing track => silent
@@ -192,7 +192,7 @@ void AudioDirector_Tick(Player *me) {
         lastShotsFired = me->shotsFired; lastShotsHit = me->shotsHit;
         lastHeadshots = me->headshots;   lastKills = me->kills;
         lastHp = me->hp;                 lastPoints = me->points;
-        lastPhase = gamePhase;           lastMBoxState = mbox.state;
+        lastPhase = gamePhase;           lastMBoxState = g_world.mbox.state;
         lastDoublePoints = g_world.doublePointsTimer; lastInstakill = g_world.instaKillTimer;
         int mask = 0;
         for (int k = 0; k < PERK_COUNT; k++) if (me->hasPerk[k]) mask |= 1 << k;
@@ -223,8 +223,8 @@ void AudioDirector_Tick(Player *me) {
     }
 
     // ---- map music: detect mapName change --------------------------------
-    if (strcmp(mapName, lastMapName) != 0) {
-        strncpy(lastMapName, mapName, sizeof lastMapName - 1);
+    if (strcmp(g_world.mapName, lastMapName) != 0) {
+        strncpy(lastMapName, g_world.mapName, sizeof lastMapName - 1);
         lastMapName[sizeof lastMapName - 1] = 0;
         SwitchMapMusic();
     }
@@ -317,12 +317,12 @@ void AudioDirector_Tick(Player *me) {
         lastPhase = gamePhase;
     }
 
-    if (mbox.state != lastMBoxState) {
-        if (mbox.state == MBOX_ROLLING)
+    if (g_world.mbox.state != lastMBoxState) {
+        if (g_world.mbox.state == MBOX_ROLLING)
             Audio_Play(SFX_MBOX_ROLL, 0.7f * duckMul, 1.0f);
-        else if (mbox.state == MBOX_WAITING)
+        else if (g_world.mbox.state == MBOX_WAITING)
             Audio_Play(SFX_MBOX_STOP, 0.8f * duckMul, 1.0f);
-        lastMBoxState = mbox.state;
+        lastMBoxState = g_world.mbox.state;
     }
 
     if (g_world.doublePointsTimer > lastDoublePoints + 5.0f ||

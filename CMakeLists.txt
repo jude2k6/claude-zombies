@@ -43,8 +43,6 @@ FetchContent_MakeAvailable(enet)
 # ---- executable ------------------------------------------------------------
 add_executable(shooter
     src/main.c
-    src/net.c
-    src/mapdoc.c
     src/level.c
     src/player.c
     src/weapons.c
@@ -58,16 +56,21 @@ add_executable(shooter
     src/devtools.c
     src/hud.c
     src/menu.c
-    src/pad.c
-    src/fx.c
     src/audio.c
     src/settings.c
     src/assets.c
-    src/decals.c
-    src/particles.c
-    src/anim.c
+    # ---- engine/ : reusable, game-clean modules (engine/game split, Phase 3) --
+    src/engine/net.c
+    src/engine/mapdoc.c
+    src/engine/pad.c
+    src/engine/fx.c
+    src/engine/decals.c
+    src/engine/particles.c
+    src/engine/anim.c
 )
 target_include_directories(shooter PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/engine
     ${raygui_SOURCE_DIR}/src
     ${enet_SOURCE_DIR}/include
 )

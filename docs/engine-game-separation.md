@@ -1,5 +1,44 @@
 # Engine / Game Separation — Design & Plan
 
+> ## ▶ Resume here (state as of commit `a590afb`)
+> Everything below "Progress" is current. Tree is clean and green; build runs
+> `seam-check` and a pre-commit hook enforces the §2 rule
+> (`git config core.hooksPath scripts/hooks` if cloning fresh).
+>
+> **Build + verify loop** (no in-game input/audio path is headless, so these
+> plus a manual playtest are the regression check):
+> ```
+> cmake --build build -j                 # seam-check runs first, then compiles
+> ./build/shooter --screenshot-zombies   # exercises g_world.enemies
+> ./build/shooter --screenshot-coop      # players[] + round state
+> timeout 5 ./build/shooter              # exit 124 = ran clean
+> ```
+>
+> **Next slice — finish Phase 0 state relocation into `g_world`** (`src/world.{h,c}`).
+> Two proven techniques:
+> 1. *collision-free name* → add a `World` member + an object-like alias macro in
+>    `world.h` (`#define enemies (g_world.enemies)`). Safe ONLY if the name is
+>    never a struct field or local — check with
+>    `grep -rhoE '[.>]NAME\b' src/*.c src/*.h`.
+> 2. *collider* (name also a struct field, e.g. in `PktSnapshotHeader`/`MapDoc`)
+>    → add a `World` member with **no** macro; rewrite every bare use to
+>    `g_world.NAME` (sed `s/\bNAME\b/g_world.NAME/g` on the simple files; hand-edit
+>    files where a `hdr->NAME`/`doc->NAME` field shares a line — currently only
+>    `protocol.c`). The linker catches any miss (undefined `NAME`).
+>
+> Order of attack for the rest: `mbox`, `mapName`, level state (all colliders →
+> technique 2), then **`players[]`** (collider, 277 uses/13 files — do it alone,
+> playtest after). Each global: remove its `extern` from the canonical header
+> (which already `#include "world.h"`) and its definition from the `.c`. After
+> all state is in `g_world`, start threading `World *` through the sim toward the
+> §15 litmus (headless `fixed()` tick). Then resume Phase 2 (gamepad fold-in,
+> movement/look), Phase 4 (content registry), Phase 5 (render seam), Phase 6
+> (`main.c` flip), Phase 7 (full dir split).
+>
+> **Subagent note:** worktree agents keep forking from stale bases — only spawn
+> them for additive, independent, green-building units, tell them to rebase onto
+> main first, and always `git diff <merge-base> <branch>` before merging.
+
 Status: **in progress**. This is the target architecture and the incremental
 path to it. The goal is a clean, reusable **engine** that owns
 

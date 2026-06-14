@@ -145,6 +145,64 @@ void Enemies_Separate(void) {
     }
 }
 
+// Floor levels within this much Y are treated as "the same floor" for AI.
+#define FLOOR_LEVEL_EPS 0.75f
+
+// Centre of a ramp's low / high edge — the point a zombie aims for to get on
+// or off it. (RAMP_X slopes along +X, RAMP_Z along +Z.)
+static Vector3 RampLowEntrance(const FloorRegion *f) {
+    if (f->rampAxis == RAMP_X) return (Vector3){ f->cx - f->halfX, f->yLow, f->cz };
+    return (Vector3){ f->cx, f->yLow, f->cz - f->halfZ };
+}
+static Vector3 RampHighEntrance(const FloorRegion *f) {
+    if (f->rampAxis == RAMP_X) return (Vector3){ f->cx + f->halfX, f->yHigh, f->cz };
+    return (Vector3){ f->cx, f->yHigh, f->cz + f->halfZ };
+}
+
+// Multi-floor pathing. When the enemy (on floor level eY) and target (on tY)
+// are on different floors, redirect the homing goal toward a ramp that moves
+// the enemy one level toward the target, instead of straight at the target
+// (which would walk it into the wall above/below). Greedy and level-by-level:
+// after climbing/descending one ramp the enemy re-evaluates next tick. Reuses
+// the existing XZ homing toward the chosen ramp entrance. Returns true and
+// writes *goal when a detour is needed. On flat maps eY==tY==0, so this never
+// fires and AI is unchanged. (Generalises the existing doorway routing — the
+// graph here is implicit: ramps are the edges between floor levels.)
+static bool CrossFloorGoal(const Enemy *e, float eY, float tY, Vector3 *goal) {
+    if (fabsf(eY - tY) <= FLOOR_LEVEL_EPS) return false;
+    bool goUp = tY > eY;
+
+    // If we're already on a ramp, commit to its far end so we don't oscillate.
+    for (int i = 0; i < g_world.floorCount; i++) {
+        const FloorRegion *f = &g_world.floors[i];
+        if (f->rampAxis == RAMP_FLAT) continue;
+        if (e->pos.x < f->cx - f->halfX || e->pos.x > f->cx + f->halfX) continue;
+        if (e->pos.z < f->cz - f->halfZ || e->pos.z > f->cz + f->halfZ) continue;
+        if (fabsf(Level_RegionSurfaceY(f, e->pos.x, e->pos.z) - eY) < 0.4f) {
+            *goal = goUp ? RampHighEntrance(f) : RampLowEntrance(f);
+            return true;
+        }
+    }
+
+    // Otherwise seek the nearest ramp whose near end sits on our level and
+    // whose far end moves us toward the target's level.
+    const FloorRegion *best = NULL; float bestD = 1e30f; Vector3 bestEnt = {0};
+    for (int i = 0; i < g_world.floorCount; i++) {
+        const FloorRegion *f = &g_world.floors[i];
+        if (f->rampAxis == RAMP_FLAT) continue;
+        float nearY = goUp ? f->yLow  : f->yHigh;
+        float farY  = goUp ? f->yHigh : f->yLow;
+        if (fabsf(nearY - eY) > FLOOR_LEVEL_EPS) continue;
+        if (goUp ? (farY <= eY) : (farY >= eY)) continue;
+        Vector3 ent = goUp ? RampLowEntrance(f) : RampHighEntrance(f);
+        float dx = ent.x - e->pos.x, dz = ent.z - e->pos.z;
+        float dd = dx*dx + dz*dz;
+        if (dd < bestD) { bestD = dd; best = f; bestEnt = ent; }
+    }
+    if (best) { *goal = bestEnt; return true; }
+    return false;  // no route — fall back to homing at the target
+}
+
 void Enemies_Update(float dt) {
     for (int i = 0; i < MAX_ENEMIES; i++) {
         // Tick dying corpses: decrement the window and free the slot when done.
@@ -209,7 +267,16 @@ void Enemies_Update(float dt) {
             // angle pins zombies against the wall instead of the doorway.
             Vector3 goal = tp->pos;
             e->hasWaypoint = false;
-            for (int di = 0; di < doorCount; di++) {
+
+            // Multi-floor: if the player is on a different floor, route toward a
+            // ramp instead of straight at them. Takes priority over door routing
+            // (ramps/doors rarely interact); never fires on flat maps.
+            float eFloorY = Level_FloorHeightAt(e->pos.x, e->pos.z, e->pos.y - ENEMY_HEIGHT*0.5f);
+            float tFloorY = Level_FloorHeightAt(tp->pos.x, tp->pos.z, tp->pos.y - PLAYER_EYE);
+            bool crossFloor = CrossFloorGoal(e, eFloorY, tFloorY, &goal);
+            if (crossFloor) { e->waypoint = goal; e->hasWaypoint = true; }
+
+            for (int di = 0; di < doorCount && !crossFloor; di++) {
                 if (!doors[di].opened) continue;
                 Box b = doors[di].box;
                 bool wallAlongX = b.size.x > b.size.z;
@@ -353,9 +420,19 @@ void Enemies_Update(float dt) {
                 e->stuckBias = !e->stuckBias;
             }
 
+            // Stand on the floor surface here (multi-floor): walk up ramps and
+            // onto decks. Flat maps -> surface 0, identical to the old fixed Y.
+            float surfY = Level_FloorHeightAt(e->pos.x, e->pos.z, e->pos.y - ENEMY_HEIGHT*0.5f);
+            e->pos.y = surfY + ENEMY_HEIGHT*0.5f;
+
             Vector2 pXZ = { tp->pos.x, tp->pos.z };
             Vector2 eXZ = { e->pos.x, e->pos.z };
-            if (Vector2Distance(pXZ, eXZ) < PLAYER_RADIUS + ENEMY_RADIUS + 0.1f && e->touchTimer <= 0 && e->stunTimer <= 0) {
+            // Bite only when on the same floor (don't claw through a deck at a
+            // player standing right above/below). On flat maps the Y delta is
+            // the fixed eye-vs-centre gap, well within the threshold.
+            if (Vector2Distance(pXZ, eXZ) < PLAYER_RADIUS + ENEMY_RADIUS + 0.1f
+                && fabsf(e->pos.y - tp->pos.y) < 2.0f
+                && e->touchTimer <= 0 && e->stunTimer <= 0) {
                 bool cheatProtected = godMode && (int)(tp - players) == localPlayerIdx;
                 // Downed players are incapacitated — only the bleed timer kills them.
                 if (tp->downed) cheatProtected = true;
@@ -580,6 +657,14 @@ void Bullets_Update(float dt) {
             if (doors[j].opened) continue;
             float t; Vector3 hp, hn;
             if (SegmentBoxHit(a, b, doors[j].box, &t, &hp, &hn) && t < bestT) {
+                bestT = t; hitIsEnemy = false; hitPos = hp; hitNormal = hn;
+            }
+        }
+        // Floor-region slabs (multi-floor): shots can't pass through a deck/ramp.
+        for (int j = 0; j < g_world.floorCount; j++) {
+            Box fb = Level_FloorRegionBox(&g_world.floors[j]);
+            float t; Vector3 hp, hn;
+            if (SegmentBoxHit(a, b, fb, &t, &hp, &hn) && t < bestT) {
                 bestT = t; hitIsEnemy = false; hitPos = hp; hitNormal = hn;
             }
         }

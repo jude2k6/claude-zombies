@@ -665,6 +665,60 @@ static int Dev_ScreenshotMap(int argc, char **argv) {
     return 0;
 }
 
+// ---- --sim-navtest <file.map> ----------------------------------------------
+// Headless behavioural test for cross-floor AI nav: load a map, put a zombie
+// on the ground and the player on the highest deck at (15,-10) [the demo map's
+// elevated floor], tick the sim, and check the zombie climbs a ramp up to the
+// player's floor. Exit 0 = PASS. No rendering — just simulation.
+
+static int Dev_SimNavtest(int argc, char **argv) {
+    if (argc < 3) { fprintf(stderr, "usage: --sim-navtest <file.map>\n"); return 1; }
+    const char *path = argv[2];
+    SetTraceLogLevel(LOG_WARNING);
+    InitWindow(320, 240, "navtest");   // GL context for asset/texture lookups
+    Weapons_Load();
+    Assets_Load();
+    if (!Level_LoadFromFile(path)) {
+        fprintf(stderr, "failed to load map: %s\n", path);
+        Assets_Unload(); Weapons_Unload(); CloseWindow();
+        return 1;
+    }
+
+    godMode = true;             // keep the test player alive while chased
+    localPlayerIdx = 0;
+    for (int i = 0; i < NET_MAX_PLAYERS; i++) memset(&players[i], 0, sizeof players[i]);
+    players[0].active = true; players[0].alive = true;
+    float deckSurf = Level_FloorHeightAt(15, -10, 100.0f);   // highest surface there
+    players[0].pos = (Vector3){ 15, deckSurf + PLAYER_EYE, -10 };
+
+    Enemies_ClearAll();
+    enemies[0] = (Enemy){
+        .pos = { 0, ENEMY_HEIGHT * 0.5f, -10 },
+        .hp = 100000, .maxHp = 100000, .alive = true, .speed = 3.5f,
+        .state = ZS_INSIDE, .type = ZT_NORMAL, .targetPlayer = 0, .targetWindow = 0,
+    };
+
+    float startY = enemies[0].pos.y, maxY = startY;
+    float wantCentreY = deckSurf + ENEMY_HEIGHT * 0.5f;
+    int   reachedFrame = -1;
+    const float dt = 1.0f / 60.0f;
+    for (int f = 0; f < 1800 && reachedFrame < 0; f++) {   // up to 30 s
+        Enemies_Update(dt);
+        if (enemies[0].pos.y > maxY) maxY = enemies[0].pos.y;
+        if (fabsf(enemies[0].pos.y - wantCentreY) < 0.6f) reachedFrame = f;
+    }
+    bool pass = reachedFrame >= 0;
+    fprintf(stderr,
+            "navtest %s: deck surf=%.2f  zombie startY=%.2f maxY=%.2f endY=%.2f  -> %s",
+            path, deckSurf, startY, maxY, enemies[0].pos.y,
+            pass ? "" : "FAIL\n");
+    if (pass)
+        fprintf(stderr, "PASS (reached deck in %.2fs)\n", reachedFrame / 60.0f);
+
+    Assets_Unload(); Weapons_Unload(); CloseWindow();
+    return pass ? 0 : 1;
+}
+
 // ---- dispatcher ------------------------------------------------------------
 
 bool Devtools_HandleCLI(int argc, char **argv, int *exitCode) {
@@ -706,6 +760,10 @@ bool Devtools_HandleCLI(int argc, char **argv, int *exitCode) {
     }
     if (argc >= 3 && strcmp(argv[1], "--screenshot-map") == 0) {
         *exitCode = Dev_ScreenshotMap(argc, argv);
+        return true;
+    }
+    if (argc >= 3 && strcmp(argv[1], "--sim-navtest") == 0) {
+        *exitCode = Dev_SimNavtest(argc, argv);
         return true;
     }
     return false;

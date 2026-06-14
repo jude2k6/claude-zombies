@@ -48,4 +48,9 @@ float       Level_RegionSurfaceY(const FloorRegion *f, float x, float z);
 // docs/multi-floor-maps.md §2).
 float       Level_FloorHeightAt(float x, float z, float feetY);
 
+// Solid bounding box for a floor region's slab — used as a bullet/segment
+// blocker so shots can't pass through a floor. Flat slabs are a thin box just
+// under the surface; ramps span their yLow..yHigh as one AABB (approximation).
+Box         Level_FloorRegionBox(const FloorRegion *f);
+
 #endif

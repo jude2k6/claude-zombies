@@ -183,6 +183,17 @@ float Level_RegionSurfaceY(const FloorRegion *f, float x, float z) {
     }
 }
 
+Box Level_FloorRegionBox(const FloorRegion *f) {
+    if (f->rampAxis == RAMP_FLAT) {
+        return (Box){ { f->cx, f->yLow - 0.1f, f->cz },
+                      { f->halfX * 2, 0.2f, f->halfZ * 2 } };
+    }
+    float lo = f->yLow < f->yHigh ? f->yLow : f->yHigh;
+    float hi = f->yLow > f->yHigh ? f->yLow : f->yHigh;
+    return (Box){ { f->cx, (lo + hi) * 0.5f, f->cz },
+                  { f->halfX * 2, (hi - lo) + 0.2f, f->halfZ * 2 } };
+}
+
 float Level_FloorHeightAt(float x, float z, float feetY) {
     // Implicit ground plane: always a candidate, so flat maps (no regions)
     // and falling-to-the-bottom both resolve to Y=0.

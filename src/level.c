@@ -168,6 +168,38 @@ bool Level_PathClearXZ(Vector3 from, Vector3 dir, float radius, float dist) {
     return true;
 }
 
+float Level_RegionSurfaceY(const FloorRegion *f, float x, float z) {
+    switch (f->rampAxis) {
+        case RAMP_X: {
+            float t = (x - (f->cx - f->halfX)) / (2.0f * f->halfX);
+            return f->yLow + (f->yHigh - f->yLow) * Clamp(t, 0.0f, 1.0f);
+        }
+        case RAMP_Z: {
+            float t = (z - (f->cz - f->halfZ)) / (2.0f * f->halfZ);
+            return f->yLow + (f->yHigh - f->yLow) * Clamp(t, 0.0f, 1.0f);
+        }
+        default:
+            return f->yLow;
+    }
+}
+
+float Level_FloorHeightAt(float x, float z, float feetY) {
+    // Implicit ground plane: always a candidate, so flat maps (no regions)
+    // and falling-to-the-bottom both resolve to Y=0.
+    float best = 0.0f;
+    for (int i = 0; i < g_world.floorCount; i++) {
+        const FloorRegion *f = &g_world.floors[i];
+        if (x < f->cx - f->halfX || x > f->cx + f->halfX) continue;
+        if (z < f->cz - f->halfZ || z > f->cz + f->halfZ) continue;
+        float surf = Level_RegionSurfaceY(f, x, z);
+        // Skip surfaces above what the player can step onto: anything more than
+        // a step above the feet is "the floor above me", not the one I'm on.
+        if (surf > feetY + STEP_UP_HEIGHT) continue;
+        if (surf > best) best = surf;
+    }
+    return best;
+}
+
 // ============================================================================
 //  Map instantiation (MapDoc -> game globals)
 // ============================================================================

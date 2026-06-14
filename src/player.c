@@ -177,9 +177,15 @@ void Player_ApplyLocalMove(Player *p, float dt) {
         p->onGround = false;
     }
     p->velY -= PLAYER_GRAVITY * dt;
+    // Ground height is a query now (multi-floor maps): the highest walkable
+    // surface at or just above the player's feet, so they auto-climb stairs and
+    // stand on the correct floor of a stacked map. With no floor regions this
+    // returns 0 and the snap is identical to the old flat world.
+    float groundY  = Level_FloorHeightAt(p->pos.x, p->pos.z, p->pos.y - PLAYER_EYE);
+    float floorEye = groundY + PLAYER_EYE;
     float newY = p->pos.y + p->velY * dt;
-    if (newY <= PLAYER_EYE) {
-        newY = PLAYER_EYE;
+    if (newY <= floorEye) {
+        newY = floorEye;
         p->velY = 0.0f;
         p->onGround = true;
     } else {

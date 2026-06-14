@@ -61,6 +61,12 @@ typedef struct {
     float       arenaHalfX;   // per-map arena half-extents (default 40 x 40)
     float       arenaHalfZ;
 
+    // Walkable floor regions for multi-floor / vertical maps. Empty by default
+    // (an implicit ground plane at Y=0 covers the flat case). Accessed
+    // explicitly as g_world.floors — no alias macro (new state).
+    FloorRegion floors[MAX_FLOORS];
+    int         floorCount;
+
     // TODO (Phase 0, real threading): players[], netMode.
 } World;
 

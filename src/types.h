@@ -23,6 +23,7 @@
 #define DOOR_HEIGHT         2.5f   // height of door + matching wall opening
 #define PLAYER_EYE          1.7f
 #define PLAYER_RADIUS       0.4f
+#define STEP_UP_HEIGHT      0.6f   // max ledge the player auto-climbs (stairs/curbs)
 #define BASE_MOVE_SPEED     7.0f
 #define PLAYER_GRAVITY     36.0f
 #define PLAYER_JUMP_VEL     7.0f
@@ -57,6 +58,7 @@
 #define MAX_DOORS          16
 #define MAX_WALLBUYS       16
 #define MAX_MAP_PROPS      64
+#define MAX_FLOORS         32   // walkable floor regions (multi-floor maps)
 
 #define INV_SLOTS           2
 #define INTERACT_DIST       3.0f
@@ -357,6 +359,21 @@ typedef struct {
     Vector3 center;
     Vector3 size;
 } Box;
+
+// A walkable floor surface over an axis-aligned XZ rectangle (multi-floor
+// maps). Flat when yLow == yHigh; a ramp/stair otherwise — the surface Y
+// interpolates yLow -> yHigh along rampAxis. Stacked regions over the same
+// XZ give true overlapping floors (an upstairs above a downstairs); the
+// player stands on the highest surface at or just above their feet, found by
+// Level_FloorHeightAt(). An implicit ground plane at Y=0 is always present, so
+// maps with no FloorRegions behave exactly as the old flat world.
+typedef enum { RAMP_FLAT = 0, RAMP_X = 1, RAMP_Z = 2 } RampAxis;
+typedef struct {
+    float cx, cz;          // XZ center
+    float halfX, halfZ;    // XZ half-extents
+    float yLow, yHigh;     // surface Y (flat: equal; ramp: low/high edge)
+    RampAxis rampAxis;     // RAMP_FLAT, or slope along +X / +Z
+} FloorRegion;
 
 typedef struct {
     Vector3 pos;

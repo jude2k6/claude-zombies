@@ -35,4 +35,17 @@ bool        Level_PathClearXZ(Vector3 from, Vector3 dir, float radius, float dis
 
 float       Level_RandRange(float a, float b);
 
+// ---- multi-floor spatial queries ------------------------------------------
+// Surface Y of a single floor region at (x,z) — caller must ensure (x,z) is
+// inside the region's XZ rect. Handles flat slabs and ramps.
+float       Level_RegionSurfaceY(const FloorRegion *f, float x, float z);
+
+// "Where is the floor here?" — the highest walkable surface at (x,z) that sits
+// at or just above `feetY` (within STEP_UP_HEIGHT, so stairs/curbs auto-climb).
+// Returns the implicit ground plane (Y=0) when no region qualifies, so maps
+// with no FloorRegions behave exactly like the old flat world. This is the one
+// query that turns ground height from a constant into data (see
+// docs/multi-floor-maps.md §2).
+float       Level_FloorHeightAt(float x, float z, float feetY);
+
 #endif

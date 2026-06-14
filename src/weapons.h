@@ -40,7 +40,8 @@ extern WeaponGrip weaponGrip[W_COUNT];
 // ---- loader -------------------------------------------------------------
 // Scans data/weapons/ for *.weapon files, parses each, populates WEAPONS[]
 // + weaponTune[] and loads the model into weaponModels[]. Call BEFORE
-// Assets_Load (Assets_ApplyWorldShader iterates weaponModels[]).
+// Assets_Load: it enrols the loaded models via Assets_RegisterWorldShaderModel
+// so the world (fog) shader is stamped on them by Assets_ApplyWorldShader.
 // Safe to call after InitWindow only — uses LoadModel from raylib.
 void  Weapons_Load(void);
 void  Weapons_Unload(void);

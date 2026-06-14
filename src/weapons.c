@@ -4,6 +4,7 @@
 #include "interact.h"
 #include "fx.h"
 #include "particles.h"
+#include "assets.h"     // Assets_RegisterWorldShaderModel (world-shader enrol)
 #include "raymath.h"
 #include <math.h>
 #include <stdio.h>
@@ -578,6 +579,13 @@ void Weapons_Load(void) {
                     W_ID_NAMES[i]);
     }
     fprintf(stderr, "weapon: parsed %d .weapon file(s)\n", parsed);
+
+    // Enrol loaded weapon viewmodels with the asset module so the next
+    // Assets_ApplyWorldShader stamps the world (fog) shader onto them. This
+    // is the game telling the engine which models want the shader, instead of
+    // assets.c reaching into weaponModels[] — see docs/engine-game-separation §2.
+    for (int i = 0; i < W_COUNT; i++)
+        if (weaponModelLoaded[i]) Assets_RegisterWorldShaderModel(&weaponModels[i]);
 }
 
 void Weapons_Unload(void) {

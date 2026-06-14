@@ -113,9 +113,19 @@ extern Vector3 ambientColor;    // RGB 0..1
 void Assets_Load(void);    // call after InitWindow
 void Assets_Unload(void);  // call before CloseWindow
 
-// Wire `worldShader` onto every loaded prop / weapon model and to rlgl's
-// default. Called after Assets_Load and after any later LoadModel.
+// Wire `worldShader` onto every loaded prop model and every registered
+// external model, plus rlgl's default. Call after Assets_Load and after any
+// later LoadModel.
 void Assets_ApplyWorldShader(void);
+
+// ---- world-shader model registration ------------------------------------
+// Game code registers any externally-owned Model* (e.g. weapon viewmodels)
+// whose materials should track the world shader, instead of assets.c reaching
+// into game arrays like weaponModels[]. Registration is idempotent; up to
+// WORLD_SHADER_MODEL_MAX models may be enrolled. Call before the
+// Assets_ApplyWorldShader that should first stamp them (Weapons_Load does this).
+#define WORLD_SHADER_MODEL_MAX 64
+void Assets_RegisterWorldShaderModel(Model *m);
 
 // ---- name-keyed texture cache -------------------------------------------
 // Look up (or load on first request) a texture by base name.  The file

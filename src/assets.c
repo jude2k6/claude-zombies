@@ -1,8 +1,26 @@
 #include "assets.h"
-#include "weapons.h"     // weaponModels[] for Assets_ApplyWorldShader
 #include "rlgl.h"
 #include <stdio.h>
 #include <string.h>
+
+// ---- world-shader model registry ----------------------------------------
+// Game code enrolls any externally-owned Model* (e.g. weapon viewmodels) whose
+// materials should track the world shader. Assets_ApplyWorldShader() walks this
+// list, so assets.c never has to know about weaponModels[] or any game type.
+static Model *s_wsModels[WORLD_SHADER_MODEL_MAX];
+static int    s_wsModelCount = 0;
+
+void Assets_RegisterWorldShaderModel(Model *m) {
+    if (!m) return;
+    for (int i = 0; i < s_wsModelCount; i++)
+        if (s_wsModels[i] == m) return;        // already enrolled
+    if (s_wsModelCount >= WORLD_SHADER_MODEL_MAX) {
+        fprintf(stderr, "assets: world-shader registry full (cap=%d)\n",
+                WORLD_SHADER_MODEL_MAX);
+        return;
+    }
+    s_wsModels[s_wsModelCount++] = m;
+}
 
 // ---- prop storage -------------------------------------------------------
 Model propModels[PROP_COUNT];
@@ -255,12 +273,12 @@ void Assets_Load(void) {
 void Assets_ApplyWorldShader(void) {
     if (!worldShaderLoaded) return;
     // Replace the shader on every material of every loaded model so
-    // DrawModelEx draws through the fog program. Weapons keep their own
-    // separate array but go through the same path.
-    for (int i = 0; i < W_COUNT; i++) {
-        if (!weaponModelLoaded[i]) continue;
-        for (int m = 0; m < weaponModels[i].materialCount; m++) {
-            weaponModels[i].materials[m].shader = worldShader;
+    // DrawModelEx draws through the fog program. Models owned outside assets.c
+    // (weapon viewmodels) are enrolled via Assets_RegisterWorldShaderModel.
+    for (int i = 0; i < s_wsModelCount; i++) {
+        Model *mdl = s_wsModels[i];
+        for (int m = 0; m < mdl->materialCount; m++) {
+            mdl->materials[m].shader = worldShader;
         }
     }
     for (int i = 0; i < PROP_COUNT; i++) {

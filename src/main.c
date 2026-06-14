@@ -190,7 +190,7 @@ int main(int argc, char **argv) {
     GuiSetStyle(DEFAULT, TEXT_SIZE, 16);
 
     Audio_Init();
-    Weapons_Load();   // must run before Assets_Load — Assets_ApplyWorldShader iterates weaponModels[]
+    Weapons_Load();   // before Assets_Load: enrols weapon models for the world shader
     Assets_Load();
     Render_LoadZombieAnim();        // shared rigged zombie.glb (skinned shader from Assets_Load)
     Viewmodel_LoadArms();           // shared first-person arms (non-pistol guns bolt onto hand.R)

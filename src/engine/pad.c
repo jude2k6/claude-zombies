@@ -51,3 +51,84 @@ bool Pad_TriggerR(void) {
     if (!IsGamepadAvailable(PAD_ID)) return false;
     return GetGamepadAxisMovement(PAD_ID, GAMEPAD_AXIS_RIGHT_TRIGGER) > padTriggerThresh;
 }
+
+// ---------------------------------------------------------------------------
+// Engine input action map — implementation
+// ---------------------------------------------------------------------------
+
+// Sane defaults: mouse sensitivity in pixels-to-radians, pad in radians/sec.
+#define ENG_DEFAULT_MOUSE_SENS  0.0015f
+#define ENG_DEFAULT_PAD_SENS    1.8f
+
+typedef struct {
+    int key;        // raylib KEY_* or -1
+    int padButton;  // GAMEPAD_BUTTON_* or -1
+} ActionBind;
+
+static ActionBind s_binds[ENG_MAX_ACTIONS];
+static float      s_mouseSens = ENG_DEFAULT_MOUSE_SENS;
+static float      s_padSens   = ENG_DEFAULT_PAD_SENS;
+
+void Eng_InputBind(Action a, int key, int padButton) {
+    if (a < 0 || a >= ENG_MAX_ACTIONS) return;
+    // Callers pass -1 for "none"; normalise to 0 (KEY_NULL / GAMEPAD_BUTTON_UNKNOWN).
+    s_binds[a].key       = (key       < 0) ? 0 : key;
+    s_binds[a].padButton = (padButton < 0) ? 0 : padButton;
+}
+
+bool Eng_InputPressed(Action a) {
+    if (a < 0 || a >= ENG_MAX_ACTIONS) return false;
+    int k = s_binds[a].key;
+    // KEY_NULL == 0 and GAMEPAD_BUTTON_UNKNOWN == 0 are the unbound sentinels.
+    if (k > 0 && IsKeyPressed(k)) return true;
+    int b = s_binds[a].padButton;
+    if (b > 0 && IsGamepadAvailable(PAD_ID) && IsGamepadButtonPressed(PAD_ID, b)) return true;
+    return false;
+}
+
+bool Eng_InputDown(Action a) {
+    if (a < 0 || a >= ENG_MAX_ACTIONS) return false;
+    int k = s_binds[a].key;
+    if (k > 0 && IsKeyDown(k)) return true;
+    int b = s_binds[a].padButton;
+    if (b > 0 && IsGamepadAvailable(PAD_ID) && IsGamepadButtonDown(PAD_ID, b)) return true;
+    return false;
+}
+
+Vector2 Eng_InputMoveAxis(void) {
+    Vector2 v = { 0.0f, 0.0f };
+    if (Pad_Connected()) {
+        // Left stick: x = strafe, y = forward (stick Y is inverted: up = -1).
+        v.x = Pad_StickX(0);
+        v.y = -Pad_StickY(0);
+    } else {
+        if (IsKeyDown(KEY_D)) v.x += 1.0f;
+        if (IsKeyDown(KEY_A)) v.x -= 1.0f;
+        if (IsKeyDown(KEY_W)) v.y += 1.0f;
+        if (IsKeyDown(KEY_S)) v.y -= 1.0f;
+        // Clamp diagonal to unit magnitude.
+        float len = sqrtf(v.x * v.x + v.y * v.y);
+        if (len > 1.0f) { v.x /= len; v.y /= len; }
+    }
+    return v;
+}
+
+Vector2 Eng_InputLookDelta(void) {
+    Vector2 d = { 0.0f, 0.0f };
+    if (Pad_Connected()) {
+        // Right stick gives a rate; scale by a fixed dt proxy of GetFrameTime().
+        float dt = GetFrameTime();
+        d.x = Pad_StickX(1) * s_padSens * dt;
+        d.y = Pad_StickY(1) * s_padSens * dt;
+    } else {
+        Vector2 md = GetMouseDelta();
+        d.x = md.x * s_mouseSens;
+        d.y = md.y * s_mouseSens;
+    }
+    return d;
+}
+
+void Eng_InputSetLookSensitivity(float mouse, float pad) {
+    s_mouseSens = mouse;
+    s_padSens   = pad;
+}

@@ -39,4 +39,43 @@ bool  Pad_Pressed(int btn);
 bool  Pad_TriggerL(void);
 bool  Pad_TriggerR(void);
 
+// ---------------------------------------------------------------------------
+// Engine input action map (Phase 2 of the engine/game split).
+//
+// The engine owns the binding table; the game assigns Action ids and meaning.
+// An Action is just an int chosen by the game — the engine assigns no names.
+// The map supports up to ENG_MAX_ACTIONS distinct actions.
+//
+// Typical usage:
+//   Eng_InputBind(ACT_FIRE, KEY_SPACE, PAD_RT_BTN);
+//   if (Eng_InputPressed(ACT_FIRE)) { ... }
+// ---------------------------------------------------------------------------
+
+#define ENG_MAX_ACTIONS 64
+
+// Opaque integer id chosen by the game.  The engine does not enumerate names.
+typedef int Action;
+
+// Bind a raylib KEY_* and/or GAMEPAD_BUTTON_* to an action.
+// Pass -1 for "none" on either slot.
+void    Eng_InputBind(Action a, int key, int padButton);
+
+// True on the first frame the action becomes active (edge trigger).
+bool    Eng_InputPressed(Action a);
+
+// True for every frame the action is held.
+bool    Eng_InputDown(Action a);
+
+// Resolved movement axis: x = strafe, y = forward, each in [-1, 1].
+// Uses WASD when no pad is connected; left stick otherwise.
+Vector2 Eng_InputMoveAxis(void);
+
+// Look delta this frame: x = yaw, y = pitch.
+// Uses mouse delta (scaled by mouse sensitivity) or right stick (scaled by
+// pad sensitivity), whichever source has non-zero input.
+Vector2 Eng_InputLookDelta(void);
+
+// Override the default look sensitivities.
+void    Eng_InputSetLookSensitivity(float mouse, float pad);
+
 #endif

@@ -70,6 +70,7 @@ add_executable(shooter
     src/engine/particles.c
     src/engine/anim.c
     src/engine/gfx.c
+    src/engine/app.c
 )
 target_include_directories(shooter PRIVATE
     ${CMAKE_SOURCE_DIR}/src

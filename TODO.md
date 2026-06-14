@@ -275,6 +275,15 @@ connectivity auditor). Remaining work is authoring + per-entity wiring:
       (pins at 1.0 while downed).
 
 ### Map format / engine integration
+- [x] **Multi-floor / sector map format** — region-centric `SECTOR`/`RAMP`
+      blocks (entities derive Y from their sector); `Level_FloorHeightAt`
+      player+enemy floor snap, floor-slab bullet collision, cross-floor
+      zombie nav. Done; verified by `--validate`/`--map-roundtrip`/
+      `--sim-navtest`/`--screenshot-map`.
+- [ ] **Region-BFS nav** — `RAMP … LINK a b` edges are stored but the AI
+      still uses the *greedy* `CrossFloorGoal`; wire a real BFS over the
+      sector link graph (docs/multi-floor-maps.md §5) to fix greedy
+      dead-ends on down-then-up routes.
 - [ ] **`LIGHTS x y z r g b range`** in `.map` — per-map placed lights;
       pass an array of N to the lit shader.
 - [ ] **`sky_tint` → `sky.fs`** — already parses, just needs the uniform

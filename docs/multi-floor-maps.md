@@ -8,9 +8,11 @@
 >   (within `STEP_UP_HEIGHT`), with an implicit Y=0 ground plane fallback so
 >   flat maps are unchanged. `player.c` ground snap uses it (stairs auto-climb,
 >   stacked floors resolve to the right one).
-> - MapDoc `FLOOR x z sx sz y` (flat) / `FLOOR x z sx sz yLow yHigh X|Z` (ramp)
->   entries: parsed, saved (canonical round-trip), `MapDoc_Equal`, and
->   instantiated into `g_world.floors`.
+> - Map data is the region-centric **sector model** (see the dedicated note
+>   below and `data/maps/default.map`'s header): `SECTOR`/`RAMP` blocks, every
+>   entity belongs to a sector and derives its Y from it, `RAMP … LINK a b`
+>   records nav edges. Parsed, saved (canonical round-trip), `MapDoc_Equal`,
+>   and instantiated into `g_world.floors` (elevated sectors + ramps).
 > - Rendering of decks (textured top + slab body) and ramps (sloped quad) in
 >   `render.c DrawArena`.
 > - `data/maps/multifloor.map` demo (ground + overlapping Y4 deck + ramp + Y8

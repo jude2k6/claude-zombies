@@ -660,13 +660,17 @@ Headline changes since the previous handoff:
 - **`data/shaders/sky.{vs,fs}`** — procedural night sky: horizon→zenith
   gradient, faint warm horizon glow, hash-based stable star field. No
   texture asset required.
-- **New map format** in `data/maps/*.map`. Compact `WALL x1 z1 x2 z2
-  [DOOR center width cost [AS name]]`, symbolic `+x/-x/+z/-z`
-  directions, `WINDOW … LOCKED_BY <door_name>`, `OBSTACLE x z sx sz
-  [h]` (no more y/sy boilerplate), `ROOM <name> … END` blocks,
-  `ATMOSPHERE { fog R G B start end; sky_tint R G B; music name } END`,
-  `PROP <name> x z [yaw d] [scale s]`. All three shipped maps already
-  converted.
+- **Sector map format** in `data/maps/*.map` (region-centric; see
+  `data/maps/default.map`'s header for the full grammar). A map is a list
+  of `SECTOR <name> x z sx sz y` (flat floor at height `y`) and
+  `RAMP <name> x z sx sz yLow yHigh X|Z [LINK a b] … END` (slope/stair +
+  AI nav edge) blocks; every placed entity (`SPAWN`, `WALL … [DOOR … AS
+  name]`, `WINDOW … LOCKED_BY`, `OBSTACLE x z sx sz [h]`, `WALLBUY`,
+  `PERK`, `PAP`, `MBOX`, `PROP`) lives inside a sector and derives its
+  floor Y from it, so overlapping floors are unambiguous. Plus top-level
+  `ATMOSPHERE`/`TEXTURES` blocks and optional `ARENA halfX halfZ`. In
+  memory: `MapDoc.sectors[]` + a `sectorId` on each entity (no more flat
+  2D entities or `ROOM` blocks). All shipped maps converted.
 - **`./build/shooter --validate path/to/map.map`** — parses without
   opening a window, prints line-numbered errors, exits 0 or 1. Hook it
   into an editor save action.

@@ -169,22 +169,29 @@ conventions, gotchas) and `TODO.md` (live punch list).
 
 ## Maps
 
-Maps live in `data/maps/*.map` (`default`, `nacht`, `factory`). The format
-is a compact text grammar — one entry per line, `#` comments — so adding a
-map is just copying a file and editing it:
+Maps live in `data/maps/*.map` (`default`, `nacht`, `factory`, `multifloor`).
+The format is a compact text grammar — one entry per line, `#` comments. A map
+is a set of **sectors** (flat floor areas at a height) joined by **ramps**;
+every placed entity lives inside a sector and takes its floor height from it,
+so vertical / overlapping floors just work:
 
 ```
-SPAWN    x z
-WALL     x1 z1 x2 z2 [DOOR center width cost [AS name]]
-WINDOW   x z <+x|-x|+z|-z> [LOCKED_BY door_name]
-OBSTACLE x z sx sz [h]
-PROP     <name> x z [yaw d] [scale s]
-WALLBUY  x z <+x|-x|+z|-z> PISTOL|SMG|SHOTGUN|RIFLE|RAYGUN
-PERK     x z JUG|SPEED|DTAP|STAMIN
-PAP      x z
-MBOX     x z
-ROOM <name> ... END
 ATMOSPHERE { fog R G B start end; sky_tint R G B; music name } END
+TEXTURES   { floor/ground/wall_ext/wall_int/ceiling <name> } END
+ARENA    halfX halfZ                                   # optional, default 40 40
+
+SECTOR <name> x z sx sz y                              # flat floor at height y
+RAMP   <name> x z sx sz yLow yHigh X|Z [LINK a b]      # slope/stair + nav edge
+    SPAWN    x z
+    WALL     x1 z1 x2 z2 [DOOR center width cost [AS name]] [TEX name]
+    WINDOW   x z <+x|-x|+z|-z> [LOCKED_BY door_name]
+    OBSTACLE x z sx sz [h] [TEX name]
+    PROP     <name> x z [yaw d] [scale s]
+    WALLBUY  x z <+x|-x|+z|-z> PISTOL|SMG|SHOTGUN|RIFLE|RAYGUN
+    PERK     x z JUG|SPEED|DTAP|STAMIN
+    PAP      x z
+    MBOX     x z
+END
 ```
 
 Validate a map without launching the game (line-numbered errors, exit 0/1):

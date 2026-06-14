@@ -1,54 +1,78 @@
 # Engine / Game Separation — Design & Plan
 
-> ## ▶ Resume here (state as of commit `d70aea9`+)
-> Everything below "Progress" is current. Tree is clean and green; build runs
-> `seam-check` and a pre-commit hook enforces the §2 rule
-> (`git config core.hooksPath scripts/hooks` if cloning fresh).
+> ## ▶ DONE — the §15 definition of done is met (commit `6ae27ce`)
+> The engine/game split is complete. The tree is `src/engine/` (a reusable
+> static `libengine.a`) + `src/game/` (rules + content linking it). Build runs
+> `seam-check`, a pre-commit hook enforces the §2 rule
+> (`git config core.hooksPath scripts/hooks` if cloning fresh), and CI
+> (`.github/workflows/ci.yml`) runs the seam check + build + `--validate` +
+> `--sim-tick` on every map.
+>
+> **§15 done-criteria — all met:**
+> 1. ✅ Seam grep returns nothing (`scripts/check-seam.sh`); no `src/engine/`
+>    file includes a game header.
+> 2. ✅ `src/engine/` builds into `libengine.a` with **zero game sources**
+>    (`audio net mapdoc pad fx decals particles anim gfx app`); the `shooter`
+>    executable links it.
+> 3. ✅ A `World` is instantiated from a `MapDoc` and `Game_Tick`'d with **no
+>    window** — `./build/shooter --sim-tick <map> [frames]` (devtools.c).
+> 4. ✅ `main()` is 10 lines and lives in `src/game/main.c`.
+> 5. ✅ No file outside `src/engine/` includes `rlgl.h`; no engine file includes
+>    a game header.
 >
 > **Build + verify loop:**
 > ```
-> cmake --build build -j                       # seam-check runs first, then compiles
-> ./build/shooter --sim-tick data/maps/nacht.map   # §15 litmus: headless tick, NO window
-> ./build/shooter --screenshot-zombies         # exercises g_world.enemies
-> ./build/shooter --screenshot-coop            # g_world.players[] + round state
-> timeout 5 ./build/shooter                    # exit 124 = ran clean
+> cmake --build build -j                            # seam-check → libengine.a → shooter
+> ./build/shooter --sim-tick data/maps/nacht.map    # §15 litmus: headless tick, NO window
+> ./build/shooter --screenshot-zombies              # g_world.enemies render path
+> ./build/shooter --screenshot-coop                 # g_world.players[] + round state
+> timeout 5 ./build/shooter                         # exit 124 = ran clean
 > ```
 >
-> **✅ Phase 0 state relocation COMPLETE.** All game state now lives in `g_world`
-> (`src/world.{h,c}`). Final slice (`players[]` + `netMode`, commit `d70aea9`):
-> `players[]` collides with the `SerPlayer players[]` field in `PktSnapshotHeader`,
-> so it's accessed explicitly as `g_world.players` (lookbehind perl over all
-> game `.c`, then `protocol.c` hand-fixed so `hdr->players` / the struct field
-> stay bare); `netMode` is collision-free so it's macro-aliased. Earlier slices:
-> all level state (`ef90e9e`, `714cd20`), entity arrays + round/power-up timers
-> (`059b638`, `e02f621`).
+> **How each phase landed:**
+> - **Phase 0 (state)** — all game state in `g_world` (`src/game/world.{h,c}`):
+>   level state (`ef90e9e`,`714cd20`), entities + round/power-up timers
+>   (`059b638`,`e02f621`), `players[]` + `netMode` (`d70aea9`). `players[]`
+>   collides with `SerPlayer players[]` in `PktSnapshotHeader`, so it's explicit
+>   `g_world.players` (lookbehind perl + `protocol.c` hand-fix); `netMode` is
+>   macro-aliased. `g_world` stays the singleton — the headless litmus is met
+>   without threading a `World *` through ~290 sites, so that churn was skipped.
+> - **Phase 0 litmus** (`341d7ea`) — `--sim-tick` runs the full sim with no GL.
+> - **Phase 5 (render seam)** — `engine/gfx.{c,h}` is a thin facade over rlgl
+>   (`d31bb0e`); `render.c`/`viewmodel.c`/`assets.c` route every `rl*` call
+>   through it (`90492b9`), so rlgl is engine-only. (Pragmatic facade, not the
+>   full §8 `DrawItem` submission — see "Open / deferred" below.)
+> - **Phase 6 (main flip)** — `engine/app.c` owns the window, frame loop, time,
+>   raygui/audio init, and `Begin/EndDrawing`; the game is a `GameModule` vtable
+>   (`init/frame/draw/shutdown`); `main()` is 10 lines (`4c0cabd`).
+> - **Phase 7 (dir split)** — game TUs → `src/game/`, engine → `libengine.a`,
+>   `decals` dropped its last `types.h` dep, CI added (`6ae27ce`).
+> - Phases 1/3/7a (leak inversion, clean-module relocation, seam enforcement)
+>   and Phase 4's §2 leak (assets→weapons) landed earlier.
 >
-> **✅ §15 headless-tick litmus MET.** `--sim-tick <map> [frames]` (in
-> `devtools.c`) instantiates the World from a MapDoc and runs the full `Game_Tick`
-> with **no `InitWindow` / no GL context** — proving the sim no longer depends on
-> the renderer. The sim path (`Game_Tick`→enemies/bullets/throwables/weapons/perks)
-> has zero GL calls; map parsing is pure (texture-name lookups resolve to -1 with
-> no asset cache). Passes on all four shipped maps (zombies spawn + walk headless).
-> This is the proof that supports keeping `g_world` as the singleton rather than
-> threading a `World *` param through ~290 call sites — the litmus is achieved
-> without it, so the macro/`g_world.X` access pattern stays.
->
-> **Next slice — Phase 2** (fold gamepad `Bind_*` + movement/look into the engine
-> action map), then Phase 4 (content registry → `engine/content`), Phase 5 (render
-> seam), Phase 6 (`main.c` → `engine/app.c` + GameModule), Phase 7 (dir split +
-> `libengine.a` + CI grep). Techniques for any future state relocation:
-> 1. *collision-free name* → `World` member + object-like alias macro in `world.h`.
->    Safe ONLY if never a struct field/local (`grep -rhoE '[.>]NAME\b' src/*.c`).
-> 2. *collider* → `World` member, no macro; lookbehind perl
->    `s/(?<![.>\w])NAME\b/g_world.NAME/g`, hand-fix files where a `hdr->NAME` /
->    struct-field declaration shares the namespace (e.g. `protocol.c`).
+> **Open / deferred (NOT §15 blockers):**
+> - **Phase 2 gamepad fold-in** — keyboard+mouse are on the engine action map
+>   (`Eng_Input*`); the configurable `Bind_*` gamepad layer is still queried in
+>   parallel at each site (`Eng_InputPressed(a) || Bind_Pressed(a)`). Folding the
+>   rebindable pad bindings into the engine map needs the game to re-`Eng_InputBind`
+>   on every rebind; behaviour-sensitive and only gamepad-playtest-verifiable.
+> - **Phase 4 full content registry** — handle-based `Eng_LoadModel/Texture` with
+>   dedup + game-registered `.weapon`/`.map` parsers (§6/§11). `assets.c` stays
+>   game-side (it owns the `PropId` list) and loads via high-level raylib; it is
+>   rlgl-free so it does not block §15.
+> - **Phase 5 full submission (§8)** — the `RenderFrame`/`DrawItem` model. The
+>   facade meets the rlgl criterion; full submission would let a second renderer
+>   backend touch only `engine/render`. Bigger, screenshot-only-verifiable.
+> - **`types.h` split (§13)** — still one header in `src/game/`; the engine no
+>   longer depends on it at all.
 >
 > **Subagent note:** worktree agents keep forking from stale bases — only spawn
 > them for additive, independent, green-building units, tell them to rebase onto
 > main first, and always `git diff <merge-base> <branch>` before merging.
 
-Status: **in progress**. This is the target architecture and the incremental
-path to it. The goal is a clean, reusable **engine** that owns
+Status: **core split DONE (§15 met)**; the items under "Open / deferred" above
+are optional polish. This is the target architecture and the path that was
+taken to it. The goal was a clean, reusable **engine** that owns
 
 > **Progress (2026-06-14)**
 > - ✅ **Phase 5 start (fx submission, §6)** — generic game-agnostic

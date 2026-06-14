@@ -148,14 +148,21 @@ so the cheats won't have a real effect.
 ## Layout
 
 ```
-CMakeLists.txt        FetchContent for raylib / raygui / enet, per-OS link bits
-src/main.c            entry + main loop only
-src/types.h           shared structs / enums / constants
-src/{level,player,weapons,perks,entities,interact,game}  simulation
-src/{render,viewmodel,hud,menu,assets,decals,anim,fx}    presentation
-src/devtools                                             dev/debug CLI modes
-src/{net,protocol}    networking (enet wrapper + snapshot serialization)
-src/{audio,pad,settings}                                 sfx, gamepad, bindings
+CMakeLists.txt        FetchContent for raylib / raygui / enet; builds libengine.a + shooter
+src/engine/           reusable, game-clean runtime → static libengine.a
+  app                 window, frame loop, time, GameModule host
+  gfx                 low-level GL facade (rlgl lives ONLY here)
+  net mapdoc          enet transport + generic map document
+  anim particles decals fx   skeletal anim, particles, decals, camera shake
+  audio pad           mixer (event-driven) + input action map
+src/game/             rules + content; links libengine.a
+  main.c              ~10 lines: Eng_Run(Game_Module())
+  world.{c,h}         the World struct (all game state, g_world)
+  types.h             shared game structs / enums / constants
+  level player weapons perks entities interact game   simulation
+  render viewmodel hud menu assets audio_director      presentation
+  protocol            snapshot (de)serialization (the wire schema)
+  settings devtools   bindings persistence + dev/debug CLI modes
 data/maps/*.map       map definitions (compact text grammar)
 data/models/          props + rigged glTF models (+ ASSETS.md spec)
 data/weapons/<name>/  per-weapon .weapon defs + models (single source of

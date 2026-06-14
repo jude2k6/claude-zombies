@@ -12,6 +12,35 @@ and **enet 1.3.18** (all via CMake `FetchContent`). Host-authoritative
 
 Repo: `git@github.com:jude2k6/claude-zombies.git` · branch: `main`.
 
+## ✅ DONE (2026-06-15) — Engine/game split COMPLETE (§15 met)
+
+The `docs/engine-game-separation.md` plan reached its definition of done. The
+source tree is now **`src/engine/`** (a reusable, game-clean static
+**`libengine.a`**) + **`src/game/`** (rules + content that links it).
+
+- **All file paths in the architecture table below are now `src/engine/<x>` or
+  `src/game/<x>`** (everything that was bare `src/<x>` moved into `src/game/`;
+  the engine modules are `app gfx audio net mapdoc pad fx decals particles
+  anim`). Responsibilities per file are unchanged.
+- **`libengine.a`** (CMake `add_library(engine …)`) contains **zero** game
+  sources; `shooter` links it. Link-time seam enforcement on top of the grep.
+- **`src/engine/app.{c,h}`** owns `main()`'s body — window, frame loop, time,
+  raygui+audio init, the `BeginDrawing/EndDrawing` bookends — and hosts a
+  **`GameModule`** vtable. `src/game/main.c` is ~10 lines:
+  `Eng_Run(&cfg, Game_Module())`.
+- **`src/engine/gfx.{c,h}`** is the low-level GL facade; **`rlgl.h` is included
+  ONLY inside `src/engine/`** now. Game render code (`render.c`, `viewmodel.c`,
+  `assets.c`) calls `Eng_Gfx*`.
+- **Headless sim:** `./build/shooter --sim-tick <map> [frames]` ticks the full
+  `Game_Tick` with no window / no GL (the §15 litmus). CI
+  (`.github/workflows/ci.yml`) runs seam-check + build + `--validate` +
+  `--sim-tick` on every map.
+- **Deferred (optional, NOT §15 blockers):** the gamepad `Bind_*` fold-in into
+  the engine action map (keyboard/mouse already migrated); the full handle-based
+  content registry; the `RenderFrame`/`DrawItem` submission model (the facade
+  meets the rlgl criterion); the `types.h` split. See the engine doc's "Open /
+  deferred" list.
+
 ## ✅ DONE (2026-06-14) — MP5 gripping hands + higher-poly arms + correct reload
 
 Follow-up pass fixing what Jude flagged on the shipped MP5 viewmodel: the reload

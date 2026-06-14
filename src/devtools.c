@@ -91,17 +91,17 @@ static int Dev_ScreenshotViewmodels(void) {
     Level_Build();
 
     localPlayerIdx = 0;
-    for (int i = 0; i < NET_MAX_PLAYERS; i++) memset(&players[i], 0, sizeof players[i]);
-    players[0].active = true;
-    players[0].alive = true;
-    players[0].pos = (Vector3){ 0, PLAYER_EYE, 0 };
-    players[0].yaw = 0.0f;
-    players[0].pitch = 0.0f;
-    players[0].currentSlot = 0;
+    for (int i = 0; i < NET_MAX_PLAYERS; i++) memset(&g_world.players[i], 0, sizeof g_world.players[i]);
+    g_world.players[0].active = true;
+    g_world.players[0].alive = true;
+    g_world.players[0].pos = (Vector3){ 0, PLAYER_EYE, 0 };
+    g_world.players[0].yaw = 0.0f;
+    g_world.players[0].pitch = 0.0f;
+    g_world.players[0].currentSlot = 0;
 
     Camera cam = {
-        .position   = players[0].pos,
-        .target     = Vector3Add(players[0].pos, Player_LookDir(0, 0)),
+        .position   = g_world.players[0].pos,
+        .target     = Vector3Add(g_world.players[0].pos, Player_LookDir(0, 0)),
         .up         = (Vector3){ 0, 1, 0 },
         .fovy       = 75.0f,
         .projection = CAMERA_PERSPECTIVE,
@@ -113,10 +113,10 @@ static int Dev_ScreenshotViewmodels(void) {
                     WEAPONS[wi].idName ? WEAPONS[wi].idName : "?");
             continue;
         }
-        players[0].inventory[0].weaponIdx = wi;
-        players[0].inventory[0].owned = true;
-        players[0].inventory[0].ammo = WEAPONS[wi].magSize;
-        players[0].inventory[0].reserve = WEAPONS[wi].reserveMax;
+        g_world.players[0].inventory[0].weaponIdx = wi;
+        g_world.players[0].inventory[0].owned = true;
+        g_world.players[0].inventory[0].ammo = WEAPONS[wi].magSize;
+        g_world.players[0].inventory[0].reserve = WEAPONS[wi].reserveMax;
 
         // Render_World3D activates the world shader and draws the
         // viewmodel inside it — so we get lit materials instead of
@@ -170,9 +170,9 @@ static int Dev_ScreenshotCoop(void) {
     Level_Build();
 
     localPlayerIdx = 0;
-    for (int i = 0; i < NET_MAX_PLAYERS; i++) memset(&players[i], 0, sizeof players[i]);
-    players[0].active = true; players[0].alive = true;
-    players[0].pos = (Vector3){ 0, PLAYER_EYE, 9 };  // not drawn (local)
+    for (int i = 0; i < NET_MAX_PLAYERS; i++) memset(&g_world.players[i], 0, sizeof g_world.players[i]);
+    g_world.players[0].active = true; g_world.players[0].alive = true;
+    g_world.players[0].pos = (Vector3){ 0, PLAYER_EYE, 9 };  // not drawn (local)
 
     // Camera looks down -Z at the teammates clustered near the origin.
     Camera cam = {
@@ -192,53 +192,53 @@ static int Dev_ScreenshotCoop(void) {
     };
     for (int s = 0; s < 4; s++) {
         // reset all teammate slots inactive each scene
-        for (int i = 1; i < NET_MAX_PLAYERS; i++) memset(&players[i], 0, sizeof players[i]);
+        for (int i = 1; i < NET_MAX_PLAYERS; i++) memset(&g_world.players[i], 0, sizeof g_world.players[i]);
         // The noclip scene shows YOUR OWN body left behind: move the local
         // player into view, flip noclipMode on so it's drawn + the
         // first-person viewmodel is suppressed. Restored after the shot.
         noclipMode = (s == 3);
         if (s == 3) {
-            players[0].pos = (Vector3){ 0, PLAYER_EYE, 0 };
-            players[0].yaw = YAW;
-            players[0].inventory[0].owned = true;  // would show a gun if not noclip
+            g_world.players[0].pos = (Vector3){ 0, PLAYER_EYE, 0 };
+            g_world.players[0].yaw = YAW;
+            g_world.players[0].inventory[0].owned = true;  // would show a gun if not noclip
         } else {
-            players[0].pos = (Vector3){ 0, PLAYER_EYE, 9 };  // behind cam (not drawn)
+            g_world.players[0].pos = (Vector3){ 0, PLAYER_EYE, 9 };  // behind cam (not drawn)
         }
         for (int f = 0; f < scenes[s].frames; f++) {
             float dt = GetFrameTime(); if (dt <= 0) dt = 1.0f/60.0f;
             if (s == 0) {
                 // walker (slot1), runner (slot2), idler (slot3)
                 if (f == 0) {
-                    players[1].active=players[1].alive=true; players[1].yaw=YAW;
-                    players[1].pos=(Vector3){-2.2f,PLAYER_EYE,0};
-                    players[2].active=players[2].alive=true; players[2].yaw=YAW;
-                    players[2].pos=(Vector3){-3.6f,PLAYER_EYE,1.4f};
-                    players[3].active=players[3].alive=true; players[3].yaw=YAW;
-                    players[3].pos=(Vector3){2.2f,PLAYER_EYE,0.4f};
+                    g_world.players[1].active=g_world.players[1].alive=true; g_world.players[1].yaw=YAW;
+                    g_world.players[1].pos=(Vector3){-2.2f,PLAYER_EYE,0};
+                    g_world.players[2].active=g_world.players[2].alive=true; g_world.players[2].yaw=YAW;
+                    g_world.players[2].pos=(Vector3){-3.6f,PLAYER_EYE,1.4f};
+                    g_world.players[3].active=g_world.players[3].alive=true; g_world.players[3].yaw=YAW;
+                    g_world.players[3].pos=(Vector3){2.2f,PLAYER_EYE,0.4f};
                 }
-                players[1].pos.x += 7.0f * dt;    // walk speed
-                players[2].pos.x += 11.0f * dt;   // sprint speed
+                g_world.players[1].pos.x += 7.0f * dt;    // walk speed
+                g_world.players[2].pos.x += 11.0f * dt;   // sprint speed
             } else if (s == 1) {
                 // reloading (slot1), downed (slot2), dead (slot3)
                 if (f == 0) {
-                    players[1].active=players[1].alive=true; players[1].yaw=YAW;
-                    players[1].pos=(Vector3){-2.4f,PLAYER_EYE,0};
-                    players[1].inventory[0].owned=true;
-                    players[2].active=players[2].alive=true; players[2].downed=true;
-                    players[2].yaw=YAW; players[2].pos=(Vector3){0,PLAYER_EYE,0.3f};
-                    players[3].active=true; players[3].alive=false;
-                    players[3].yaw=YAW; players[3].pos=(Vector3){2.4f,PLAYER_EYE,0.3f};
+                    g_world.players[1].active=g_world.players[1].alive=true; g_world.players[1].yaw=YAW;
+                    g_world.players[1].pos=(Vector3){-2.4f,PLAYER_EYE,0};
+                    g_world.players[1].inventory[0].owned=true;
+                    g_world.players[2].active=g_world.players[2].alive=true; g_world.players[2].downed=true;
+                    g_world.players[2].yaw=YAW; g_world.players[2].pos=(Vector3){0,PLAYER_EYE,0.3f};
+                    g_world.players[3].active=true; g_world.players[3].alive=false;
+                    g_world.players[3].yaw=YAW; g_world.players[3].pos=(Vector3){2.4f,PLAYER_EYE,0.3f};
                 }
-                players[1].inventory[0].reloadTimer = 1.5f;  // hold in reload
+                g_world.players[1].inventory[0].reloadTimer = 1.5f;  // hold in reload
             } else if (s == 2) {
                 // reviver (slot1) kneeling over a downed teammate (slot2)
                 if (f == 0) {
-                    players[1].active=players[1].alive=true; players[1].yaw=YAW;
-                    players[1].pos=(Vector3){-0.8f,PLAYER_EYE,0};
-                    players[2].active=players[2].alive=true; players[2].downed=true;
-                    players[2].yaw=YAW+PI*0.5f; players[2].pos=(Vector3){0.7f,PLAYER_EYE,0.2f};
+                    g_world.players[1].active=g_world.players[1].alive=true; g_world.players[1].yaw=YAW;
+                    g_world.players[1].pos=(Vector3){-0.8f,PLAYER_EYE,0};
+                    g_world.players[2].active=g_world.players[2].alive=true; g_world.players[2].downed=true;
+                    g_world.players[2].yaw=YAW+PI*0.5f; g_world.players[2].pos=(Vector3){0.7f,PLAYER_EYE,0.2f};
                 }
-                players[2].reviveAsTarget = 2.0f;  // being revived
+                g_world.players[2].reviveAsTarget = 2.0f;  // being revived
             }
             BeginDrawing();
             ClearBackground((Color){ 60, 65, 75, 255 });
@@ -271,9 +271,9 @@ static int Dev_ScreenshotPaP(void) {
     Level_Build();
 
     localPlayerIdx = 0;
-    for (int i = 0; i < NET_MAX_PLAYERS; i++) memset(&players[i], 0, sizeof players[i]);
-    players[0].active = true; players[0].alive = true;
-    players[0].pos = (Vector3){ 0, PLAYER_EYE, 6 };
+    for (int i = 0; i < NET_MAX_PLAYERS; i++) memset(&g_world.players[i], 0, sizeof g_world.players[i]);
+    g_world.players[0].active = true; g_world.players[0].alive = true;
+    g_world.players[0].pos = (Vector3){ 0, PLAYER_EYE, 6 };
 
     g_world.pap.pos = (Vector3){ 0, 0, 0 };           // bring it to the origin
     g_world.pap.ownerPlayer = 0; g_world.pap.slotInProgress = 0; g_world.pap.weaponIdx = W_RIFLE;
@@ -412,9 +412,9 @@ static int Dev_ScreenshotZombies(void) {
     Level_Build();
 
     localPlayerIdx = 0;
-    for (int i = 0; i < NET_MAX_PLAYERS; i++) memset(&players[i], 0, sizeof players[i]);
-    players[0].active = true; players[0].alive = true;
-    players[0].pos = (Vector3){ 0, PLAYER_EYE, 9 };   // behind camera (not drawn)
+    for (int i = 0; i < NET_MAX_PLAYERS; i++) memset(&g_world.players[i], 0, sizeof g_world.players[i]);
+    g_world.players[0].active = true; g_world.players[0].alive = true;
+    g_world.players[0].pos = (Vector3){ 0, PLAYER_EYE, 9 };   // behind camera (not drawn)
 
     // Clear all enemy slots.
     for (int i = 0; i < MAX_ENEMIES; i++) memset(&enemies[i], 0, sizeof enemies[i]);
@@ -491,9 +491,9 @@ static int Dev_ScreenshotParticles(void) {
     Level_Build();
 
     localPlayerIdx = 0;
-    for (int i = 0; i < NET_MAX_PLAYERS; i++) memset(&players[i], 0, sizeof players[i]);
-    players[0].active = true; players[0].alive = true;
-    players[0].pos = (Vector3){ 0, PLAYER_EYE, 9 };
+    for (int i = 0; i < NET_MAX_PLAYERS; i++) memset(&g_world.players[i], 0, sizeof g_world.players[i]);
+    g_world.players[0].active = true; g_world.players[0].alive = true;
+    g_world.players[0].pos = (Vector3){ 0, PLAYER_EYE, 9 };
 
     // Camera positioned to show all three effects at a closer range so the
     // billboard particles subtend enough pixels to be clearly visible.
@@ -562,11 +562,11 @@ static int Dev_ScreenshotPostFX(void) {
     Level_Build();
 
     localPlayerIdx = 0;
-    for (int i = 0; i < NET_MAX_PLAYERS; i++) memset(&players[i], 0, sizeof players[i]);
-    players[0].active = true; players[0].alive = true;
-    players[0].pos = (Vector3){ 0, PLAYER_EYE, 0 };
-    players[0].yaw = 0.0f;
-    players[0].pitch = 0.0f;
+    for (int i = 0; i < NET_MAX_PLAYERS; i++) memset(&g_world.players[i], 0, sizeof g_world.players[i]);
+    g_world.players[0].active = true; g_world.players[0].alive = true;
+    g_world.players[0].pos = (Vector3){ 0, PLAYER_EYE, 0 };
+    g_world.players[0].yaw = 0.0f;
+    g_world.players[0].pitch = 0.0f;
 
     Camera cam = {
         .position   = (Vector3){ 0, PLAYER_EYE, 5.0f },
@@ -634,9 +634,9 @@ static int Dev_ScreenshotMap(int argc, char **argv) {
     }
 
     localPlayerIdx = 0;
-    for (int i = 0; i < NET_MAX_PLAYERS; i++) memset(&players[i], 0, sizeof players[i]);
-    players[0].active = true; players[0].alive = true;
-    players[0].pos = (Vector3){ 0, PLAYER_EYE, 6 };
+    for (int i = 0; i < NET_MAX_PLAYERS; i++) memset(&g_world.players[i], 0, sizeof g_world.players[i]);
+    g_world.players[0].active = true; g_world.players[0].alive = true;
+    g_world.players[0].pos = (Vector3){ 0, PLAYER_EYE, 6 };
 
     // A 3/4 aerial that frames the whole arena, and a low angle that shows
     // floor elevation in profile. Targets the arena centre-ish.
@@ -686,10 +686,10 @@ static int Dev_SimNavtest(int argc, char **argv) {
 
     godMode = true;             // keep the test player alive while chased
     localPlayerIdx = 0;
-    for (int i = 0; i < NET_MAX_PLAYERS; i++) memset(&players[i], 0, sizeof players[i]);
-    players[0].active = true; players[0].alive = true;
+    for (int i = 0; i < NET_MAX_PLAYERS; i++) memset(&g_world.players[i], 0, sizeof g_world.players[i]);
+    g_world.players[0].active = true; g_world.players[0].alive = true;
     float deckSurf = Level_FloorHeightAt(15, -10, 100.0f);   // highest surface there
-    players[0].pos = (Vector3){ 15, deckSurf + PLAYER_EYE, -10 };
+    g_world.players[0].pos = (Vector3){ 15, deckSurf + PLAYER_EYE, -10 };
 
     Enemies_ClearAll();
     enemies[0] = (Enemy){

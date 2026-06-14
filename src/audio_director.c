@@ -25,7 +25,7 @@
 
 typedef struct {
     float   timer;        // time until next step is allowed
-    Vector3 lastPos;      // previous frame position (for remote players)
+    Vector3 lastPos;      // previous frame position (for remote g_world.players)
     bool    lastPosValid;
     int     variantIdx;   // rotates through STEP_VARIANTS
 } StepState;
@@ -199,16 +199,16 @@ void AudioDirector_Tick(Player *me) {
         lastPerks = mask;
         lastOnGround = me->onGround;
 
-        // Seed footstep last positions for all players.
+        // Seed footstep last positions for all g_world.players.
         for (int i = 0; i < NET_MAX_PLAYERS; i++) {
-            stepState[i].lastPos = players[i].pos;
-            stepState[i].lastPosValid = players[i].active;
+            stepState[i].lastPos = g_world.players[i].pos;
+            stepState[i].lastPosValid = g_world.players[i].active;
             stepState[i].timer = 0.0f;
             stepState[i].variantIdx = i % STEP_VARIANTS;
         }
-        // Seed reload state for all players.
+        // Seed reload state for all g_world.players.
         for (int i = 0; i < NET_MAX_PLAYERS; i++) {
-            reloadState[i].lastReloadTimer = players[i].inventory[players[i].currentSlot].reloadTimer;
+            reloadState[i].lastReloadTimer = g_world.players[i].inventory[g_world.players[i].currentSlot].reloadTimer;
             reloadState[i].magInPending    = false;
             reloadState[i].magInTimer      = 0.0f;
         }
@@ -340,7 +340,7 @@ void AudioDirector_Tick(Player *me) {
 
     // ---- per-player footsteps + two-stage reload -------------------------
     for (int i = 0; i < NET_MAX_PLAYERS; i++) {
-        Player *p = &players[i];
+        Player *p = &g_world.players[i];
         if (!p->active || !p->alive || p->downed) {
             // Keep last pos valid so there's no phantom step when they re-activate.
             stepState[i].lastPos = p->pos;
@@ -359,7 +359,7 @@ void AudioDirector_Tick(Player *me) {
             // Local player: moveBlend drives step speed; sprintBlend the cadence.
             speedH = p->moveBlend * BASE_MOVE_SPEED * (1.0f + 0.6f * p->sprintBlend);
         } else {
-            // Remote players: derive from pos delta.
+            // Remote g_world.players: derive from pos delta.
             float dx = p->pos.x - ss->lastPos.x;
             float dz = p->pos.z - ss->lastPos.z;
             speedH = sqrtf(dx * dx + dz * dz) / dt;
@@ -391,7 +391,7 @@ void AudioDirector_Tick(Player *me) {
                 float vol = isCrouching ? 0.28f : 0.42f;
                 Audio_Play(SFX_STEP0 + v, vol * duckMul, pitch);
             } else {
-                // Positional for remote players.
+                // Positional for remote g_world.players.
                 float vol, pan;
                 if (Audio_Positional(p->pos, 18.0f, &vol, &pan)) {
                     float finalVol = vol * 0.50f * duckMul;

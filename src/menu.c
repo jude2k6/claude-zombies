@@ -34,8 +34,6 @@ MapEntry mapList[MAP_LIST_MAX];
 int      mapListCount = 0;
 int      selectedMapIdx = 0;
 
-NetMode netMode = NET_SOLO;
-
 // ---- shared menu styling ------------------------------------------------
 #define MENU_GOLD  (Color){ 255, 206, 84,  255 }
 #define MENU_RED   (Color){ 222, 52,  52,  255 }
@@ -171,7 +169,7 @@ void Menu_ToggleFullscreenSafe(void) {
 void Menu_StartSoloGame(void) {
     netMode = NET_SOLO;
     localPlayerIdx = 0;
-    for (int i = 0; i < NET_MAX_PLAYERS; i++) memset(&players[i], 0, sizeof players[i]);
+    for (int i = 0; i < NET_MAX_PLAYERS; i++) memset(&g_world.players[i], 0, sizeof g_world.players[i]);
     LoadSelectedMap();
     Level_Reset();
     Player_ResetForGame(0, playerName);
@@ -194,7 +192,7 @@ void Menu_StartHosting(void) {
     }
     netMode = NET_HOST;
     localPlayerIdx = 0;
-    for (int i = 0; i < NET_MAX_PLAYERS; i++) memset(&players[i], 0, sizeof players[i]);
+    for (int i = 0; i < NET_MAX_PLAYERS; i++) memset(&g_world.players[i], 0, sizeof g_world.players[i]);
     Player_ResetForGame(0, playerName);
     gamePhase = GS_PRE_GAME;
     uiState = UI_HOST_LOBBY;
@@ -464,7 +462,7 @@ void Menu_DrawLobby(int sw, int sh, bool isHost) {
     DrawText(t, sw/2 - tw/2, 50, ts, RAYWHITE);
 
     char info[128];
-    snprintf(info, sizeof info, "Port %d  -  %d / %d players",
+    snprintf(info, sizeof info, "Port %d  -  %d / %d g_world.players",
              NET_PORT_DEFAULT, Player_ActiveCount(), NET_MAX_PLAYERS);
     int iw = MeasureText(info, 20);
     DrawText(info, sw/2 - iw/2, 108, 20, GRAY);
@@ -499,9 +497,9 @@ void Menu_DrawLobby(int sw, int sh, bool isHost) {
         DrawRectangle(sw/2 - 220, ry, 440, rowH - 6, (Color){25,30,40,255});
         DrawRectangle(sw/2 - 210, ry + 8, 20, 20, PLAYER_COLORS[i]);
         char line[64];
-        if (players[i].active) snprintf(line, sizeof line, "%s", players[i].name[0] ? players[i].name : "Player");
+        if (g_world.players[i].active) snprintf(line, sizeof line, "%s", g_world.players[i].name[0] ? g_world.players[i].name : "Player");
         else                   snprintf(line, sizeof line, "(empty)");
-        Color tc = players[i].active ? RAYWHITE : GRAY;
+        Color tc = g_world.players[i].active ? RAYWHITE : GRAY;
         DrawText(line, sw/2 - 180, ry + 8, 22, tc);
         if (i == localPlayerIdx) DrawText("(you)", sw/2 + 140, ry + 10, 18, YELLOW);
     }
@@ -531,7 +529,7 @@ void Menu_DrawPause(int sw, int sh) {
     int ts = 64; int tw = MeasureText(title, ts);
     DrawText(title, sw/2 - tw/2, sh/4, ts, RAYWHITE);
     if (netMode != NET_SOLO) {
-        const char *sub = "(other players keep playing)";
+        const char *sub = "(other g_world.players keep playing)";
         int sw2 = MeasureText(sub, 18);
         DrawText(sub, sw/2 - sw2/2, sh/4 + ts + 12, 18, GRAY);
     }
@@ -564,7 +562,7 @@ void Menu_DrawGameOver(int sw, int sh) {
     // Find MVP (highest points).
     int mvpIdx = -1, mvpPts = -1;
     for (int i = 0; i < NET_MAX_PLAYERS; i++)
-        if (players[i].active && players[i].points > mvpPts) { mvpPts = players[i].points; mvpIdx = i; }
+        if (g_world.players[i].active && g_world.players[i].points > mvpPts) { mvpPts = g_world.players[i].points; mvpIdx = i; }
 
     // Stats table
     int colW = 110;
@@ -586,8 +584,8 @@ void Menu_DrawGameOver(int sw, int sh) {
     int teamPoints = 0, teamFired = 0, teamHit = 0;
     int row = 0;
     for (int i = 0; i < NET_MAX_PLAYERS; i++) {
-        if (!players[i].active) continue;
-        Player *p = &players[i];
+        if (!g_world.players[i].active) continue;
+        Player *p = &g_world.players[i];
         int yr = y0 + 36 + row * 28;
         if (i == mvpIdx) DrawRectangle(x0 - 20, yr - 4, totalW + 40, 26, (Color){80, 60, 0, 120});
 

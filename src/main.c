@@ -63,14 +63,14 @@ static int Spectator_NextTeammate(int after) {
     for (int step = 1; step <= NET_MAX_PLAYERS; step++) {
         int idx = (after + step) % NET_MAX_PLAYERS;
         if (idx == localPlayerIdx) continue;
-        if (players[idx].active && players[idx].alive) return idx;
+        if (g_world.players[idx].active && g_world.players[idx].alive) return idx;
     }
     return -1;
 }
 
 static void Spectator_SnapTo(int idx) {
     if (idx < 0) return;
-    Player *t = &players[idx];
+    Player *t = &g_world.players[idx];
     Vector3 fwd = { sinf(t->yaw), 0, -cosf(t->yaw) };
     // 3rd-person-ish, behind their shoulder.
     specPos = (Vector3){ t->pos.x - fwd.x * 2.6f,
@@ -89,7 +89,7 @@ static void PollNetwork(void) {
         if (netMode == NET_HOST) {
             if (ev->kind == NEV_DISCONNECT) {
                 if (ev->peerIdx >= 0 && ev->peerIdx < NET_MAX_PLAYERS)
-                    players[ev->peerIdx].active = false;
+                    g_world.players[ev->peerIdx].active = false;
                 Protocol_HostSendLobby();
             } else if (ev->kind == NEV_RECEIVE) {
                 Protocol_HostHandlePacket(ev->peerIdx, ev->data, ev->len);
@@ -138,7 +138,7 @@ static void BindGameInputDefaults(void) {
 }
 
 static void HandleLocalActions(Player *me) {
-    // Downed players can't act. They lay there until revived or bled out.
+    // Downed g_world.players can't act. They lay there until revived or bled out.
     bool canAct = me->alive && !me->downed;
     bool kbdSwap  = Eng_InputPressed(BA_SWAP) && canAct;
     bool padSwap  = Bind_Pressed(BA_SWAP) && canAct;
@@ -231,7 +231,7 @@ int main(int argc, char **argv) {
     if (fullscreen && !IsWindowFullscreen()) Menu_ToggleFullscreenSafe();
     Level_Build();
     Menu_ScanMaps();
-    for (int i = 0; i < NET_MAX_PLAYERS; i++) memset(&players[i], 0, sizeof players[i]);
+    for (int i = 0; i < NET_MAX_PLAYERS; i++) memset(&g_world.players[i], 0, sizeof g_world.players[i]);
     Player_ResetForGame(0, playerName);
 
     Camera camera = { 0 };
@@ -280,7 +280,7 @@ int main(int argc, char **argv) {
 
         if (netMode != NET_SOLO) PollNetwork();
 
-        Player *me = &players[localPlayerIdx];
+        Player *me = &g_world.players[localPlayerIdx];
         Interact ix = { IK_NONE, -1, 0 };
 
         bool useFlyCam = (uiState == UI_PLAY) && (!me->alive || noclipMode);
@@ -350,7 +350,7 @@ int main(int argc, char **argv) {
             if (isHost) {
                 Game_Tick(dt);
                 if (godMode) {
-                    Player *gp = &players[localPlayerIdx];
+                    Player *gp = &g_world.players[localPlayerIdx];
                     gp->points = 999999;
                     gp->hp = Perk_EffMaxHP(gp);
                     gp->alive = true;

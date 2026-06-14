@@ -106,7 +106,7 @@ void Weapon_Fire(Player *p) {
     WeaponSlot *s = &p->inventory[p->currentSlot];
     if (!s->owned) return;
     if (s->reloadTimer > 0 || s->fireTimer > 0 || s->ammo <= 0) return;
-    if (PaP_SlotLocked((int)(p - players), p->currentSlot)) return;  // in the PaP machine
+    if (PaP_SlotLocked((int)(p - g_world.players), p->currentSlot)) return;  // in the PaP machine
 
     const WeaponDef *w = &WEAPONS[s->weaponIdx];
     Vector3 dir = Player_LookDir(p->yaw, p->pitch);
@@ -124,10 +124,10 @@ void Weapon_Fire(Player *p) {
     origin = Vector3Add(origin, Vector3Scale(right,  rightOff));
     origin = Vector3Add(origin, Vector3Scale(up,    -downOff));
     int dmg = Weapon_EffDamage(p, s);
-    int ownerIdx = (int)(p - players);
+    int ownerIdx = (int)(p - g_world.players);
     // Movement throws off accuracy: walking adds a little bloom, sprinting a
     // lot. ADS settles everything (and you can't sprint while aiming). For
-    // remote players on the host, moveBlend/sprintBlend stay 0 (local-only
+    // remote g_world.players on the host, moveBlend/sprintBlend stay 0 (local-only
     // fields), so their hip-fire isn't movement-penalised — same MP caveat as
     // the per-weapon recoil.
     float adsMul = p->adsHeld ? 0.25f : 1.0f;
@@ -200,7 +200,7 @@ void Weapon_Melee(Player *p) {
     p->meleeTimer = MELEE_COOLDOWN;
 
     Vector3 fwd = { sinf(p->yaw), 0, -cosf(p->yaw) };
-    int ownerIdx = (int)(p - players);
+    int ownerIdx = (int)(p - g_world.players);
     for (int i = 0; i < MAX_ENEMIES; i++) {
         if (!enemies[i].alive) continue;
         float dx = enemies[i].pos.x - p->pos.x;
@@ -216,13 +216,13 @@ void Weapon_Melee(Player *p) {
             enemies[i].dyingTimer = ENEMY_DEATH_WINDOW;
             enemies[i].alive = false;
             enemiesAlive--;
-            if (ownerIdx >= 0 && ownerIdx < NET_MAX_PLAYERS && players[ownerIdx].active) {
-                players[ownerIdx].points += MELEE_KILL_POINTS;
-                players[ownerIdx].kills++;
-                players[ownerIdx].meleeKills++;
+            if (ownerIdx >= 0 && ownerIdx < NET_MAX_PLAYERS && g_world.players[ownerIdx].active) {
+                g_world.players[ownerIdx].points += MELEE_KILL_POINTS;
+                g_world.players[ownerIdx].kills++;
+                g_world.players[ownerIdx].meleeKills++;
             }
-        } else if (ownerIdx >= 0 && ownerIdx < NET_MAX_PLAYERS && players[ownerIdx].active) {
-            players[ownerIdx].points += HIT_POINTS;
+        } else if (ownerIdx >= 0 && ownerIdx < NET_MAX_PLAYERS && g_world.players[ownerIdx].active) {
+            g_world.players[ownerIdx].points += HIT_POINTS;
         }
     }
 }

@@ -8,28 +8,27 @@
 #include <string.h>
 #include <math.h>
 
-Player players[NET_MAX_PLAYERS];
-// localPlayerIdx now lives in g_world (world.h).
+// players[] + localPlayerIdx now live in g_world (world.h).
 bool   godMode = false;
 bool   noclipMode = false;
 
 int Player_ActiveCount(void) {
     int n = 0;
-    for (int i = 0; i < NET_MAX_PLAYERS; i++) if (players[i].active) n++;
+    for (int i = 0; i < NET_MAX_PLAYERS; i++) if (g_world.players[i].active) n++;
     return n;
 }
 
 int Player_AliveActiveCount(void) {
     int n = 0;
-    for (int i = 0; i < NET_MAX_PLAYERS; i++) if (players[i].active && players[i].alive) n++;
+    for (int i = 0; i < NET_MAX_PLAYERS; i++) if (g_world.players[i].active && g_world.players[i].alive) n++;
     return n;
 }
 
 int Player_NearestAlive(Vector3 pos) {
     int best = -1; float bestD = 1e9f;
     for (int i = 0; i < NET_MAX_PLAYERS; i++) {
-        if (!players[i].active || !players[i].alive) continue;
-        float dx = players[i].pos.x - pos.x, dz = players[i].pos.z - pos.z;
+        if (!g_world.players[i].active || !g_world.players[i].alive) continue;
+        float dx = g_world.players[i].pos.x - pos.x, dz = g_world.players[i].pos.z - pos.z;
         float d = dx*dx + dz*dz;
         if (d < bestD) { bestD = d; best = i; }
     }
@@ -73,7 +72,7 @@ void Player_GiveStartingPistol(Player *p) {
 }
 
 void Player_ResetForGame(int idx, const char *name) {
-    Player *p = &players[idx];
+    Player *p = &g_world.players[idx];
     memset(p, 0, sizeof *p);
     p->active = true;
     p->alive = true;

@@ -358,7 +358,7 @@ static void HudDrawDamageDir(int cx, int cy, Player *me) {
 
 static void HudDrawScoreboard(int sw, int sh) {
     int rows = 0;
-    for (int i = 0; i < NET_MAX_PLAYERS; i++) if (players[i].active) rows++;
+    for (int i = 0; i < NET_MAX_PLAYERS; i++) if (g_world.players[i].active) rows++;
     if (rows == 0) return;
     int rowH = 32;
     int w = 720, h = 80 + rows * rowH;
@@ -374,8 +374,8 @@ static void HudDrawScoreboard(int sw, int sh) {
     DrawText("ACC %",     x + 580, hy, 18, GRAY);
     int row = 0;
     for (int i = 0; i < NET_MAX_PLAYERS; i++) {
-        if (!players[i].active) continue;
-        Player *p = &players[i];
+        if (!g_world.players[i].active) continue;
+        Player *p = &g_world.players[i];
         int yr = hy + 24 + row * rowH;
         Color tc = p->alive ? RAYWHITE : (Color){180, 80, 80, 255};
         DrawText(p->name[0] ? p->name : "Player", x + 20, yr, 20, tc);
@@ -586,16 +586,16 @@ void Hud_Draw(int sw, int sh, Player *me, Interact ix) {
         DrawRectangleLines(rx, ry, 210, 8 + actCount * rh, (Color){200,200,200,180});
         int row = 0;
         for (int i = 0; i < NET_MAX_PLAYERS; i++) {
-            if (!players[i].active) continue;
+            if (!g_world.players[i].active) continue;
             DrawRectangle(rx + 6, ry + 4 + row*rh + 4, 14, 14, PLAYER_COLORS[i]);
             char ln[64];
-            const char *suffix = players[i].downed ? "  (DOWN)" : (!players[i].alive ? "  (DEAD)" : "");
-            snprintf(ln, sizeof ln, "%s%s", players[i].name[0] ? players[i].name : "Player", suffix);
-            Color tc = (players[i].alive && !players[i].downed) ? RAYWHITE : (Color){220,90,90,255};
+            const char *suffix = g_world.players[i].downed ? "  (DOWN)" : (!g_world.players[i].alive ? "  (DEAD)" : "");
+            snprintf(ln, sizeof ln, "%s%s", g_world.players[i].name[0] ? g_world.players[i].name : "Player", suffix);
+            Color tc = (g_world.players[i].alive && !g_world.players[i].downed) ? RAYWHITE : (Color){220,90,90,255};
             DrawText(ln, rx + 26, ry + 4 + row*rh + 2, 16, tc);
             char hpStr[32];
-            if (players[i].downed) snprintf(hpStr, sizeof hpStr, "%.0fs", players[i].bleedTimer);
-            else                   snprintf(hpStr, sizeof hpStr, "%d", players[i].hp);
+            if (g_world.players[i].downed) snprintf(hpStr, sizeof hpStr, "%.0fs", g_world.players[i].bleedTimer);
+            else                   snprintf(hpStr, sizeof hpStr, "%d", g_world.players[i].hp);
             DrawText(hpStr, rx + 150, ry + 4 + row*rh + 2, 16, tc);
             row++;
         }
@@ -663,7 +663,7 @@ void Hud_Draw(int sw, int sh, Player *me, Interact ix) {
                 if (me->points < d->cost) promptColor = (Color){200,80,80,255};
             }
         } else if (ix.kind == IK_REVIVE) {
-            Player *t = &players[ix.idx];
+            Player *t = &g_world.players[ix.idx];
             border = (Color){80, 200, 80, 255};
             snprintf(prompt, sizeof prompt, "[Hold E]  REVIVE %s",
                      t->name[0] ? t->name : "teammate");
@@ -683,7 +683,7 @@ void Hud_Draw(int sw, int sh, Player *me, Interact ix) {
                 } else {
                     snprintf(prompt, sizeof prompt, "%s  -  waiting for %s",
                              w->name,
-                             players[g_world.mbox.ownerPlayer].name[0] ? players[g_world.mbox.ownerPlayer].name : "owner");
+                             g_world.players[g_world.mbox.ownerPlayer].name[0] ? g_world.players[g_world.mbox.ownerPlayer].name : "owner");
                     promptColor = GRAY;
                 }
             }
@@ -699,7 +699,7 @@ void Hud_Draw(int sw, int sh, Player *me, Interact ix) {
                 float p = g_world.windows[ix.idx].repairProgress;
                 if (p > 0) GuiProgressBar((Rectangle){cx - tw/2, by + 36, tw, 8}, NULL, NULL, &p, 0.0f, 1.0f);
             } else if (ix.kind == IK_REVIVE) {
-                float p = players[ix.idx].reviveAsTarget;
+                float p = g_world.players[ix.idx].reviveAsTarget;
                 if (p > 0) GuiProgressBar((Rectangle){cx - tw/2, by + 36, tw, 8}, NULL, NULL, &p, 0.0f, 1.0f);
             }
         }
@@ -724,7 +724,7 @@ void Hud_Draw(int sw, int sh, Player *me, Interact ix) {
         char sub[96];
         int rescuers = 0;
         for (int i = 0; i < NET_MAX_PLAYERS; i++)
-            if (i != localPlayerIdx && players[i].active && players[i].alive && !players[i].downed) rescuers++;
+            if (i != localPlayerIdx && g_world.players[i].active && g_world.players[i].alive && !g_world.players[i].downed) rescuers++;
         if (rescuers > 0)
             snprintf(sub, sizeof sub, "Hold on — bleeding out in %.0fs", me->bleedTimer);
         else

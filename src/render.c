@@ -36,7 +36,7 @@ static int zClipWalk = -1, zClipAttack = -1, zClipDeath = -1;
 
 // ---- rigged third-person player model (glTF) ---------------------------
 // One shared skinned soldier (player.glb) + a render-local AnimState per
-// player slot. Only OTHER players are drawn with it (you never see your own
+// player slot. Only OTHER g_world.players are drawn with it (you never see your own
 // body). State is render-local / not serialized — same precedent as the
 // zombie anim: it's purely visual and reconstructed from the synced fields
 // (pos delta → locomotion, reloadTimer, downed, reviveAsTarget, alive). Falls
@@ -521,7 +521,7 @@ static void DrawPerkMachines(void) {
             DrawCube((Vector3){ pm->pos.x, 1.7f, pm->pos.z }, 0.8f, 1.0f, 0.8f, pd->tint);
             DrawCubeWires((Vector3){ pm->pos.x, 1.7f, pm->pos.z }, 0.8f, 1.0f, 0.8f, BLACK);
             DrawCube((Vector3){ pm->pos.x, 2.5f, pm->pos.z }, 0.6f, 0.4f, 0.6f, (Color){40,40,40,255});
-            bool myOwn = players[localPlayerIdx].hasPerk[pm->perkIdx];
+            bool myOwn = g_world.players[localPlayerIdx].hasPerk[pm->perkIdx];
             DrawSphere((Vector3){ pm->pos.x, 2.95f, pm->pos.z }, 0.18f,
                        myOwn ? (Color){240,240,240,255} : pd->tint);
         }
@@ -641,8 +641,8 @@ static void DrawEnemy(Enemy *e) {
     // Face the targeted player; fall back to 0 yaw if no target.
     float yawDeg = 0.0f;
     if (e->targetPlayer >= 0 && e->targetPlayer < NET_MAX_PLAYERS &&
-        players[e->targetPlayer].active) {
-        Vector3 t3 = players[e->targetPlayer].pos;
+        g_world.players[e->targetPlayer].active) {
+        Vector3 t3 = g_world.players[e->targetPlayer].pos;
         float dx = t3.x - e->pos.x;
         float dz = t3.z - e->pos.z;
         // raylib draws model with rotation around (0,1,0); 0 deg = -Z fwd.
@@ -744,7 +744,7 @@ static void DrawEnemy(Enemy *e) {
 }
 
 static void DrawOtherPlayer(int idx) {
-    Player *p = &players[idx];
+    Player *p = &g_world.players[idx];
     if (!p->active) return;
     Color c = PLAYER_COLORS[idx];
     if (!p->alive)      c = (Color){ 100,100,100, 200 };
@@ -777,10 +777,10 @@ static void DrawOtherPlayer(int idx) {
         bool reviving = false;
         if (p->alive && !p->downed) {
             for (int j = 0; j < NET_MAX_PLAYERS; j++) {
-                if (j == idx || !players[j].active || !players[j].downed) continue;
-                if (players[j].reviveAsTarget <= 0.01f) continue;
-                float dx = players[j].pos.x - p->pos.x;
-                float dz = players[j].pos.z - p->pos.z;
+                if (j == idx || !g_world.players[j].active || !g_world.players[j].downed) continue;
+                if (g_world.players[j].reviveAsTarget <= 0.01f) continue;
+                float dx = g_world.players[j].pos.x - p->pos.x;
+                float dz = g_world.players[j].pos.z - p->pos.z;
                 if (dx*dx + dz*dz < 2.2f*2.2f) { reviving = true; break; }
             }
         }

@@ -39,11 +39,11 @@ Interact Interact_FindFor(Player *p) {
     }
     // Downed teammates within reach. Dead (bled out) teammates can't be
     // revived mid-round — they respawn at the next round break.
-    int meIdx = (int)(p - players);
+    int meIdx = (int)(p - g_world.players);
     for (int i = 0; i < NET_MAX_PLAYERS; i++) {
         if (i == meIdx) continue;
-        if (!players[i].active || !players[i].downed) continue;
-        Vector2 q = { players[i].pos.x, players[i].pos.z };
+        if (!g_world.players[i].active || !g_world.players[i].downed) continue;
+        Vector2 q = { g_world.players[i].pos.x, g_world.players[i].pos.z };
         float d = Vector2Distance(pXZ, q);
         if (d < INTERACT_DIST && d < best.dist) best = (Interact){ IK_REVIVE, i, d };
     }
@@ -110,7 +110,7 @@ bool PaP_SlotLocked(int playerIdx, int slot) {
 // Apply the upgrade to the owner's locked slot and free the machine.
 static void PaP_Finalize(void) {
     if (g_world.pap.ownerPlayer >= 0 && g_world.pap.slotInProgress >= 0) {
-        WeaponSlot *s = &players[g_world.pap.ownerPlayer].inventory[g_world.pap.slotInProgress];
+        WeaponSlot *s = &g_world.players[g_world.pap.ownerPlayer].inventory[g_world.pap.slotInProgress];
         if (s->owned && s->weaponIdx == g_world.pap.weaponIdx) {
             s->packed = true;
             s->ammo = Weapon_EffMagSize(s);
@@ -126,7 +126,7 @@ static void PaP_Finalize(void) {
 }
 
 void Interact_UsePackAPunch(Player *p) {
-    int meIdx = (int)(p - players);
+    int meIdx = (int)(p - g_world.players);
     // READY: only the owner can take the finished weapon out.
     if (g_world.pap.phase == PAP_READY) {
         if (g_world.pap.ownerPlayer == meIdx) PaP_Finalize();
@@ -148,7 +148,7 @@ void Interact_UsePackAPunch(Player *p) {
 
 void Interact_UseMBox(Player *p) {
     if (!g_world.mbox.placed) return;
-    int meIdx = (int)(p - players);
+    int meIdx = (int)(p - g_world.players);
     if (g_world.mbox.state == MBOX_IDLE) {
         if (p->points < MBOX_COST) return;
         p->points -= MBOX_COST;
@@ -239,7 +239,7 @@ void Interact_UpdatePaP(float dt) {
     // Safety: never strand a weapon. If the owner vanished or died, finalize
     // (apply the upgrade if the slot is still valid) and free the machine.
     if (g_world.pap.ownerPlayer < 0 || g_world.pap.ownerPlayer >= NET_MAX_PLAYERS ||
-        !players[g_world.pap.ownerPlayer].active || !players[g_world.pap.ownerPlayer].alive) {
+        !g_world.players[g_world.pap.ownerPlayer].active || !g_world.players[g_world.pap.ownerPlayer].alive) {
         PaP_Finalize();
         return;
     }
@@ -265,7 +265,7 @@ void Interact_UpdateRepairs(float dt) {
     bool revActive[NET_MAX_PLAYERS] = { false };
 
     for (int pi = 0; pi < NET_MAX_PLAYERS; pi++) {
-        Player *p = &players[pi];
+        Player *p = &g_world.players[pi];
         if (!p->active || !p->alive || !p->interactHeld) continue;
         Interact ix = Interact_FindFor(p);
         if (ix.kind == IK_WINDOW) {
@@ -286,7 +286,7 @@ void Interact_UpdateRepairs(float dt) {
         else if (ix.kind == IK_REVIVE) {
             int ti = ix.idx;
             if (ti < 0 || ti >= NET_MAX_PLAYERS) continue;
-            Player *tgt = &players[ti];
+            Player *tgt = &g_world.players[ti];
             if (!tgt->active || !tgt->downed) continue;
             tgt->reviverIdx = pi;
             tgt->reviveAsTarget += dt / REVIVE_TIME;
@@ -311,9 +311,9 @@ void Interact_UpdateRepairs(float dt) {
     for (int i = 0; i < NET_MAX_PLAYERS; i++) {
         if (!revActive[i]) {
             // decay so an interrupted revive doesn't snap to 0 instantly
-            players[i].reviveAsTarget *= (1.0f - dt * 2.0f);
-            if (players[i].reviveAsTarget < 0) players[i].reviveAsTarget = 0;
-            players[i].reviverIdx = -1;
+            g_world.players[i].reviveAsTarget *= (1.0f - dt * 2.0f);
+            if (g_world.players[i].reviveAsTarget < 0) g_world.players[i].reviveAsTarget = 0;
+            g_world.players[i].reviverIdx = -1;
         }
     }
 }

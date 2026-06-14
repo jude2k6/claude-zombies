@@ -254,12 +254,12 @@ void Enemies_Update(float dt) {
             int retargetMod = 60;
             if      (e->type == ZT_RUNNER)  retargetMod = 25;
             else if (e->type == ZT_CRAWLER) retargetMod = 100;
-            if (e->targetPlayer < 0 || !players[e->targetPlayer].active || !players[e->targetPlayer].alive
+            if (e->targetPlayer < 0 || !g_world.players[e->targetPlayer].active || !g_world.players[e->targetPlayer].alive
                 || (rand() % retargetMod) == 0) {
                 e->targetPlayer = Player_NearestAlive(e->pos);
             }
             if (e->targetPlayer < 0) continue;
-            Player *tp = &players[e->targetPlayer];
+            Player *tp = &g_world.players[e->targetPlayer];
 
             // Route via an open door if one lies between us and the target.
             // Use a two-stage waypoint: first line up perpendicular to the
@@ -433,8 +433,8 @@ void Enemies_Update(float dt) {
             if (Vector2Distance(pXZ, eXZ) < PLAYER_RADIUS + ENEMY_RADIUS + 0.1f
                 && fabsf(e->pos.y - tp->pos.y) < 2.0f
                 && e->touchTimer <= 0 && e->stunTimer <= 0) {
-                bool cheatProtected = godMode && (int)(tp - players) == localPlayerIdx;
-                // Downed players are incapacitated — only the bleed timer kills them.
+                bool cheatProtected = godMode && (int)(tp - g_world.players) == localPlayerIdx;
+                // Downed g_world.players are incapacitated — only the bleed timer kills them.
                 if (tp->downed) cheatProtected = true;
                 float ccd = ENEMY_TOUCH_COOLDOWN;
                 if      (e->type == ZT_RUNNER) ccd *= 0.80f;
@@ -455,10 +455,10 @@ void Enemies_Update(float dt) {
                         // Drop into downed state if a teammate can possibly
                         // revive us, otherwise die outright (solo flow).
                         int otherUp = 0;
-                        int meIdx = (int)(tp - players);
+                        int meIdx = (int)(tp - g_world.players);
                         for (int j = 0; j < NET_MAX_PLAYERS; j++) {
                             if (j == meIdx) continue;
-                            if (players[j].active && players[j].alive && !players[j].downed) otherUp++;
+                            if (g_world.players[j].active && g_world.players[j].alive && !g_world.players[j].downed) otherUp++;
                         }
                         if (otherUp > 0) {
                             tp->downed = true;
@@ -467,7 +467,7 @@ void Enemies_Update(float dt) {
                             tp->alive = false;
                         }
                     }
-                    if ((int)(tp - players) == localPlayerIdx) {
+                    if ((int)(tp - g_world.players) == localPlayerIdx) {
                         float kickAmt = tp->hp <= 0 ? 0.65f
                                       : (e->type == ZT_BOSS ? 0.50f : 0.30f);
                         Fx_PunchAndRumble(kickAmt, 0.55f, 0.55f, 0.15f);
@@ -737,16 +737,16 @@ void Bullets_Update(float dt) {
             int hitPts  = HIT_POINTS;
             int killPts = KILL_POINTS + (headHit ? 40 : 0);
             if (g_world.doublePointsTimer > 0) { hitPts *= 2; killPts *= 2; }
-            if (op >= 0 && op < NET_MAX_PLAYERS && players[op].active) {
-                players[op].points += hitPts;
-                players[op].shotsHit++;
-                if (headHit) players[op].headshots++;
+            if (op >= 0 && op < NET_MAX_PLAYERS && g_world.players[op].active) {
+                g_world.players[op].points += hitPts;
+                g_world.players[op].shotsHit++;
+                if (headHit) g_world.players[op].headshots++;
                 if (en->hp <= 0) {
                     en->dyingTimer = ENEMY_DEATH_WINDOW;
                     en->alive = false;
                     enemiesAlive--;
-                    players[op].points += killPts;
-                    players[op].kills++;
+                    g_world.players[op].points += killPts;
+                    g_world.players[op].kills++;
                     PowerUps_TryDrop(en->pos);
                 }
             } else if (en->hp <= 0) {
@@ -782,16 +782,16 @@ void Bullets_Update(float dt) {
                 if (dmg < 1) continue;
                 if (g_world.instaKillTimer > 0) dmg = 99999;
                 enemies[e].hp -= dmg;
-                if (splashOwner >= 0 && splashOwner < NET_MAX_PLAYERS && players[splashOwner].active) {
-                    players[splashOwner].points += hitHitPts;
+                if (splashOwner >= 0 && splashOwner < NET_MAX_PLAYERS && g_world.players[splashOwner].active) {
+                    g_world.players[splashOwner].points += hitHitPts;
                 }
                 if (enemies[e].hp <= 0) {
                     enemies[e].dyingTimer = ENEMY_DEATH_WINDOW;
                     enemies[e].alive = false;
                     enemiesAlive--;
-                    if (splashOwner >= 0 && splashOwner < NET_MAX_PLAYERS && players[splashOwner].active) {
-                        players[splashOwner].points += hitKillPts;
-                        players[splashOwner].kills++;
+                    if (splashOwner >= 0 && splashOwner < NET_MAX_PLAYERS && g_world.players[splashOwner].active) {
+                        g_world.players[splashOwner].points += hitKillPts;
+                        g_world.players[splashOwner].kills++;
                     }
                     PowerUps_TryDrop(enemies[e].pos);
                 }
@@ -834,7 +834,7 @@ void Throwables_Throw(Player *p, ThrowableKind kind) {
                 .pos         = origin,
                 .vel         = vel,
                 .fuse        = FRAG_FUSE,
-                .ownerPlayer = (int)(p - players),
+                .ownerPlayer = (int)(p - g_world.players),
                 .spinPhase   = 0.0f,
             };
             if (kind == TH_FRAG) p->lethals--;
@@ -863,16 +863,16 @@ void Throwables_Detonate(Throwable *t) {
             if (dmg < 1) continue;
             if (g_world.instaKillTimer > 0) dmg = 99999;
             enemies[e].hp -= dmg;
-            if (op >= 0 && op < NET_MAX_PLAYERS && players[op].active) {
-                players[op].points += hitPts;
+            if (op >= 0 && op < NET_MAX_PLAYERS && g_world.players[op].active) {
+                g_world.players[op].points += hitPts;
             }
             if (enemies[e].hp <= 0) {
                 enemies[e].dyingTimer = ENEMY_DEATH_WINDOW;
                 enemies[e].alive = false;
                 enemiesAlive--;
-                if (op >= 0 && op < NET_MAX_PLAYERS && players[op].active) {
-                    players[op].points += killPts;
-                    players[op].kills++;
+                if (op >= 0 && op < NET_MAX_PLAYERS && g_world.players[op].active) {
+                    g_world.players[op].points += killPts;
+                    g_world.players[op].kills++;
                 }
                 PowerUps_TryDrop(enemies[e].pos);
             }
@@ -883,22 +883,22 @@ void Throwables_Detonate(Throwable *t) {
         Particles_Explosion(t->pos);
 
         // Camera kick for any nearby local player
-        if (localPlayerIdx >= 0 && players[localPlayerIdx].active) {
-            float dx = players[localPlayerIdx].pos.x - t->pos.x;
-            float dy = players[localPlayerIdx].pos.y - t->pos.y;
-            float dz = players[localPlayerIdx].pos.z - t->pos.z;
+        if (localPlayerIdx >= 0 && g_world.players[localPlayerIdx].active) {
+            float dx = g_world.players[localPlayerIdx].pos.x - t->pos.x;
+            float dy = g_world.players[localPlayerIdx].pos.y - t->pos.y;
+            float dz = g_world.players[localPlayerIdx].pos.z - t->pos.z;
             float d  = sqrtf(dx*dx + dy*dy + dz*dz);
             if (d < FRAG_RADIUS * 1.5f) {
                 float mul = 1.0f - (d / (FRAG_RADIUS * 1.5f));
                 Fx_PunchAndRumble(0.55f * mul, 0.7f * mul, 0.6f * mul, 0.20f);
                 // Frag damages the local player too (friendly fire by proximity).
-                if (d < FRAG_RADIUS && !godMode && !players[localPlayerIdx].downed) {
+                if (d < FRAG_RADIUS && !godMode && !g_world.players[localPlayerIdx].downed) {
                     int self = (int)(FRAG_DAMAGE * 0.40f * (1.0f - d / FRAG_RADIUS));
                     if (self > 0) {
-                        players[localPlayerIdx].hp -= self;
-                        players[localPlayerIdx].damageFlash = 0.6f;
-                        players[localPlayerIdx].regenTimer = 0.0f;
-                        if (players[localPlayerIdx].hp < 0) players[localPlayerIdx].hp = 0;
+                        g_world.players[localPlayerIdx].hp -= self;
+                        g_world.players[localPlayerIdx].damageFlash = 0.6f;
+                        g_world.players[localPlayerIdx].regenTimer = 0.0f;
+                        if (g_world.players[localPlayerIdx].hp < 0) g_world.players[localPlayerIdx].hp = 0;
                     }
                 }
             }
@@ -914,9 +914,9 @@ void Throwables_Detonate(Throwable *t) {
             if (d > STUN_RADIUS) continue;
             enemies[e].stunTimer = STUN_DURATION;
         }
-        if (localPlayerIdx >= 0 && players[localPlayerIdx].active) {
-            float dx = players[localPlayerIdx].pos.x - t->pos.x;
-            float dz = players[localPlayerIdx].pos.z - t->pos.z;
+        if (localPlayerIdx >= 0 && g_world.players[localPlayerIdx].active) {
+            float dx = g_world.players[localPlayerIdx].pos.x - t->pos.x;
+            float dz = g_world.players[localPlayerIdx].pos.z - t->pos.z;
             if (dx*dx + dz*dz < STUN_RADIUS * STUN_RADIUS * 4.0f) {
                 Fx_PunchAndRumble(0.10f, 0.2f, 0.2f, 0.05f);
             }
@@ -999,12 +999,12 @@ void PowerUps_Apply(PowerUpType type) {
     switch (type) {
         case PU_MAX_AMMO:
             for (int i = 0; i < NET_MAX_PLAYERS; i++) {
-                if (!players[i].active) continue;
+                if (!g_world.players[i].active) continue;
                 for (int s = 0; s < INV_SLOTS; s++) {
-                    if (!players[i].inventory[s].owned) continue;
-                    int cap = WEAPONS[players[i].inventory[s].weaponIdx].reserveMax;
-                    if (players[i].inventory[s].packed) cap += 60;
-                    players[i].inventory[s].reserve = cap;
+                    if (!g_world.players[i].inventory[s].owned) continue;
+                    int cap = WEAPONS[g_world.players[i].inventory[s].weaponIdx].reserveMax;
+                    if (g_world.players[i].inventory[s].packed) cap += 60;
+                    g_world.players[i].inventory[s].reserve = cap;
                 }
             }
             break;
@@ -1016,7 +1016,7 @@ void PowerUps_Apply(PowerUpType type) {
                 enemiesAlive--;
             }
             for (int i = 0; i < NET_MAX_PLAYERS; i++)
-                if (players[i].active) players[i].points += 400;
+                if (g_world.players[i].active) g_world.players[i].points += 400;
             fxFlashAmount = 1.0f;
             Fx_PunchAndRumble(0.9f, 1.0f, 1.0f, 0.5f);
             break;
@@ -1029,7 +1029,7 @@ void PowerUps_Apply(PowerUpType type) {
         case PU_CARPENTER:
             for (int i = 0; i < g_world.windowCount; i++) g_world.windows[i].boards = MAX_BOARDS_PER_WIN;
             for (int i = 0; i < NET_MAX_PLAYERS; i++)
-                if (players[i].active) players[i].points += 200;
+                if (g_world.players[i].active) g_world.players[i].points += 200;
             break;
         default: break;
     }
@@ -1039,9 +1039,9 @@ void PowerUps_Pickup(void) {
     for (int i = 0; i < MAX_POWERUPS; i++) {
         if (!powerUps[i].active) continue;
         for (int pi = 0; pi < NET_MAX_PLAYERS; pi++) {
-            if (!players[pi].active || !players[pi].alive) continue;
-            float dx = players[pi].pos.x - powerUps[i].pos.x;
-            float dz = players[pi].pos.z - powerUps[i].pos.z;
+            if (!g_world.players[pi].active || !g_world.players[pi].alive) continue;
+            float dx = g_world.players[pi].pos.x - powerUps[i].pos.x;
+            float dz = g_world.players[pi].pos.z - powerUps[i].pos.z;
             if (dx*dx + dz*dz < POWERUP_PICKUP_R * POWERUP_PICKUP_R) {
                 PowerUps_Apply(powerUps[i].type);
                 powerUps[i].active = false;

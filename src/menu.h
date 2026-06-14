@@ -22,7 +22,7 @@ extern char    statusMsg[128];
 extern char    hostIps[8][64];
 extern int     hostIpCount;
 
-extern NetMode netMode;
+// netMode now lives in g_world (world.h), aliased by a macro there.
 
 #define MAP_LIST_MAX 16
 typedef struct { char path[256]; char name[64]; } MapEntry;

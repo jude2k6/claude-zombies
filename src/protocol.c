@@ -213,7 +213,7 @@ void Protocol_HostBroadcastSnapshot(void) {
     hdr->mboxShowingWeapon = (uint8_t)g_world.mbox.showingWeapon;
     hdr->mboxFinalWeapon   = (uint8_t)g_world.mbox.finalWeapon;
     hdr->mboxOwnerPlayer   = (int8_t)g_world.mbox.ownerPlayer;
-    for (int i = 0; i < NET_MAX_PLAYERS; i++) SerializePlayer(&hdr->players[i], &players[i]);
+    for (int i = 0; i < NET_MAX_PLAYERS; i++) SerializePlayer(&hdr->players[i], &g_world.players[i]);
 
     size_t off = sizeof *hdr;
     uint16_t ne = 0;
@@ -311,7 +311,7 @@ void Protocol_ClientApplySnapshot(uint8_t *data, size_t len) {
     g_world.mbox.ownerPlayer   = hdr->mboxOwnerPlayer;
 
     for (int i = 0; i < NET_MAX_PLAYERS; i++)
-        DeserializePlayer(&players[i], &hdr->players[i], i == localPlayerIdx);
+        DeserializePlayer(&g_world.players[i], &hdr->players[i], i == localPlayerIdx);
 
     size_t off = sizeof *hdr;
     for (int i = 0; i < MAX_ENEMIES; i++) {
@@ -369,8 +369,8 @@ void Protocol_ClientApplySnapshot(uint8_t *data, size_t len) {
 void Protocol_HostSendLobby(void) {
     PktLobby lob = { .type = PKT_LOBBY, .numPlayers = (uint8_t)Player_ActiveCount() };
     for (int i = 0; i < NET_MAX_PLAYERS; i++) {
-        lob.active[i] = players[i].active;
-        memcpy(lob.names[i], players[i].name, 32);
+        lob.active[i] = g_world.players[i].active;
+        memcpy(lob.names[i], g_world.players[i].name, 32);
     }
     Net_Broadcast(&lob, sizeof lob, true);
 }
@@ -406,7 +406,7 @@ void Protocol_HostHandlePacket(int peerIdx, uint8_t *data, size_t len) {
     else if (type == PKT_INPUT && len >= sizeof(PktInput)) {
         PktInput *in = (PktInput *)data;
         if (peerIdx < 0 || peerIdx >= NET_MAX_PLAYERS) return;
-        Player *p = &players[peerIdx];
+        Player *p = &g_world.players[peerIdx];
         if (!p->active) return;
         p->pos = (Vector3){ in->px, in->py, in->pz };
         p->yaw = in->yaw; p->pitch = in->pitch;
@@ -418,7 +418,7 @@ void Protocol_HostHandlePacket(int peerIdx, uint8_t *data, size_t len) {
     else if (type == PKT_ACTION && len >= sizeof(PktAction)) {
         PktAction *a = (PktAction *)data;
         if (peerIdx < 0 || peerIdx >= NET_MAX_PLAYERS) return;
-        Player *p = &players[peerIdx];
+        Player *p = &g_world.players[peerIdx];
         if (!p->active) return;
         if      (a->action == ACT_RELOAD)     Weapon_StartReload(p);
         else if (a->action == ACT_SWAP_SLOT)  Weapon_SwapSlot(p, a->arg);
@@ -435,7 +435,7 @@ void Protocol_ClientHandlePacket(uint8_t *data, size_t len, const char *playerNa
     if (type == PKT_WELCOME && len >= sizeof(PktWelcome)) {
         PktWelcome *w = (PktWelcome *)data;
         localPlayerIdx = w->playerIdx;
-        for (int i = 0; i < NET_MAX_PLAYERS; i++) memset(&players[i], 0, sizeof players[i]);
+        for (int i = 0; i < NET_MAX_PLAYERS; i++) memset(&g_world.players[i], 0, sizeof g_world.players[i]);
         Player_ResetForGame(localPlayerIdx, playerName);
         uiState = UI_CLIENT_LOBBY;
     }
@@ -449,9 +449,9 @@ void Protocol_ClientHandlePacket(uint8_t *data, size_t len, const char *playerNa
     else if (type == PKT_LOBBY && len >= sizeof(PktLobby)) {
         PktLobby *l = (PktLobby *)data;
         for (int i = 0; i < NET_MAX_PLAYERS; i++) {
-            players[i].active = l->active[i];
-            memcpy(players[i].name, l->names[i], 32);
-            players[i].name[31] = 0;
+            g_world.players[i].active = l->active[i];
+            memcpy(g_world.players[i].name, l->names[i], 32);
+            g_world.players[i].name[31] = 0;
         }
     }
     else if (type == PKT_START && len >= sizeof(PktStart)) {

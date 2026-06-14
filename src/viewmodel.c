@@ -180,7 +180,7 @@ static void ViewmodelMotion(Player *me, Vector3 fwd, Vector3 right, Vector3 up,
 // same player-state → clip state machine as DrawArmsViewmodel. Called only when
 // crigVM[wi].loaded is true. No separate gun model, no weaponGrip seating.
 static void DrawCombinedRigViewmodel(Camera camera, int wi) {
-    Player *me = &players[localPlayerIdx];
+    Player *me = &g_world.players[localPlayerIdx];
     int cs = me->currentSlot;
     WeaponSlot *slot = &me->inventory[cs];
     float dt = GetFrameTime();
@@ -332,7 +332,7 @@ static void DrawCombinedRigViewmodel(Camera camera, int wi) {
 // (same logic as the pistol VM); the gun rides the right hand so recoil/reload
 // motion is inherited from the arms clip for free.
 static void DrawArmsViewmodel(Camera camera, int wi) {
-    Player *me = &players[localPlayerIdx];
+    Player *me = &g_world.players[localPlayerIdx];
     int cs = me->currentSlot;
     WeaponSlot *slot = &me->inventory[cs];
     float dt = GetFrameTime();
@@ -497,7 +497,7 @@ static void DrawArmsViewmodel(Camera camera, int wi) {
 // weaponTune.yawDeg lets each weapon's authored "forward" axis be aligned
 // to the camera's forward without modifying the OBJ.
 void Viewmodel_DrawFirstPerson(Camera camera) {
-    Player *me = &players[localPlayerIdx];
+    Player *me = &g_world.players[localPlayerIdx];
     // Hidden when dead/downed, and while noclipping — in noclip the camera
     // detaches and flies free, so the arms+gun must NOT trail it; the body is
     // drawn in third person at its frozen spot instead (see DrawOtherPlayer).

@@ -17,6 +17,7 @@
 // real `World *` threading lands.
 // ---------------------------------------------------------------------------
 typedef struct {
+    Player    players[NET_MAX_PLAYERS];
     Enemy     enemies[MAX_ENEMIES];
     Bullet    bullets[MAX_BULLETS];
     Throwable throwables[MAX_THROWABLES];
@@ -67,7 +68,12 @@ typedef struct {
     FloorRegion floors[MAX_FLOORS];
     int         floorCount;
 
-    // TODO (Phase 0, real threading): players[], netMode.
+    // ---- session / networking role ---------------------------------------
+    // netMode is collision-free (never a struct field), so it is aliased by a
+    // macro below. players[] clashes with the SerPlayer players[] field in the
+    // network snapshot header, so it is accessed explicitly as g_world.players
+    // (no macro) — protocol.c keeps its hdr->players / SerPlayer players[] uses.
+    NetMode   netMode;
 } World;
 
 // The single live world instance. Defined in world.c.
@@ -101,5 +107,6 @@ extern World g_world;
 #define mapSpawnCount         (g_world.mapSpawnCount)
 #define mapProps              (g_world.mapProps)
 #define mapPropCount          (g_world.mapPropCount)
+#define netMode               (g_world.netMode)
 
 #endif

@@ -16,14 +16,26 @@
 > - `data/maps/multifloor.map` demo (ground + overlapping Y4 deck + ramp + Y8
 >   catwalk) and a `--screenshot-map <file.map>` dev harness to eyeball any map.
 >
-> **Deferred (still flat / TODO):** floor-slab **collision** — you can currently
-> walk off a deck edge (gravity catches you on the ground below, which is fine)
-> but bullets and enemies still ignore floor slabs (§4: add slabs as XZ-at-Y
-> blockers + segment blockers). And **AI navigation is still XZ-only** (§5) — a
-> zombie can't yet path *across* floors to a player upstairs; it needs the
-> region/portal nav graph. These are the remaining items for full multi-floor
-> *gameplay*. The spatial-query layer they build on (`Level_FloorHeightAt`,
-> `FloorRegion`) now exists.
+> **Floor-slab collision + cross-floor AI — now also done:**
+> - Bullets are blocked by floor-region slabs (`Level_FloorRegionBox` + the
+>   bullet segment loop): no shooting through a deck/ramp between levels.
+> - Enemies stand on the floor surface each tick (`Level_FloorHeightAt`), so
+>   they walk up ramps and onto decks instead of floating at a fixed Y.
+> - Cross-floor zombie nav (`CrossFloorGoal` in `entities.c`): when the player
+>   is on another floor, the zombie routes toward a ramp that moves it one level
+>   toward the player (greedy, level-by-level, reusing XZ homing toward the ramp
+>   entrance — ramps are the implicit graph edges). Bites are gated to the same
+>   floor. Verified headless by `--sim-navtest <map>` (zombie climbs to the deck
+>   in ~1.8s on multifloor.map). On flat maps none of this fires (queries return
+>   0), so AI is byte-identical.
+>
+> **Still TODO (refinements, not blockers):** the nav is *greedy* — it climbs
+> level-by-level and can dead-end on maps needing down-then-up routing (a real
+> region/portal BFS, §5, would fix that); ramp bullet-blocking uses one AABB
+> spanning yLow..yHigh (slightly over-blocks the air beside a ramp); grenades
+> still detonate on the Y=0 plane, not on decks; spawns/perks/wallbuys don't yet
+> carry a floor Y. Core multi-floor *gameplay* (walk, stand, shoot, get chased
+> across floors) works.
 
 Status of the rest of this doc: **design reference** for the deferred work
 (collision + AI nav) and the engine-seam framing. How to add verticality

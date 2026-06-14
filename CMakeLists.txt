@@ -69,6 +69,7 @@ add_executable(shooter
     src/engine/decals.c
     src/engine/particles.c
     src/engine/anim.c
+    src/engine/gfx.c
 )
 target_include_directories(shooter PRIVATE
     ${CMAKE_SOURCE_DIR}/src

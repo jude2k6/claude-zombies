@@ -11,7 +11,7 @@
 #include "particles.h"
 #include "anim.h"
 #include "raymath.h"
-#include "rlgl.h"
+#include "gfx.h"
 #include <math.h>
 #include <stdio.h>
 
@@ -119,10 +119,10 @@ static inline void TexQuad(float ax, float ay, float az,
                            float dx, float dy, float dz,
                            float u, float v) {
     // Four-vertex quad (CCW from outside).  Texture spans U×V repeats.
-    rlTexCoord2f(0, v); rlVertex3f(ax, ay, az);
-    rlTexCoord2f(u, v); rlVertex3f(bx, by, bz);
-    rlTexCoord2f(u, 0); rlVertex3f(cx, cy, cz);
-    rlTexCoord2f(0, 0); rlVertex3f(dx, dy, dz);
+    Eng_GfxTexCoord(0, v); Eng_GfxVertex(ax, ay, az);
+    Eng_GfxTexCoord(u, v); Eng_GfxVertex(bx, by, bz);
+    Eng_GfxTexCoord(u, 0); Eng_GfxVertex(cx, cy, cz);
+    Eng_GfxTexCoord(0, 0); Eng_GfxVertex(dx, dy, dz);
 }
 
 // Flush whatever rlgl immediate verts are pending under the *current*
@@ -133,13 +133,13 @@ static inline void TexQuad(float ax, float ay, float az,
 // sharing the immediate-mode batch.
 static void BeginTileVariation(void) {
     if (!worldShaderLoaded) return;
-    rlDrawRenderBatchActive();
+    Eng_GfxFlushBatch();
     float v = 1.0f;
     SetShaderValue(worldShader, worldShader_tileVariationLoc, &v, SHADER_UNIFORM_FLOAT);
 }
 static void EndTileVariation(void) {
     if (!worldShaderLoaded) return;
-    rlDrawRenderBatchActive();
+    Eng_GfxFlushBatch();
     float v = 0.0f;
     SetShaderValue(worldShader, worldShader_tileVariationLoc, &v, SHADER_UNIFORM_FLOAT);
 }
@@ -162,37 +162,35 @@ static void DrawTexturedBoxTex(Vector3 c, Vector3 s, Texture2D *tex,
     float uz = s.z / TILE_SIZE;
 
     BeginTileVariation();
-    rlSetTexture(tex->id);
-    rlBegin(RL_QUADS);
-    rlColor4ub(tint.r, tint.g, tint.b, tint.a);
+    Eng_GfxBeginQuads(tex->id);
+    Eng_GfxColor(tint);
 
     // +Z face
-    rlNormal3f(0, 0, 1);
+    Eng_GfxNormal(0, 0, 1);
     TexQuad(c.x-hx, c.y-hy, c.z+hz,  c.x+hx, c.y-hy, c.z+hz,
             c.x+hx, c.y+hy, c.z+hz,  c.x-hx, c.y+hy, c.z+hz,  ux, uy);
     // -Z face
-    rlNormal3f(0, 0, -1);
+    Eng_GfxNormal(0, 0, -1);
     TexQuad(c.x+hx, c.y-hy, c.z-hz,  c.x-hx, c.y-hy, c.z-hz,
             c.x-hx, c.y+hy, c.z-hz,  c.x+hx, c.y+hy, c.z-hz,  ux, uy);
     // +X face
-    rlNormal3f(1, 0, 0);
+    Eng_GfxNormal(1, 0, 0);
     TexQuad(c.x+hx, c.y-hy, c.z+hz,  c.x+hx, c.y-hy, c.z-hz,
             c.x+hx, c.y+hy, c.z-hz,  c.x+hx, c.y+hy, c.z+hz,  uz, uy);
     // -X face
-    rlNormal3f(-1, 0, 0);
+    Eng_GfxNormal(-1, 0, 0);
     TexQuad(c.x-hx, c.y-hy, c.z-hz,  c.x-hx, c.y-hy, c.z+hz,
             c.x-hx, c.y+hy, c.z+hz,  c.x-hx, c.y+hy, c.z-hz,  uz, uy);
     // +Y face (top)
-    rlNormal3f(0, 1, 0);
+    Eng_GfxNormal(0, 1, 0);
     TexQuad(c.x-hx, c.y+hy, c.z+hz,  c.x+hx, c.y+hy, c.z+hz,
             c.x+hx, c.y+hy, c.z-hz,  c.x-hx, c.y+hy, c.z-hz,  ux, uz);
     // -Y face (bottom)
-    rlNormal3f(0, -1, 0);
+    Eng_GfxNormal(0, -1, 0);
     TexQuad(c.x-hx, c.y-hy, c.z-hz,  c.x+hx, c.y-hy, c.z-hz,
             c.x+hx, c.y-hy, c.z+hz,  c.x-hx, c.y-hy, c.z+hz,  ux, uz);
 
-    rlEnd();
-    rlSetTexture(0);
+    Eng_GfxEndQuads();
     EndTileVariation();
 }
 
@@ -216,16 +214,14 @@ static void DrawTexturedFloorTex(Vector3 center, float sizeX, float sizeZ,
     float v = sizeZ / TILE_SIZE;
 
     BeginTileVariation();
-    rlSetTexture(tex->id);
-    rlBegin(RL_QUADS);
-    rlColor4ub(tint.r, tint.g, tint.b, tint.a);
-    rlNormal3f(0, 1, 0);
+    Eng_GfxBeginQuads(tex->id);
+    Eng_GfxColor(tint);
+    Eng_GfxNormal(0, 1, 0);
     TexQuad(center.x-hx, center.y, center.z+hz,
             center.x+hx, center.y, center.z+hz,
             center.x+hx, center.y, center.z-hz,
             center.x-hx, center.y, center.z-hz,  u, v);
-    rlEnd();
-    rlSetTexture(0);
+    Eng_GfxEndQuads();
     EndTileVariation();
 }
 
@@ -964,11 +960,11 @@ static void DrawPowerUps(void) {
 // writes disabled so it always sits behind every world-space object.
 static void DrawSkybox(Camera camera) {
     if (!skyShaderLoaded) return;
-    rlDisableBackfaceCulling();
-    rlDisableDepthMask();
+    Eng_GfxBackfaceCull(false);
+    Eng_GfxDepthMask(false);
     DrawModel(skyModel, camera.position, 1.0f, WHITE);
-    rlEnableDepthMask();
-    rlEnableBackfaceCulling();
+    Eng_GfxDepthMask(true);
+    Eng_GfxBackfaceCull(true);
 }
 
 // Push fog uniforms + swap rlgl's default shader so textured walls / floor
@@ -1001,14 +997,14 @@ static void BeginWorldShader(void) {
         SetShaderValue(worldSkinnedShader, worldSkinnedShader_sunColorLoc,     sc, SHADER_UNIFORM_VEC3);
         SetShaderValue(worldSkinnedShader, worldSkinnedShader_ambientColorLoc, ac, SHADER_UNIFORM_VEC3);
     }
-    rlSetShader(worldShader.id, worldShader.locs);
+    Eng_GfxUseShader(worldShader);
 }
 static void EndWorldShader(void) {
     if (!worldShaderLoaded) return;
     // CRITICAL: rlSetShader's second arg must point at the default shader's
     // own locs array; passing NULL leaves currentShaderLocs as NULL and
     // EndDrawing's render-batch flush dereferences it (SEGV).
-    rlSetShader(rlGetShaderIdDefault(), rlGetShaderLocsDefault());
+    Eng_GfxUseDefaultShader();
 }
 
 // Speed → tracer colour. Avoids serialising the firing weapon on every
@@ -1023,9 +1019,8 @@ static Color TracerColor(float speed) {
 // Billboard-aligned streak between (head - vel * tail) and head. Bright at
 // the head, transparent at the tail.
 static void DrawTracers(Camera camera) {
-    rlSetTexture(0);
-    rlDisableBackfaceCulling();
-    rlBegin(RL_QUADS);
+    Eng_GfxBackfaceCull(false);
+    Eng_GfxBeginQuads(0);
     for (int i = 0; i < MAX_BULLETS; i++) {
         if (!bullets[i].alive) continue;
         Vector3 head = bullets[i].pos;
@@ -1054,13 +1049,13 @@ static void DrawTracers(Camera camera) {
         Vector3 tr = Vector3Add(tail, Vector3Scale(side,  w));
         Vector3 tl = Vector3Add(tail, Vector3Scale(side, -w));
 
-        rlColor4ub(cCore.r, cCore.g, cCore.b, cCore.a); rlVertex3f(hr.x, hr.y, hr.z);
-        rlColor4ub(cCore.r, cCore.g, cCore.b, cCore.a); rlVertex3f(hl.x, hl.y, hl.z);
-        rlColor4ub(cTail.r, cTail.g, cTail.b, cTail.a); rlVertex3f(tl.x, tl.y, tl.z);
-        rlColor4ub(cTail.r, cTail.g, cTail.b, cTail.a); rlVertex3f(tr.x, tr.y, tr.z);
+        Eng_GfxColor(cCore); Eng_GfxVertex(hr.x, hr.y, hr.z);
+        Eng_GfxColor(cCore); Eng_GfxVertex(hl.x, hl.y, hl.z);
+        Eng_GfxColor(cTail); Eng_GfxVertex(tl.x, tl.y, tl.z);
+        Eng_GfxColor(cTail); Eng_GfxVertex(tr.x, tr.y, tr.z);
     }
-    rlEnd();
-    rlEnableBackfaceCulling();
+    Eng_GfxEndQuads();
+    Eng_GfxBackfaceCull(true);
 }
 
 // Ensure the RT exists and matches the current window size. Called lazily from

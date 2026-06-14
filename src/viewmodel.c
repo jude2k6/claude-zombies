@@ -6,7 +6,7 @@
 #include "anim.h"
 #include "interact.h"
 #include "raymath.h"
-#include "rlgl.h"
+#include "gfx.h"
 #include <math.h>
 #include <stdio.h>
 
@@ -311,13 +311,13 @@ static void DrawCombinedRigViewmodel(Camera camera, int wi) {
     if (worldSkinnedShaderLoaded) {
         Vector3 flatSun = { 0.45f, 0.46f, 0.50f };
         Vector3 flatAmb = { 2.40f, 2.42f, 2.50f };
-        rlDrawRenderBatchActive();
+        Eng_GfxFlushBatch();
         SetShaderValue(worldSkinnedShader, worldSkinnedShader_sunColorLoc,
                        &flatSun, SHADER_UNIFORM_VEC3);
         SetShaderValue(worldSkinnedShader, worldSkinnedShader_ambientColorLoc,
                        &flatAmb, SHADER_UNIFORM_VEC3);
         DrawModel(am->model, (Vector3){0,0,0}, 1.0f, WHITE);
-        rlDrawRenderBatchActive();
+        Eng_GfxFlushBatch();
         SetShaderValue(worldSkinnedShader, worldSkinnedShader_sunColorLoc,
                        &sunColor, SHADER_UNIFORM_VEC3);
         SetShaderValue(worldSkinnedShader, worldSkinnedShader_ambientColorLoc,
@@ -425,11 +425,11 @@ static void DrawArmsViewmodel(Camera camera, int wi) {
     if (worldSkinnedShaderLoaded) {
         Vector3 flatSun = { 0.25f, 0.26f, 0.30f };
         Vector3 flatAmb = { 1.30f, 1.31f, 1.36f };
-        rlDrawRenderBatchActive();
+        Eng_GfxFlushBatch();
         SetShaderValue(worldSkinnedShader, worldSkinnedShader_sunColorLoc,     &flatSun, SHADER_UNIFORM_VEC3);
         SetShaderValue(worldSkinnedShader, worldSkinnedShader_ambientColorLoc, &flatAmb, SHADER_UNIFORM_VEC3);
         DrawModel(armsVM.model, (Vector3){0,0,0}, 1.0f, WHITE);
-        rlDrawRenderBatchActive();
+        Eng_GfxFlushBatch();
         SetShaderValue(worldSkinnedShader, worldSkinnedShader_sunColorLoc,     &sunColor,     SHADER_UNIFORM_VEC3);
         SetShaderValue(worldSkinnedShader, worldSkinnedShader_ambientColorLoc, &ambientColor, SHADER_UNIFORM_VEC3);
     } else {
@@ -439,11 +439,11 @@ static void DrawArmsViewmodel(Camera camera, int wi) {
     if (worldShaderLoaded) {
         Vector3 flatSun = { 0.12f, 0.13f, 0.16f };
         Vector3 flatAmb = { 0.90f, 0.91f, 0.96f };
-        rlDrawRenderBatchActive();
+        Eng_GfxFlushBatch();
         SetShaderValue(worldShader, worldShader_sunColorLoc,     &flatSun, SHADER_UNIFORM_VEC3);
         SetShaderValue(worldShader, worldShader_ambientColorLoc, &flatAmb, SHADER_UNIFORM_VEC3);
         DrawModel(gm, (Vector3){0,0,0}, 1.0f, WHITE);
-        rlDrawRenderBatchActive();
+        Eng_GfxFlushBatch();
         SetShaderValue(worldShader, worldShader_sunColorLoc,     &sunColor,     SHADER_UNIFORM_VEC3);
         SetShaderValue(worldShader, worldShader_ambientColorLoc, &ambientColor, SHADER_UNIFORM_VEC3);
     } else {
@@ -469,8 +469,8 @@ static void DrawArmsViewmodel(Camera camera, int wi) {
             fprintf(stderr, "vmdbg handR pos: %+.4f %+.4f %+.4f\n", bone.m12, bone.m13, bone.m14);
             fprintf(stderr, "vmdbg handL pos: %+.4f %+.4f %+.4f\n", bL.m12, bL.m13, bL.m14);
         }
-        rlDrawRenderBatchActive();
-        rlDisableDepthTest();
+        Eng_GfxFlushBatch();
+        Eng_GfxDepthTest(false);
         Matrix mR = MatrixMultiply(bone, root);
         Vector3 pR = { mR.m12, mR.m13, mR.m14 };
         DrawSphere(pR, 0.010f, RED);
@@ -484,8 +484,8 @@ static void DrawArmsViewmodel(Camera camera, int wi) {
             Matrix mL = MatrixMultiply(Anim_BoneMatrix(&armsVM, st, avmHandL), root);
             DrawSphere((Vector3){ mL.m12, mL.m13, mL.m14 }, 0.010f, BLUE);
         }
-        rlDrawRenderBatchActive();
-        rlEnableDepthTest();
+        Eng_GfxFlushBatch();
+        Eng_GfxDepthTest(true);
     }
 }
 
@@ -624,11 +624,11 @@ void Viewmodel_DrawFirstPerson(Camera camera) {
     if (worldShaderLoaded) {
         Vector3 flatSun = { 0.12f, 0.13f, 0.16f };
         Vector3 flatAmb = { 0.90f, 0.91f, 0.96f };
-        rlDrawRenderBatchActive();
+        Eng_GfxFlushBatch();
         SetShaderValue(worldShader, worldShader_sunColorLoc,     &flatSun, SHADER_UNIFORM_VEC3);
         SetShaderValue(worldShader, worldShader_ambientColorLoc, &flatAmb, SHADER_UNIFORM_VEC3);
         DrawModel(m, (Vector3){0,0,0}, 1.0f, WHITE);
-        rlDrawRenderBatchActive();
+        Eng_GfxFlushBatch();
         SetShaderValue(worldShader, worldShader_sunColorLoc,     &sunColor,     SHADER_UNIFORM_VEC3);
         SetShaderValue(worldShader, worldShader_ambientColorLoc, &ambientColor, SHADER_UNIFORM_VEC3);
     } else {

@@ -187,7 +187,7 @@ void Protocol_HostBroadcastSnapshot(void) {
     PktSnapshotHeader *hdr = (PktSnapshotHeader *)snapshotBuf;
     memset(hdr, 0, sizeof *hdr);
     hdr->type = PKT_SNAPSHOT;
-    hdr->roundNum = (uint8_t)roundNum;
+    hdr->roundNum = (uint8_t)g_world.roundNum;
     hdr->gameState = (uint8_t)gamePhase;
     hdr->breakTimer = roundBreakTimer;
     hdr->enemiesAlive = (uint16_t)enemiesAlive;
@@ -206,8 +206,8 @@ void Protocol_HostBroadcastSnapshot(void) {
         for (int i = 0; i < doorCount && i < 16; i++) if (doors[i].opened) mask |= (uint16_t)(1u << i);
         hdr->doorsOpened = mask;
     }
-    hdr->doublePointsTimer = doublePointsTimer;
-    hdr->instaKillTimer    = instaKillTimer;
+    hdr->doublePointsTimer = g_world.doublePointsTimer;
+    hdr->instaKillTimer    = g_world.instaKillTimer;
     hdr->mboxState         = (uint8_t)mbox.state;
     hdr->mboxTimer         = mbox.timer;
     hdr->mboxShowingWeapon = (uint8_t)mbox.showingWeapon;
@@ -287,7 +287,7 @@ void Protocol_HostBroadcastSnapshot(void) {
 void Protocol_ClientApplySnapshot(uint8_t *data, size_t len) {
     if (len < sizeof(PktSnapshotHeader)) return;
     PktSnapshotHeader *hdr = (PktSnapshotHeader *)data;
-    roundNum = hdr->roundNum;
+    g_world.roundNum = hdr->roundNum;
     gamePhase = (GamePhase)hdr->gameState;
     roundBreakTimer = hdr->breakTimer;
     enemiesAlive = hdr->enemiesAlive;
@@ -302,8 +302,8 @@ void Protocol_ClientApplySnapshot(uint8_t *data, size_t len) {
     pap.ownerPlayer = hdr->papOwnerPlayer;
     pap.weaponIdx = hdr->papWeaponIdx;
     for (int i = 0; i < doorCount && i < 16; i++) doors[i].opened = (hdr->doorsOpened & (1u << i)) != 0;
-    doublePointsTimer = hdr->doublePointsTimer;
-    instaKillTimer    = hdr->instaKillTimer;
+    g_world.doublePointsTimer = hdr->doublePointsTimer;
+    g_world.instaKillTimer    = hdr->instaKillTimer;
     mbox.state         = hdr->mboxState;
     mbox.timer         = hdr->mboxTimer;
     mbox.showingWeapon = hdr->mboxShowingWeapon;

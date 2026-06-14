@@ -9,12 +9,11 @@
 #include <math.h>
 #include <stdlib.h>
 
-// enemies[]/bullets[]/throwables[]/powerUps[] now live in g_world (world.h).
+// enemies[]/bullets[]/throwables[]/powerUps[] + doublePointsTimer/instaKillTimer
+// now live in g_world (world.h).
 int   enemiesAlive = 0;
 int   enemiesToSpawn = 0;
 float spawnTimer = 0.0f;
-float doublePointsTimer = 0.0f;
-float instaKillTimer    = 0.0f;
 
 // Canonical CoD zombies health curve: linear +100/round through round 9,
 // then a compounding +10% each round from round 10 on.
@@ -644,7 +643,7 @@ void Bullets_Update(float dt) {
             }
             int dmg = (int)(bullets[i].damage * dropMul) * (headHit ? 2 : 1);
             if (dmg < 1) dmg = 1;
-            if (instaKillTimer > 0) dmg = 99999;
+            if (g_world.instaKillTimer > 0) dmg = 99999;
             en->hp -= dmg;
             int op = bullets[i].ownerPlayer;
             // CoD scoring: 10 per hitmarker, 60 for a body kill (10+50),
@@ -652,7 +651,7 @@ void Bullets_Update(float dt) {
             // only score the base 10.
             int hitPts  = HIT_POINTS;
             int killPts = KILL_POINTS + (headHit ? 40 : 0);
-            if (doublePointsTimer > 0) { hitPts *= 2; killPts *= 2; }
+            if (g_world.doublePointsTimer > 0) { hitPts *= 2; killPts *= 2; }
             if (op >= 0 && op < NET_MAX_PLAYERS && players[op].active) {
                 players[op].points += hitPts;
                 players[op].shotsHit++;
@@ -684,7 +683,7 @@ void Bullets_Update(float dt) {
         if (doSplash) {
             int hitKillPts = KILL_POINTS;
             int hitHitPts  = HIT_POINTS;
-            if (doublePointsTimer > 0) { hitKillPts *= 2; hitHitPts *= 2; }
+            if (g_world.doublePointsTimer > 0) { hitKillPts *= 2; hitHitPts *= 2; }
             for (int e = 0; e < MAX_ENEMIES; e++) {
                 if (!enemies[e].alive) continue;
                 if (hitIsEnemy && e == enemyIdx) continue;  // direct-hit already took damage
@@ -696,7 +695,7 @@ void Bullets_Update(float dt) {
                 float mul = 1.0f - (dd / splashR);
                 int dmg = (int)(splashDmg * mul);
                 if (dmg < 1) continue;
-                if (instaKillTimer > 0) dmg = 99999;
+                if (g_world.instaKillTimer > 0) dmg = 99999;
                 enemies[e].hp -= dmg;
                 if (splashOwner >= 0 && splashOwner < NET_MAX_PLAYERS && players[splashOwner].active) {
                     players[splashOwner].points += hitHitPts;
@@ -765,7 +764,7 @@ void Throwables_Detonate(Throwable *t) {
     if (t->kind == TH_FRAG) {
         int killPts = KILL_POINTS;
         int hitPts  = HIT_POINTS;
-        if (doublePointsTimer > 0) { killPts *= 2; hitPts *= 2; }
+        if (g_world.doublePointsTimer > 0) { killPts *= 2; hitPts *= 2; }
         int op = t->ownerPlayer;
         for (int e = 0; e < MAX_ENEMIES; e++) {
             if (!enemies[e].alive) continue;
@@ -777,7 +776,7 @@ void Throwables_Detonate(Throwable *t) {
             float mul = 1.0f - (d / FRAG_RADIUS);
             int dmg = (int)(FRAG_DAMAGE * mul);
             if (dmg < 1) continue;
-            if (instaKillTimer > 0) dmg = 99999;
+            if (g_world.instaKillTimer > 0) dmg = 99999;
             enemies[e].hp -= dmg;
             if (op >= 0 && op < NET_MAX_PLAYERS && players[op].active) {
                 players[op].points += hitPts;
@@ -882,8 +881,8 @@ void Throwables_Update(float dt) {
 
 void PowerUps_ClearAll(void) {
     for (int i = 0; i < MAX_POWERUPS; i++) powerUps[i].active = false;
-    doublePointsTimer = 0;
-    instaKillTimer = 0;
+    g_world.doublePointsTimer = 0;
+    g_world.instaKillTimer = 0;
 }
 
 void PowerUps_TryDrop(Vector3 pos) {
@@ -907,8 +906,8 @@ void PowerUps_Update(float dt) {
         powerUps[i].lifetime -= dt;
         if (powerUps[i].lifetime <= 0) powerUps[i].active = false;
     }
-    if (doublePointsTimer > 0) doublePointsTimer -= dt;
-    if (instaKillTimer    > 0) instaKillTimer    -= dt;
+    if (g_world.doublePointsTimer > 0) g_world.doublePointsTimer -= dt;
+    if (g_world.instaKillTimer    > 0) g_world.instaKillTimer    -= dt;
 }
 
 void PowerUps_Apply(PowerUpType type) {
@@ -937,10 +936,10 @@ void PowerUps_Apply(PowerUpType type) {
             Fx_PunchAndRumble(0.9f, 1.0f, 1.0f, 0.5f);
             break;
         case PU_DOUBLE_POINTS:
-            doublePointsTimer = 20.0f;
+            g_world.doublePointsTimer = 20.0f;
             break;
         case PU_INSTAKILL:
-            instaKillTimer = 20.0f;
+            g_world.instaKillTimer = 20.0f;
             break;
         case PU_CARPENTER:
             for (int i = 0; i < windowCount; i++) windows[i].boards = MAX_BOARDS_PER_WIN;

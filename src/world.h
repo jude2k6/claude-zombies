@@ -23,8 +23,14 @@ typedef struct {
     PowerUp   powerUps[MAX_POWERUPS];
     int       localPlayerIdx;
     GamePhase gamePhase;
+    // Scalar game-progress state. These names also appear as fields in the
+    // network snapshot struct, so they are accessed explicitly as g_world.X
+    // (no aliasing macro below) — see the note above.
+    int       roundNum;
+    float     doublePointsTimer;
+    float     instaKillTimer;
     // TODO (Phase 0, real threading): players[], level state, mbox, mapName,
-    // roundNum, doublePointsTimer, instaKillTimer, netMode.
+    // netMode.
 } World;
 
 // The single live world instance. Defined in world.c.

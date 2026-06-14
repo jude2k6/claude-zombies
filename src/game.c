@@ -7,12 +7,12 @@
 #include "level.h"
 #include "decals.h"
 
-int        roundNum = 0;
-// gamePhase now lives in g_world (world.h); it is GS_PRE_GAME (0) at zero-init.
+// roundNum + gamePhase now live in g_world (world.h); zero-init matches the old
+// defaults (round 0, GS_PRE_GAME == 0).
 float      roundBreakTimer = 0.0f;
 
 void Game_StartRound(int r) {
-    roundNum = r;
+    g_world.roundNum = r;
     enemiesToSpawn = Enemies_RoundSpawnCount(r);
     enemiesAlive = 0;
     spawnTimer = 1.0f;
@@ -138,7 +138,7 @@ void Game_Tick(float dt) {
     Decals_Update(dt);
     Enemies_Update(dt);
     Enemies_Separate();
-    Enemies_UpdateSpawns(roundNum, dt);
+    Enemies_UpdateSpawns(g_world.roundNum, dt);
     Interact_UpdatePaP(dt);
     Interact_UpdateRepairs(dt);
     Interact_UpdateMBox(dt);
@@ -173,13 +173,13 @@ void Game_Tick(float dt) {
         } else if (enemiesAlive <= 0 && enemiesToSpawn <= 0) {
             gamePhase = GS_ROUND_BREAK;
             roundBreakTimer = 4.0f;
-            int bonus = 50 + roundNum * 10;
+            int bonus = 50 + g_world.roundNum * 10;
             for (int i = 0; i < NET_MAX_PLAYERS; i++)
                 if (players[i].active) players[i].points += bonus;
             for (int i = 0; i < windowCount; i++) windows[i].boards = MAX_BOARDS_PER_WIN;
         }
     } else if (gamePhase == GS_ROUND_BREAK) {
         roundBreakTimer -= dt;
-        if (roundBreakTimer <= 0) Game_StartRound(roundNum + 1);
+        if (roundBreakTimer <= 0) Game_StartRound(g_world.roundNum + 1);
     }
 }

@@ -193,7 +193,7 @@ void AudioDirector_Tick(Player *me) {
         lastHeadshots = me->headshots;   lastKills = me->kills;
         lastHp = me->hp;                 lastPoints = me->points;
         lastPhase = gamePhase;           lastMBoxState = mbox.state;
-        lastDoublePoints = doublePointsTimer; lastInstakill = instaKillTimer;
+        lastDoublePoints = g_world.doublePointsTimer; lastInstakill = g_world.instaKillTimer;
         int mask = 0;
         for (int k = 0; k < PERK_COUNT; k++) if (me->hasPerk[k]) mask |= 1 << k;
         lastPerks = mask;
@@ -325,12 +325,12 @@ void AudioDirector_Tick(Player *me) {
         lastMBoxState = mbox.state;
     }
 
-    if (doublePointsTimer > lastDoublePoints + 5.0f ||
-        instaKillTimer    > lastInstakill    + 5.0f) {
+    if (g_world.doublePointsTimer > lastDoublePoints + 5.0f ||
+        g_world.instaKillTimer    > lastInstakill    + 5.0f) {
         Audio_Play(SFX_POWERUP, 0.8f * duckMul, 1.0f);
     }
-    lastDoublePoints = doublePointsTimer;
-    lastInstakill    = instaKillTimer;
+    lastDoublePoints = g_world.doublePointsTimer;
+    lastInstakill    = g_world.instaKillTimer;
 
     // ---- jump foley -------------------------------------------------------
     if (lastOnGround && !me->onGround && me->alive) {

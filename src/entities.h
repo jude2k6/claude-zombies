@@ -32,9 +32,7 @@ void  Throwables_Throw(Player *p, ThrowableKind kind);
 void  Throwables_Update(float dt);
 void  Throwables_Detonate(Throwable *t);
 
-// Power-ups (powerUps[] is g_world.powerUps via world.h)
-extern float   doublePointsTimer;
-extern float   instaKillTimer;
+// Power-ups (powerUps[]/doublePointsTimer/instaKillTimer all live in g_world)
 
 void PowerUps_ClearAll(void);
 void PowerUps_TryDrop(Vector3 pos);

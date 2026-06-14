@@ -179,9 +179,9 @@ void Menu_StartSoloGame(void) {
     Enemies_ClearAll();
     Bullets_ClearAll();
     Throwables_ClearAll();
-    // Start in the round-break: GS_ROUND_BREAK with roundNum=0 rolls into
+    // Start in the round-break: GS_ROUND_BREAK with g_world.roundNum=0 rolls into
     // Game_StartRound(1) cleanly. Avoids the round-1 skip the prior code had.
-    roundNum = 0;
+    g_world.roundNum = 0;
     gamePhase = GS_ROUND_BREAK;
     roundBreakTimer = 3.0f;
     uiState = UI_PLAY;
@@ -209,7 +209,7 @@ void Menu_StartHostedGame(void) {
     Enemies_ClearAll();
     Bullets_ClearAll();
     Throwables_ClearAll();
-    roundNum = 0;
+    g_world.roundNum = 0;
     gamePhase = GS_ROUND_BREAK;
     roundBreakTimer = 3.0f;
     PktStart s = { .type = PKT_START };
@@ -556,7 +556,7 @@ void Menu_DrawGameOver(int sw, int sh) {
     DrawText(msg, sw/2 - tw/2,     40,     fs, (Color){230, 60, 60, 255});
 
     // Big "Round X reached" centerpiece.
-    char rb[64]; snprintf(rb, sizeof rb, "REACHED  ROUND  %d", roundNum);
+    char rb[64]; snprintf(rb, sizeof rb, "REACHED  ROUND  %d", g_world.roundNum);
     int rfs = 36;
     int rw = MeasureText(rb, rfs);
     DrawText(rb, sw/2 - rw/2, 130, rfs, (Color){220, 220, 220, 240});

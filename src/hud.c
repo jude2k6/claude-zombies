@@ -201,16 +201,16 @@ static void HudUpdateFeedback(Player *me, float dt) {
     hudLastHp = me->hp;
 
     if (gamePhase == GS_ROUND_BREAK && hudLastPhase == GS_PLAY) {
-        hudBonusToastAmount = 50 + roundNum * 10;
+        hudBonusToastAmount = 50 + g_world.roundNum * 10;
         hudBonusToastTimer  = 2.5f;
     }
     // Transition into a fresh round (PRE_GAME or ROUND_BREAK → PLAY): big splash.
-    if (gamePhase == GS_PLAY && hudLastPhase != GS_PLAY && roundNum > 0) {
+    if (gamePhase == GS_PLAY && hudLastPhase != GS_PLAY && g_world.roundNum > 0) {
         hudRoundSplashTimer = 2.6f;
-        hudRoundSplashRound = roundNum;
+        hudRoundSplashRound = g_world.roundNum;
     }
     hudLastPhase = gamePhase;
-    hudLastRound = roundNum;
+    hudLastRound = g_world.roundNum;
 
     if (hudHitMarkerTimer    > 0) hudHitMarkerTimer    -= dt;
     if (hudDmgDirTimer       > 0) hudDmgDirTimer       -= dt;
@@ -441,7 +441,7 @@ void Hud_Draw(int sw, int sh, Player *me, Interact ix) {
     // unframed, COD-style, sitting over a soft dark gradient so it reads
     // against the bright sky.
     {
-        char rd[24]; snprintf(rd, sizeof rd, "%d", roundNum);
+        char rd[24]; snprintf(rd, sizeof rd, "%d", g_world.roundNum);
         int fs = 58;
         int rw = MeasureText(rd, fs);
         DrawRectangle(sw/2 - 130, 0, 260, 96, (Color){0,0,0,70});
@@ -567,14 +567,14 @@ void Hud_Draw(int sw, int sh, Player *me, Interact ix) {
 
     // Power-up status (centered under crosshair)
     int puY = sh / 2 + 30;
-    if (doublePointsTimer > 0) {
-        char b[32]; snprintf(b, sizeof b, "DOUBLE POINTS  %.1fs", doublePointsTimer);
+    if (g_world.doublePointsTimer > 0) {
+        char b[32]; snprintf(b, sizeof b, "DOUBLE POINTS  %.1fs", g_world.doublePointsTimer);
         int tw = MeasureText(b, 20);
         DrawText(b, sw/2 - tw/2, puY, 20, (Color){240,220,60,255});
         puY += 24;
     }
-    if (instaKillTimer > 0) {
-        char b[32]; snprintf(b, sizeof b, "INSTA-KILL  %.1fs", instaKillTimer);
+    if (g_world.instaKillTimer > 0) {
+        char b[32]; snprintf(b, sizeof b, "INSTA-KILL  %.1fs", g_world.instaKillTimer);
         int tw = MeasureText(b, 20);
         DrawText(b, sw/2 - tw/2, puY, 20, (Color){240,80,80,255});
     }
@@ -706,7 +706,7 @@ void Hud_Draw(int sw, int sh, Player *me, Interact ix) {
     }
 
     if (gamePhase == GS_ROUND_BREAK) {
-        char rb[64]; snprintf(rb, sizeof rb, "ROUND  %d", roundNum + 1);
+        char rb[64]; snprintf(rb, sizeof rb, "ROUND  %d", g_world.roundNum + 1);
         int rs = 70;
         int rw = MeasureText(rb, rs);
         DrawRectangle(0, sh/2 - 70, sw, 140, (Color){0,0,0,160});

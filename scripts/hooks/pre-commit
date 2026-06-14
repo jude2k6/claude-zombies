@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# pre-commit hook: enforce the engine/game seam (§2 cardinal rule).
+# Blocks any commit that introduces a game-header include inside src/engine/.
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+exec "${REPO_ROOT}/scripts/check-seam.sh"

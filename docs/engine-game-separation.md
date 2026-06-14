@@ -17,9 +17,20 @@ path to it. The goal is a clean, reusable **engine** that owns
 >   game-side `audio_director.c` owns the diff/timer state and fires events
 >   (`AudioDirector_Tick`, commit `cd6989f`). **Phase 1 complete — both §2
 >   leaks closed, dependency direction is now correct.**
-> - Remaining: Phase 0 globals→`Engine`/`World`, Phase 2 input map, Phase 4
->   content registry, Phase 5 render seam, Phase 6 `main.c` flip, Phase 7 the
->   full directory split + CI grep.
+> - ✅ **Phase 7a (seam relocation + enforcement)** — the now-pure `audio.c`
+>   moved to `src/engine/`; `scripts/check-seam.sh` enforces the §2 cardinal
+>   rule, wired as a CMake `seam-check` target the `shooter` build depends on,
+>   plus a tracked `scripts/hooks/pre-commit` (activate with
+>   `git config core.hooksPath scripts/hooks`).
+> - Remaining: Phase 0 globals→`Engine`/`World`, Phase 2 input map (engine-side
+>   action-map API in progress), Phase 4 content registry, Phase 5 render seam,
+>   Phase 6 `main.c` flip, Phase 7 full directory split.
+>
+> **Note on Phase 0:** the doc's §14 macro-shim (`#define players …`) is unsafe
+> as-is — `players`, `mbox`, `mapName`, `roundNum` and the power-up timers are
+> also field names in the protocol/mapdoc structs, so an object-like macro would
+> corrupt `hdr->players` / `doc->mbox` / `s->mapName`. Phase 0 therefore needs
+> real `World *` threading for those names (or a rename), not a blanket macro.
 
 all infrastructure — content loading, rendering, audio, animation, particles,
 input, networking transport — and a **game** that is pure rules + content

@@ -9,18 +9,12 @@
 #include <math.h>
 #include <stdlib.h>
 
-Enemy enemies[MAX_ENEMIES];
+// enemies[]/bullets[]/throwables[]/powerUps[] now live in g_world (world.h).
 int   enemiesAlive = 0;
 int   enemiesToSpawn = 0;
 float spawnTimer = 0.0f;
-
-Bullet bullets[MAX_BULLETS];
-
-Throwable throwables[MAX_THROWABLES];
-
-PowerUp powerUps[MAX_POWERUPS] = {0};
-float   doublePointsTimer = 0.0f;
-float   instaKillTimer    = 0.0f;
+float doublePointsTimer = 0.0f;
+float instaKillTimer    = 0.0f;
 
 // Canonical CoD zombies health curve: linear +100/round through round 9,
 // then a compounding +10% each round from round 10 on.

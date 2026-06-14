@@ -2,9 +2,9 @@
 #define SHOOTER_PLAYER_H
 
 #include "types.h"
+#include "world.h"   // localPlayerIdx now lives in g_world
 
 extern Player players[NET_MAX_PLAYERS];
-extern int    localPlayerIdx;
 extern bool   godMode;
 extern bool   noclipMode;
 

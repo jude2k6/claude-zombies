@@ -2,9 +2,9 @@
 #define SHOOTER_GAME_H
 
 #include "types.h"
+#include "world.h"   // gamePhase now lives in g_world
 
 extern int        roundNum;
-extern GamePhase  gamePhase;
 extern float      roundBreakTimer;
 
 void Game_StartRound(int r);

@@ -9,7 +9,7 @@
 #include <math.h>
 
 Player players[NET_MAX_PLAYERS];
-int    localPlayerIdx = 0;
+// localPlayerIdx now lives in g_world (world.h).
 bool   godMode = false;
 bool   noclipMode = false;
 

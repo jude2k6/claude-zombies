@@ -8,7 +8,7 @@
 #include "decals.h"
 
 int        roundNum = 0;
-GamePhase  gamePhase = GS_PRE_GAME;
+// gamePhase now lives in g_world (world.h); it is GS_PRE_GAME (0) at zero-init.
 float      roundBreakTimer = 0.0f;
 
 void Game_StartRound(int r) {

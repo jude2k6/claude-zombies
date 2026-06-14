@@ -22,7 +22,7 @@ if [ ! -d "${ENGINE_DIR}" ]; then
 fi
 
 VIOLATIONS="$(grep -rEl \
-    'weapons\.h|perks\.h|entities\.h|game\.h|player\.h|interact\.h|hud\.h|menu\.h|level\.h' \
+    'weapons\.h|perks\.h|entities\.h|game\.h|player\.h|interact\.h|hud\.h|menu\.h|level\.h|world\.h|audio_director\.h' \
     "${ENGINE_DIR}" 2>/dev/null || true)"
 
 if [ -n "${VIOLATIONS}" ]; then

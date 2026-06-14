@@ -185,8 +185,8 @@ void Weapon_SwapSlot(Player *p, int target) {
     if (p->inventory[target].owned) p->currentSlot = target;
 }
 
-// Forward decls into entities
-extern Enemy enemies[MAX_ENEMIES];
+// Forward decls into entities (enemies[] is g_world.enemies via world.h,
+// pulled in through player.h above).
 extern int   enemiesAlive;
 
 #define MELEE_RANGE       1.8f

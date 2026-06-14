@@ -2,9 +2,9 @@
 #define SHOOTER_ENTITIES_H
 
 #include "types.h"
+#include "world.h"   // enemies/bullets/throwables/powerUps now live in g_world
 
-// Enemies
-extern Enemy enemies[MAX_ENEMIES];
+// Enemies (enemies[] is g_world.enemies via world.h)
 extern int   enemiesAlive;
 extern int   enemiesToSpawn;
 extern float spawnTimer;
@@ -20,24 +20,19 @@ void  Enemies_Update(float dt);
 void  Enemies_Separate(void);
 void  Enemies_ClearAll(void);
 
-// Bullets
-extern Bullet bullets[MAX_BULLETS];
-
+// Bullets (bullets[] is g_world.bullets via world.h)
 void  Bullets_Spawn(Vector3 origin, Vector3 dir, float speed, float life,
                     int damage, int weaponIdx, int ownerPlayer);
 void  Bullets_Update(float dt);
 void  Bullets_ClearAll(void);
 
-// Throwables (frag / stun grenades)
-extern Throwable throwables[MAX_THROWABLES];
-
+// Throwables (frag / stun grenades; throwables[] is g_world.throwables via world.h)
 void  Throwables_ClearAll(void);
 void  Throwables_Throw(Player *p, ThrowableKind kind);
 void  Throwables_Update(float dt);
 void  Throwables_Detonate(Throwable *t);
 
-// Power-ups
-extern PowerUp powerUps[MAX_POWERUPS];
+// Power-ups (powerUps[] is g_world.powerUps via world.h)
 extern float   doublePointsTimer;
 extern float   instaKillTimer;
 

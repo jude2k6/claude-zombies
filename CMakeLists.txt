@@ -43,6 +43,7 @@ FetchContent_MakeAvailable(enet)
 # ---- executable ------------------------------------------------------------
 add_executable(shooter
     src/main.c
+    src/world.c
     src/level.c
     src/player.c
     src/weapons.c

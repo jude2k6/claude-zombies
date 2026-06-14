@@ -22,15 +22,21 @@ path to it. The goal is a clean, reusable **engine** that owns
 >   rule, wired as a CMake `seam-check` target the `shooter` build depends on,
 >   plus a tracked `scripts/hooks/pre-commit` (activate with
 >   `git config core.hooksPath scripts/hooks`).
-> - 🔶 **Phase 2 (input action map) — infra landed** — engine-owned action map
->   in `src/engine/pad.{c,h}`: `Eng_InputBind` / `Eng_InputPressed` /
->   `Eng_InputDown` / `Eng_InputMoveAxis` / `Eng_InputLookDelta` /
->   `Eng_InputSetLookSensitivity` (commit `b3247ab`). Additive, nothing calls it
->   yet. **TODO:** migrate `HandleLocalActions` + the raw `IsKeyPressed`/`Bind_*`
->   sites (main.c, player.c, menu.c, hud.c, settings.c) onto it.
+> - 🔶 **Phase 2 (input action map) — infra + gameplay edges migrated** — engine
+>   action map in `src/engine/pad.{c,h}`: `Eng_InputBind` (key + mouse + pad) /
+>   `Eng_InputPressed` / `Eng_InputDown` / `Eng_InputMoveAxis` /
+>   `Eng_InputLookDelta` (commits `b3247ab`, `eb55002`). `HandleLocalActions` +
+>   fire/ADS/interact-held now read the action map (keyed by the existing `BA_*`
+>   ids) instead of hardcoded `KEY_*`/mouse literals; keyboard+mouse bound once
+>   at startup via `BindGameInputDefaults`. **Behaviour-preserving by
+>   construction** (each action bound to exactly its old key/mouse), but in-game
+>   input is not headlessly verifiable — wants a manual playtest. **TODO:** fold
+>   the configurable gamepad layer (`Bind_*`) into the engine map so each site is
+>   a single call; migrate movement/look onto `Eng_InputMoveAxis/LookDelta`; the
+>   menu/HUD/debug key reads (player.c, menu.c, hud.c, settings.c) are untouched.
 > - Remaining: Phase 0 globals→`Engine`/`World` (needs real `World *` threading —
->   see note below), Phase 2 call-site migration, Phase 4 content registry,
->   Phase 5 render seam, Phase 6 `main.c` flip, Phase 7 full directory split.
+>   see note below), Phase 2 gamepad fold-in + movement/look, Phase 4 content
+>   registry, Phase 5 render seam, Phase 6 `main.c` flip, Phase 7 full dir split.
 >
 > **Note on Phase 0:** the doc's §14 macro-shim (`#define players …`) is unsafe
 > as-is — `players`, `mbox`, `mapName`, `roundNum` and the power-up timers are

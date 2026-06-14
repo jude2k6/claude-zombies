@@ -1,6 +1,6 @@
 # Engine / Game Separation — Design & Plan
 
-> ## ▶ Resume here (state as of commit `a590afb`)
+> ## ▶ Resume here (state as of commit `714cd20`)
 > Everything below "Progress" is current. Tree is clean and green; build runs
 > `seam-check` and a pre-commit hook enforces the §2 rule
 > (`git config core.hooksPath scripts/hooks` if cloning fresh).
@@ -14,6 +14,16 @@
 > timeout 5 ./build/shooter              # exit 124 = ran clean
 > ```
 >
+> **Done since a590afb:** all level state relocated into `g_world` — collision-free
+> names via macro alias (commit `ef90e9e`), colliders (`obstacles`, `obstacleCount`,
+> `windows`, `windowCount`, `pap`, `mbox`, `mapName`, `arenaHalfX/Z`) via explicit
+> `g_world.X` (commit `714cd20`). `level.{h,c}` now hold no state. The collider
+> rewrite was a lookbehind-guarded perl substitution over `src/*.c`
+> (`s/(?<![.>\w])NAME\b/g_world.NAME/g`) — it correctly skipped `doc->X`/`hdr->X`
+> field accesses, so protocol.c needed no hand-editing after all. Non-zero defaults
+> (`mapName "Default"`, arena halves) preserved via a designated initializer on
+> `g_world` in `world.c`.
+>
 > **Next slice — finish Phase 0 state relocation into `g_world`** (`src/world.{h,c}`).
 > Two proven techniques:
 > 1. *collision-free name* → add a `World` member + an object-like alias macro in
@@ -26,9 +36,10 @@
 >    files where a `hdr->NAME`/`doc->NAME` field shares a line — currently only
 >    `protocol.c`). The linker catches any miss (undefined `NAME`).
 >
-> Order of attack for the rest: `mbox`, `mapName`, level state (all colliders →
-> technique 2), then **`players[]`** (collider, 277 uses/13 files — do it alone,
-> playtest after). Each global: remove its `extern` from the canonical header
+> Order of attack for the rest: **`players[]`** (collider, 277 uses/13 files — do
+> it alone, playtest after) and `netMode`. (`mbox`, `mapName`, and all level state
+> are now done — see "Done since a590afb" above.) Each global: remove its `extern`
+> from the canonical header
 > (which already `#include "world.h"`) and its definition from the `.c`. After
 > all state is in `g_world`, start threading `World *` through the sim toward the
 > §15 litmus (headless `fixed()` tick). Then resume Phase 2 (gamepad fold-in,
@@ -73,7 +84,14 @@ path to it. The goal is a clean, reusable **engine** that owns
 >   the configurable gamepad layer (`Bind_*`) into the engine map so each site is
 >   a single call; migrate movement/look onto `Eng_InputMoveAxis/LookDelta`; the
 >   menu/HUD/debug key reads (player.c, menu.c, hud.c, settings.c) are untouched.
-> - 🔶 **Phase 0 (state ownership) — World struct + two clusters** — `src/world.{h,c}`
+> - ✅ **Phase 0 (state ownership) — all level state relocated** — collision-free
+>   level globals (`interiorWalls`, `doors`, `wallBuys`, `perkMachines`,
+>   `mapSpawns`, `mapProps` + counts/handles) via macro alias (commit `ef90e9e`);
+>   colliders (`obstacles`, `obstacleCount`, `windows`, `windowCount`, `pap`,
+>   `mbox`, `mapName`, `arenaHalfX/Z`) via explicit `g_world.X` (commit `714cd20`).
+>   `level.{h,c}` now hold no game state. Only `players[]` and `netMode` remain
+>   before the `World *` threading toward the §15 headless-tick litmus.
+> - 🔶 **Phase 0 (earlier) — World struct + first clusters** — `src/world.{h,c}`
 >   add the `World` struct and the live `g_world`. Migrated so far:
 >   `enemies, bullets, throwables, powerUps, localPlayerIdx, gamePhase` via
 >   transitional macros (collision-free names, commit `059b638`); and

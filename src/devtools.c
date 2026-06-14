@@ -5,6 +5,7 @@
 #include "level.h"
 #include "mapdoc.h"
 #include "player.h"
+#include "game.h"
 #include "weapons.h"
 #include "entities.h"
 #include "interact.h"
@@ -719,6 +720,71 @@ static int Dev_SimNavtest(int argc, char **argv) {
     return pass ? 0 : 1;
 }
 
+// ---- --sim-tick <file.map> [frames] ----------------------------------------
+// The §15 headless-tick litmus for the engine/game split: instantiate the
+// World from a MapDoc and run the full game tick (rounds, spawns, players,
+// enemies, bullets) with NO window and NO GL context open — proving the
+// simulation no longer depends on the renderer. Deliberately skips
+// Assets_Load / Weapons_Load (those load GL models); weapon stats being zero
+// is fine, the sim still advances rounds and walks zombies. Exit 0 = the world
+// ticked cleanly and the round system did something.
+
+static int Dev_SimTick(int argc, char **argv) {
+    if (argc < 3) { fprintf(stderr, "usage: --sim-tick <file.map> [frames]\n"); return 1; }
+    const char *path = argv[2];
+    int frames = (argc >= 4) ? atoi(argv[3]) : 1200;   // ~20 s at 60 Hz
+    if (frames <= 0) frames = 1200;
+
+    SetTraceLogLevel(LOG_WARNING);
+    // NO InitWindow — this is the whole point. MapDoc parsing + instantiation
+    // is pure; texture-name lookups resolve to -1 with no asset cache loaded.
+    if (!Level_LoadFromFile(path)) {
+        fprintf(stderr, "sim-tick: failed to load map: %s\n", path);
+        return 1;
+    }
+
+    localPlayerIdx = 0;
+    for (int i = 0; i < NET_MAX_PLAYERS; i++) memset(&g_world.players[i], 0, sizeof g_world.players[i]);
+    Player_ResetForGame(0, "headless");
+    godMode = true;   // keep the lone test player up so the run reaches late rounds
+    // Open every door so window spawns aren't gated by purchase progress —
+    // makes the litmus map-agnostic (some maps lock all round-1 windows).
+    for (int i = 0; i < doorCount; i++) doors[i].opened = true;
+
+    // Round 0 + GS_ROUND_BREAK rolls into round 1 on the first tick (same as main).
+    g_world.roundNum = 0;
+    gamePhase = GS_ROUND_BREAK;
+    roundBreakTimer = 0.0f;
+
+    const float dt = 1.0f / 60.0f;
+    int   maxRound = 0, totalSpawned = 0, prevAlive = 0;
+    float zombieTravel = 0.0f;
+    Vector3 firstZPos = { 0 };
+    bool    sawZombie = false;
+    for (int f = 0; f < frames; f++) {
+        Game_Tick(dt);
+        if (g_world.roundNum > maxRound) maxRound = g_world.roundNum;
+        int alive = 0;
+        for (int i = 0; i < MAX_ENEMIES; i++) if (enemies[i].alive) alive++;
+        if (alive > prevAlive) totalSpawned += (alive - prevAlive);
+        prevAlive = alive;
+        for (int i = 0; i < MAX_ENEMIES; i++) {
+            if (!enemies[i].alive) continue;
+            if (!sawZombie) { firstZPos = enemies[i].pos; sawZombie = true; }
+            zombieTravel = fmaxf(zombieTravel, Vector3Distance(enemies[i].pos, firstZPos));
+            break;
+        }
+    }
+
+    bool pass = (maxRound >= 1) && (totalSpawned > 0);
+    fprintf(stderr,
+            "sim-tick %s: %d frames headless (no window)  rounds->%d  spawned=%d  "
+            "zombie moved=%.1fm  -> %s\n",
+            path, frames, maxRound, totalSpawned, zombieTravel,
+            pass ? "PASS" : "FAIL");
+    return pass ? 0 : 1;
+}
+
 // ---- dispatcher ------------------------------------------------------------
 
 bool Devtools_HandleCLI(int argc, char **argv, int *exitCode) {
@@ -764,6 +830,10 @@ bool Devtools_HandleCLI(int argc, char **argv, int *exitCode) {
     }
     if (argc >= 3 && strcmp(argv[1], "--sim-navtest") == 0) {
         *exitCode = Dev_SimNavtest(argc, argv);
+        return true;
+    }
+    if (argc >= 3 && strcmp(argv[1], "--sim-tick") == 0) {
+        *exitCode = Dev_SimTick(argc, argv);
         return true;
     }
     return false;

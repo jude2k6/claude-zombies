@@ -1,50 +1,47 @@
 # Engine / Game Separation — Design & Plan
 
-> ## ▶ Resume here (state as of commit `714cd20`)
+> ## ▶ Resume here (state as of commit `d70aea9`+)
 > Everything below "Progress" is current. Tree is clean and green; build runs
 > `seam-check` and a pre-commit hook enforces the §2 rule
 > (`git config core.hooksPath scripts/hooks` if cloning fresh).
 >
-> **Build + verify loop** (no in-game input/audio path is headless, so these
-> plus a manual playtest are the regression check):
+> **Build + verify loop:**
 > ```
-> cmake --build build -j                 # seam-check runs first, then compiles
-> ./build/shooter --screenshot-zombies   # exercises g_world.enemies
-> ./build/shooter --screenshot-coop      # players[] + round state
-> timeout 5 ./build/shooter              # exit 124 = ran clean
+> cmake --build build -j                       # seam-check runs first, then compiles
+> ./build/shooter --sim-tick data/maps/nacht.map   # §15 litmus: headless tick, NO window
+> ./build/shooter --screenshot-zombies         # exercises g_world.enemies
+> ./build/shooter --screenshot-coop            # g_world.players[] + round state
+> timeout 5 ./build/shooter                    # exit 124 = ran clean
 > ```
 >
-> **Done since a590afb:** all level state relocated into `g_world` — collision-free
-> names via macro alias (commit `ef90e9e`), colliders (`obstacles`, `obstacleCount`,
-> `windows`, `windowCount`, `pap`, `mbox`, `mapName`, `arenaHalfX/Z`) via explicit
-> `g_world.X` (commit `714cd20`). `level.{h,c}` now hold no state. The collider
-> rewrite was a lookbehind-guarded perl substitution over `src/*.c`
-> (`s/(?<![.>\w])NAME\b/g_world.NAME/g`) — it correctly skipped `doc->X`/`hdr->X`
-> field accesses, so protocol.c needed no hand-editing after all. Non-zero defaults
-> (`mapName "Default"`, arena halves) preserved via a designated initializer on
-> `g_world` in `world.c`.
+> **✅ Phase 0 state relocation COMPLETE.** All game state now lives in `g_world`
+> (`src/world.{h,c}`). Final slice (`players[]` + `netMode`, commit `d70aea9`):
+> `players[]` collides with the `SerPlayer players[]` field in `PktSnapshotHeader`,
+> so it's accessed explicitly as `g_world.players` (lookbehind perl over all
+> game `.c`, then `protocol.c` hand-fixed so `hdr->players` / the struct field
+> stay bare); `netMode` is collision-free so it's macro-aliased. Earlier slices:
+> all level state (`ef90e9e`, `714cd20`), entity arrays + round/power-up timers
+> (`059b638`, `e02f621`).
 >
-> **Next slice — finish Phase 0 state relocation into `g_world`** (`src/world.{h,c}`).
-> Two proven techniques:
-> 1. *collision-free name* → add a `World` member + an object-like alias macro in
->    `world.h` (`#define enemies (g_world.enemies)`). Safe ONLY if the name is
->    never a struct field or local — check with
->    `grep -rhoE '[.>]NAME\b' src/*.c src/*.h`.
-> 2. *collider* (name also a struct field, e.g. in `PktSnapshotHeader`/`MapDoc`)
->    → add a `World` member with **no** macro; rewrite every bare use to
->    `g_world.NAME` (sed `s/\bNAME\b/g_world.NAME/g` on the simple files; hand-edit
->    files where a `hdr->NAME`/`doc->NAME` field shares a line — currently only
->    `protocol.c`). The linker catches any miss (undefined `NAME`).
+> **✅ §15 headless-tick litmus MET.** `--sim-tick <map> [frames]` (in
+> `devtools.c`) instantiates the World from a MapDoc and runs the full `Game_Tick`
+> with **no `InitWindow` / no GL context** — proving the sim no longer depends on
+> the renderer. The sim path (`Game_Tick`→enemies/bullets/throwables/weapons/perks)
+> has zero GL calls; map parsing is pure (texture-name lookups resolve to -1 with
+> no asset cache). Passes on all four shipped maps (zombies spawn + walk headless).
+> This is the proof that supports keeping `g_world` as the singleton rather than
+> threading a `World *` param through ~290 call sites — the litmus is achieved
+> without it, so the macro/`g_world.X` access pattern stays.
 >
-> Order of attack for the rest: **`players[]`** (collider, 277 uses/13 files — do
-> it alone, playtest after) and `netMode`. (`mbox`, `mapName`, and all level state
-> are now done — see "Done since a590afb" above.) Each global: remove its `extern`
-> from the canonical header
-> (which already `#include "world.h"`) and its definition from the `.c`. After
-> all state is in `g_world`, start threading `World *` through the sim toward the
-> §15 litmus (headless `fixed()` tick). Then resume Phase 2 (gamepad fold-in,
-> movement/look), Phase 4 (content registry), Phase 5 (render seam), Phase 6
-> (`main.c` flip), Phase 7 (full dir split).
+> **Next slice — Phase 2** (fold gamepad `Bind_*` + movement/look into the engine
+> action map), then Phase 4 (content registry → `engine/content`), Phase 5 (render
+> seam), Phase 6 (`main.c` → `engine/app.c` + GameModule), Phase 7 (dir split +
+> `libengine.a` + CI grep). Techniques for any future state relocation:
+> 1. *collision-free name* → `World` member + object-like alias macro in `world.h`.
+>    Safe ONLY if never a struct field/local (`grep -rhoE '[.>]NAME\b' src/*.c`).
+> 2. *collider* → `World` member, no macro; lookbehind perl
+>    `s/(?<![.>\w])NAME\b/g_world.NAME/g`, hand-fix files where a `hdr->NAME` /
+>    struct-field declaration shares the namespace (e.g. `protocol.c`).
 >
 > **Subagent note:** worktree agents keep forking from stale bases — only spawn
 > them for additive, independent, green-building units, tell them to rebase onto

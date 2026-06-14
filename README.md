@@ -222,8 +222,10 @@ and a weapon inside), `--screenshot-zombies` (renders each zombie type in
 idle/attack/dying states), `--screenshot-particles` (renders the particle
 effects — muzzle flash, casings, blood, explosion), `--screenshot-postfx`
 (renders the world through the post-FX pipeline at baseline / hit-flash /
-low-HP settings), and `--anim-test <file.glb> [clip]` (renders a skinned
-glTF model across an animation clip to verify it).
+low-HP settings), `--anim-test <file.glb> [clip]` (renders a skinned
+glTF model across an animation clip to verify it), and `--sim-tick
+<file.map> [frames]` (ticks the full game simulation headless — **no window /
+no GL** — to prove the sim is renderer-independent; exits 0 on a clean run).
 
 ## License
 

@@ -56,11 +56,11 @@ add_executable(shooter
     src/devtools.c
     src/hud.c
     src/menu.c
-    src/audio.c
     src/audio_director.c
     src/settings.c
     src/assets.c
-    # ---- engine/ : reusable, game-clean modules (engine/game split, Phase 3) --
+    # ---- engine/ : reusable, game-clean modules (engine/game split, Phase 3+7a) --
+    src/engine/audio.c
     src/engine/net.c
     src/engine/mapdoc.c
     src/engine/pad.c
@@ -88,6 +88,18 @@ if(SHOOTER_ASAN AND NOT MSVC)
     target_compile_options(shooter PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
     target_link_options(shooter PRIVATE -fsanitize=address,undefined)
 endif()
+
+# ---- engine/game seam check ------------------------------------------------
+# Verifies that no src/engine/ file includes a game header (§2 cardinal rule).
+# The seam-check target runs the script; shooter depends on it so a normal
+# cmake --build fails immediately on a seam violation before any C is compiled.
+add_custom_target(seam-check
+    COMMAND ${CMAKE_COMMAND} -E echo "-- Running seam check..."
+    COMMAND bash ${CMAKE_SOURCE_DIR}/scripts/check-seam.sh
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    COMMENT "Checking engine/game seam (cardinal rule: no game headers in src/engine/)"
+)
+add_dependencies(shooter seam-check)
 
 # ---- data files ------------------------------------------------------------
 # Copy data/ next to the executable at build time so map files load from a

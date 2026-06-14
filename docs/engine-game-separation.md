@@ -11,8 +11,12 @@ path to it. The goal is a clean, reusable **engine** that owns
 > - ✅ **Phase 1, leak #2 (assets→weapons)** — `assets.c` no longer includes
 >   `weapons.h` or iterates `weaponModels[]`; the game enrols viewmodels via
 >   `Assets_RegisterWorldShaderModel` from `Weapons_Load` (commit `c2111ee`).
-> - ⏳ **Phase 1, leak #1 (audio→game)** — not started. `Audio_Tick(me)` still
->   diffs game state; invert to event push next (the bigger half).
+> - ✅ **Phase 1, leak #1 (audio→game)** — `audio.c` is now a pure mixer
+>   (`audio.h` + libc only): `SfxId` sound bank, `Audio_Play`/`Audio_PlayPanned`,
+>   `Audio_SetListener`/`Audio_Positional`, `Audio_PlayMusicTrack`. The new
+>   game-side `audio_director.c` owns the diff/timer state and fires events
+>   (`AudioDirector_Tick`, commit `cd6989f`). **Phase 1 complete — both §2
+>   leaks closed, dependency direction is now correct.**
 > - Remaining: Phase 0 globals→`Engine`/`World`, Phase 2 input map, Phase 4
 >   content registry, Phase 5 render seam, Phase 6 `main.c` flip, Phase 7 the
 >   full directory split + CI grep.
@@ -87,7 +91,7 @@ miniature:
 
 | File | Bad include | Why it's wrong | Fix | Status |
 |------|-------------|----------------|-----|--------|
-| `audio.c` | `game.h`, `level.h`, `entities.h`, `player.h` | the mixer pulls game state to decide what to play (`Audio_Tick(me)` diffs HP, round phase, box state) | invert to **push**: game fires `Eng_AudioPlay(clip, pos)` events; mixer just plays | ⏳ TODO |
+| `audio.c` | `game.h`, `level.h`, `entities.h`, `player.h` | the mixer pulls game state to decide what to play (`Audio_Tick(me)` diffs HP, round phase, box state) | invert to **push**: game fires `Eng_AudioPlay(clip, pos)` events; mixer just plays | ✅ done (mixer + game-side `audio_director.c`, commit `cd6989f`) |
 | `assets.c` | `weapons.h` | the asset loader iterates `weaponModels[]` in `Assets_ApplyWorldShader` | invert: game **registers** which model handles want the world shader | ✅ done (`Assets_RegisterWorldShaderModel`, commit `c2111ee`) |
 
 If those two inversions land, the seam exists in principle and the rest is

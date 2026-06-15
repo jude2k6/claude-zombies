@@ -714,9 +714,12 @@ regression check (they already exercise render/anim/audio paths headlessly-ish).
    the cheaper "engine owns passes, game still issues draws between begin/end".
    You asked for full engine ownership → go with submission, accept the cost,
    do it in Phase 5 only.
-3. **Fixed vs frame timestep**: the host sim (`Game_Tick`) currently runs at
-   frame rate. Worth deciding if `fixed()` should run on a fixed accumulator
-   while migrating, since the loop is being rewritten anyway.
+3. ✅ **Fixed vs frame timestep — RESOLVED (commit `2fe930c`).** `GameModule`
+   gained a `fixed(dt)` callback; `engine/app.c` drives it from a clamped
+   accumulator at `ENG_FIXED_DT` (1/60 s). The host/solo authoritative sim
+   (`Game_Tick` + snapshot broadcast) runs there; input/local-prediction/camera
+   stay in `frame`. So the sim is frame-rate independent (and matches the
+   headless `--sim-tick` rate). See `docs/engine-usage.md` §2.
 4. **Static lib vs same-target dirs**: `libengine.a` enforces the seam at link
    time (engine literally cannot see game symbols). Stronger than the grep —
    recommended for the end state.

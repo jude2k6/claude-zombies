@@ -51,11 +51,15 @@
 >   and Phase 4's §2 leak (assets→weapons) landed earlier.
 >
 > **Open / deferred (NOT §15 blockers):**
-> - **Phase 2 gamepad fold-in** — keyboard+mouse are on the engine action map
->   (`Eng_Input*`); the configurable `Bind_*` gamepad layer is still queried in
->   parallel at each site (`Eng_InputPressed(a) || Bind_Pressed(a)`). Folding the
->   rebindable pad bindings into the engine map needs the game to re-`Eng_InputBind`
->   on every rebind; behaviour-sensitive and only gamepad-playtest-verifiable.
+> - ✅ **Phase 2 gamepad fold-in — DONE (commit `985efe3`).** The engine action
+>   map (`src/engine/pad.{c,h}`) is now the single source of truth for keyboard +
+>   mouse + gamepad. `Eng_InputBind` carries trigger-axis bindings
+>   (`ENG_BIND_TRIG_L/R`); `Settings_SyncEngineBindings` pushes every `BA_*`'s
+>   current binding into the map and is called from `Settings_Load`/`Save` (so
+>   load/rebind/reset stay current). All `|| Bind_Pressed/Down` parallel queries at
+>   gameplay sites are gone — each is one `Eng_Input*` call. `Bind_PollAny` remains
+>   only for the rebind-capture UI. Behaviour-preserving; gamepad path is
+>   playtest-verifiable only.
 > - **Phase 4 full content registry** — handle-based `Eng_LoadModel/Texture` with
 >   dedup + game-registered `.weapon`/`.map` parsers (§6/§11). `assets.c` stays
 >   game-side (it owns the `PropId` list) and loads via high-level raylib; it is

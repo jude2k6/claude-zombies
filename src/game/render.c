@@ -742,6 +742,11 @@ static void DrawEnemy(Enemy *e) {
 static void DrawOtherPlayer(int idx) {
     Player *p = &g_world.players[idx];
     if (!p->active) return;
+    // p->pos.y is eye height (groundY + PLAYER_EYE); the model origin is at the
+    // feet, so the floor under this player is pos.y - PLAYER_EYE. On flat maps
+    // that's 0 (unchanged); on multi-floor maps it puts the body on the right
+    // deck instead of the ground plane.
+    float floorY = p->pos.y - PLAYER_EYE;
     Color c = PLAYER_COLORS[idx];
     if (!p->alive)      c = (Color){ 100,100,100, 200 };
     else if (p->downed) c = (Color){ 180, 60, 60, 230 };
@@ -768,16 +773,16 @@ static void DrawOtherPlayer(int idx) {
         playerAnimSeen[idx] = true;
         float spd = playerAnimSpeed[idx];
 
-        // Reviving a teammate? reviverIdx isn't serialized, so infer it from
-        // proximity to a downed teammate that's being revived (reviveAsTarget).
+        // Reviving a teammate? reviverIdx is set on the DOWNED player ("who is
+        // reviving me") and is now serialized, so this is authoritative — a
+        // downed teammate pointing back at us means we're the reviver. No more
+        // proximity guessing (which false-fired when two players stood close).
         bool reviving = false;
         if (p->alive && !p->downed) {
             for (int j = 0; j < NET_MAX_PLAYERS; j++) {
-                if (j == idx || !g_world.players[j].active || !g_world.players[j].downed) continue;
-                if (g_world.players[j].reviveAsTarget <= 0.01f) continue;
-                float dx = g_world.players[j].pos.x - p->pos.x;
-                float dz = g_world.players[j].pos.z - p->pos.z;
-                if (dx*dx + dz*dz < 2.2f*2.2f) { reviving = true; break; }
+                Player *d = &g_world.players[j];
+                if (j == idx || !d->active || !d->downed) continue;
+                if (d->reviverIdx == idx) { reviving = true; break; }
             }
         }
 
@@ -800,8 +805,8 @@ static void DrawOtherPlayer(int idx) {
             if (st->clip != pmReload) Anim_Play(st, pmReload, false, ps);
             else st->speed = ps;
         } else if (p->fireHeld && pmFire >= 0) {
-            // fireHeld is only present on the host (not in the snapshot), so on
-            // clients this branch simply never fires — harmless.
+            // fireHeld is serialized in the snapshot now, so teammates' models
+            // actually play the fire clip while they're shooting.
             if (st->clip != pmFire || st->finished) Anim_Play(st, pmFire, false, 1.0f);
         } else if (spd > 8.5f && pmRun >= 0) {
             float ps = Clamp(spd / 9.5f, 0.7f, 1.6f);
@@ -818,7 +823,7 @@ static void DrawOtherPlayer(int idx) {
         // Model origin is at the feet; authored +Y-in-Blender → -Z forward in
         // raylib, so the camera-yaw mapping matches the OBJ path below. The
         // downed/death clips lay the body down themselves (no tilt hack).
-        Vector3 feet = { p->pos.x, 0.0f, p->pos.z };
+        Vector3 feet = { p->pos.x, floorY, p->pos.z };
         float yawDeg = -p->yaw * RAD2DEG;
         // Team-colour wash: lighten toward white so the soldier keeps its
         // material detail while still reading as the player's team colour.
@@ -834,7 +839,7 @@ static void DrawOtherPlayer(int idx) {
 
     if (propModelLoaded[PROP_PLAYER_M]) {
         // Model origin is at the feet — same convention as the zombie.
-        Vector3 feet = { p->pos.x, 0.0f, p->pos.z };
+        Vector3 feet = { p->pos.x, floorY, p->pos.z };
         float yawDeg = -p->yaw * RAD2DEG; // model -Z forward matches camera yaw
         if (p->alive && p->downed) {
             // Tilt forward 90° around X to read as prone.  raylib's
@@ -843,7 +848,7 @@ static void DrawOtherPlayer(int idx) {
             // rotation via a quick model-transform poke.
             Vector3 fwd = { sinf(p->yaw), 0, -cosf(p->yaw) };
             Vector3 lieAt = Vector3Add(feet, Vector3Scale(fwd, 0.4f));
-            lieAt.y = 0.05f;
+            lieAt.y = floorY + 0.05f;
             // Quarter-turn the model on its face by rotating around its
             // forward axis (yaw spec at base + 90 pitch via the existing
             // transform stack).  Since DrawModelEx rotates around Y only,
@@ -858,7 +863,7 @@ static void DrawOtherPlayer(int idx) {
 
     // Fallback: cube + sphere silhouette.
     if (p->alive && p->downed) {
-        Vector3 body = { p->pos.x, 0.30f, p->pos.z };
+        Vector3 body = { p->pos.x, floorY + 0.30f, p->pos.z };
         DrawCube(body, 1.6f, 0.45f, 0.55f, c);
         DrawCubeWires(body, 1.6f, 0.45f, 0.55f, BLACK);
         Vector3 fwd = { sinf(p->yaw), 0, -cosf(p->yaw) };
@@ -868,7 +873,7 @@ static void DrawOtherPlayer(int idx) {
         return;
     }
 
-    Vector3 body = { p->pos.x, ENEMY_HEIGHT*0.5f, p->pos.z };
+    Vector3 body = { p->pos.x, floorY + ENEMY_HEIGHT*0.5f, p->pos.z };
     DrawCube(body, 0.55f, 1.6f, 0.55f, c);
     DrawCubeWires(body, 0.55f, 1.6f, 0.55f, BLACK);
     DrawSphere((Vector3){ body.x, body.y + 0.95f, body.z }, 0.28f, c);

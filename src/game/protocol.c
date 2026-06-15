@@ -35,6 +35,11 @@ typedef struct {
     uint8_t highestRound;
     uint8_t lethals;
     uint8_t tacticals;
+    // Avatar visuals: lets teammates' third-person model reflect reality
+    // instead of guessing. fireHeld drives the fire clip; reviverIdx (set on
+    // the DOWNED player = "who is reviving me") drives the reviver's revive clip.
+    uint8_t fireHeld;
+    int8_t  reviverIdx;
 } SerPlayer;
 
 typedef struct {
@@ -140,6 +145,8 @@ static void SerializePlayer(SerPlayer *dst, Player *src) {
     dst->highestRound = (uint8_t)(src->highestRound > 255 ? 255 : src->highestRound);
     dst->lethals      = (uint8_t)(src->lethals   > 255 ? 255 : (src->lethals   < 0 ? 0 : src->lethals));
     dst->tacticals    = (uint8_t)(src->tacticals > 255 ? 255 : (src->tacticals < 0 ? 0 : src->tacticals));
+    dst->fireHeld     = src->fireHeld ? 1 : 0;
+    dst->reviverIdx   = (int8_t)src->reviverIdx;
 }
 
 static void DeserializePlayer(Player *dst, SerPlayer *src, bool isLocal) {
@@ -179,6 +186,10 @@ static void DeserializePlayer(Player *dst, SerPlayer *src, bool isLocal) {
     dst->highestRound = src->highestRound;
     dst->lethals      = src->lethals;
     dst->tacticals    = src->tacticals;
+    dst->reviverIdx   = src->reviverIdx;
+    // The local player owns its own fireHeld from live input (set later this
+    // frame); only adopt the host's value for the remote avatars.
+    if (!isLocal) dst->fireHeld = src->fireHeld != 0;
     if (!wasActive && src->active && isLocal)
         dst->pos = (Vector3){ src->px, src->py, src->pz };
 }

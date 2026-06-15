@@ -238,6 +238,7 @@ static int Dev_ScreenshotCoop(void) {
                     g_world.players[1].pos=(Vector3){-0.8f,PLAYER_EYE,0};
                     g_world.players[2].active=g_world.players[2].alive=true; g_world.players[2].downed=true;
                     g_world.players[2].yaw=YAW+PI*0.5f; g_world.players[2].pos=(Vector3){0.7f,PLAYER_EYE,0.2f};
+                    g_world.players[2].reviverIdx = 1;  // player 1 is reviving us (drives the revive clip)
                 }
                 g_world.players[2].reviveAsTarget = 2.0f;  // being revived
             }

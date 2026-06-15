@@ -60,10 +60,17 @@
 >   gameplay sites are gone — each is one `Eng_Input*` call. `Bind_PollAny` remains
 >   only for the rebind-capture UI. Behaviour-preserving; gamepad path is
 >   playtest-verifiable only.
-> - **Phase 4 full content registry** — handle-based `Eng_LoadModel/Texture` with
->   dedup + game-registered `.weapon`/`.map` parsers (§6/§11). `assets.c` stays
->   game-side (it owns the `PropId` list) and loads via high-level raylib; it is
->   rlgl-free so it does not block §15.
+> - ✅ **Phase 4 content registry — DONE (commit `8b0f153`).** Game-clean
+>   `src/engine/content.{c,h}`: handle-based `Eng_LoadModel/Texture/Shader/AnimModel`
+>   with path-probing (`Eng_ResolveAssetPath`) + dedup by resolved path, and
+>   `Eng_RegisterContentType`/`Eng_LoadContent` so the engine loads `.weapon`
+>   bytes and hands them to a game-registered parser without knowing their
+>   meaning. `assets.c` + `weapons.c` route through it (deleted their private
+>   probing loops); `assets.c` stays game-side for the `PropId` list + world-shader
+>   application. `.map` stays game-side (instantiation into `g_world` is game
+>   logic). The full handle-pool/AnimInstance generalisation (§9) is NOT done —
+>   draw sites still pull the underlying raylib `Model`/`Texture` from the handle;
+>   that converges with the render-submission seam below.
 > - **Phase 5 full submission (§8)** — the `RenderFrame`/`DrawItem` model. The
 >   facade meets the rlgl criterion; full submission would let a second renderer
 >   backend touch only `engine/render`. Bigger, screenshot-only-verifiable.

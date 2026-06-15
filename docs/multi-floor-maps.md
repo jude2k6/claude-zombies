@@ -43,10 +43,13 @@
 > routes two-phase — on a ramp, head for the end with the shorter hop-distance
 > to the target's region; on a flat sector, BFS and head for the first ramp's
 > near entrance. This fixes down-then-up dead-ends (proven by
-> `--sim-navtest-dtu data/maps/navtest_dtu.map`). Known locomotion limit: an
-> X-sloped ramp lying directly across a ground traversal path can still trap
-> straight-line homing (the zombie re-climbs it); that's an obstacle-avoidance
-> gap, not a routing one — the BFS picks the right regions.
+> `--sim-navtest-dtu data/maps/navtest_dtu.map`). The locomotion follow-up
+> (commit `a6b001e`) closes the X-ramp gap: `RampAscentAhead` feeds the proactive
+> fan-probe so a zombie steers AROUND any ramp it isn't intending to mount
+> (detouring in Z past an X-sloped ramp that lies across the ground path),
+> committing 1.0s to clear the footprint. Verified by
+> `--sim-navtest-dtu data/maps/navtest_xramp.map` (X-ramps directly across the
+> route). Flat-map AI is byte-identical (the guard is gated on cross-floor).
 >
 **Still TODO (refinements, not blockers):** ramp bullet-blocking uses one AABB
 > spanning yLow..yHigh (slightly over-blocks the air beside a ramp); grenades

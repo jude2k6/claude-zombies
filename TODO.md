@@ -286,9 +286,10 @@ connectivity auditor). Remaining work is authoring + per-entity wiring:
       `g_world.navNodes/navEdges` graph; `entities.c CrossFloorGoalFull` runs a
       two-phase BFS (on-ramp: shorter-hop end; on-flat: first ramp's near
       entrance), fixing greedy down-then-up dead-ends. Verified by the new
-      `--sim-navtest-dtu data/maps/navtest_dtu.map`. Remaining: an X-ramp lying
-      across a ground path can still trap straight-line homing (obstacle-
-      avoidance gap, not routing).
+      `--sim-navtest-dtu data/maps/navtest_dtu.map`. Locomotion follow-up
+      (a6b001e) closes the X-ramp gap: `RampAscentAhead` makes cross-floor
+      zombies detour (in Z) around ramps they aren't mounting; verified by
+      `navtest_xramp.map`. Flat-map AI byte-identical.
 - [ ] **`LIGHTS x y z r g b range`** in `.map` — per-map placed lights;
       pass an array of N to the lit shader.
 - [ ] **`sky_tint` → `sky.fs`** — already parses, just needs the uniform

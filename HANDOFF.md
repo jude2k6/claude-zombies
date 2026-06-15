@@ -1179,8 +1179,9 @@ See `TODO.md` for the full live list. Impact-ordered short version:
 2. ✅ **Region-BFS zombie nav — DONE (352922d).** The greedy `CrossFloorGoal`
    is replaced by a BFS over the sector graph (`g_world.navNodes/navEdges` from
    the `RAMP … LINK a b` edges); `CrossFloorGoalFull` in entities.c. Fixes
-   down-then-up dead-ends; verified by `--sim-navtest-dtu`. (Open: X-ramp across
-   a ground path can still trap straight-line homing — locomotion, not routing.)
+   down-then-up dead-ends; verified by `--sim-navtest-dtu`. Locomotion follow-up
+   (`a6b001e`): `RampAscentAhead` makes cross-floor zombies detour around ramps
+   they aren't mounting (fixes the X-ramp-across-the-path case; `navtest_xramp.map`).
 3. **Author music + ambience .oggs** — the per-map music engine path is in
    (streams `data/audio/<name>.ogg` if present); no audio ships yet.
    nacht.map references `nacht_loop`.

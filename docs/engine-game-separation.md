@@ -71,18 +71,30 @@
 >   logic). The full handle-pool/AnimInstance generalisation (§9) is NOT done —
 >   draw sites still pull the underlying raylib `Model`/`Texture` from the handle;
 >   that converges with the render-submission seam below.
-> - 🔶 **Phase 5 render seam — PRAGMATIC version DONE (commit `6df74ec`);**
->   full `DrawItem` submission still deferred. The engine now owns the frame
->   STRUCTURE (the §17 decision-#2 path): `src/engine/eng_render.{c,h}` owns the
->   postFX RT lifecycle + composite (`Eng_RenderBeginPostFX/EndPostFX`), the
->   `worldShader`/`worldSkinnedShader`/`postfxShader` handles + uniform locs
->   (moved out of assets.c), and the lighting bookend
->   (`Eng_RenderSetLighting`/`Eng_RenderBeginWorld/EndWorld`). The game still
->   issues its own draws between the engine begin/end via the `Eng_Gfx*` facade —
->   the full §8 `RenderFrame`/`DrawItem[]` submission model (game emits pure data,
->   engine renders the list; what would let a second renderer backend touch only
->   `engine/render`, and the cleanest path for the map editor) is NOT done. That
->   remains the one big deferred refactor.
+> - ✅ **Phase 5 render seam — DONE via the facade path; §8 DrawItem submission
+>   DECIDED AGAINST (commits `6df74ec`, `dc9db3e`).** Two parts:
+>   - **Frame structure** (`6df74ec`): `src/engine/eng_render.{c,h}` owns the postFX
+>     RT lifecycle + composite (`Eng_RenderBeginPostFX/EndPostFX`), the
+>     `worldShader`/`worldSkinnedShader`/`postfxShader` handles + uniform locs (moved
+>     out of assets.c), and the lighting bookend
+>     (`Eng_RenderSetLighting`/`Eng_RenderBeginWorld/EndWorld`).
+>   - **Complete the draw facade** (`dc9db3e`): `gfx.{c,h}` gained the 3D-scene draw
+>     wrappers (`Eng_GfxBeginMode3D/EndMode3D`, `Eng_GfxDrawModel/Ex`,
+>     `Cube/V/Wires/WiresV`, `Sphere`, `Plane`, `Triangle3D`, `Line3D`, `Grid`);
+>     render.c/viewmodel.c/devtools.c route every 3D draw through them. The game now
+>     makes **zero direct raylib *rendering* calls for the 3D scene** — a render
+>     backend lives entirely behind `engine/{gfx,eng_render}`.
+>   - **Why NOT the full §8 `RenderFrame`/`DrawItem[]` submission model:** this
+>     renderer is irreducibly *procedural* — cubes/spheres/triangles, per-draw
+>     shader-uniform toggles (`tileVariation`), and animation state machines woven
+>     into the draw calls. A flat `DrawItem[]` data list would be a large, lossy
+>     command-recording layer (the engine would just replay raylib calls) with no
+>     real separation gain, and there is no second-backend need driving it (the map
+>     editor reuses the *same* backend — it needs the facade + frame structure,
+>     which it now has). The facade is the correct boundary for this engine; §8 is
+>     the wrong abstraction here and is intentionally not pursued. The remaining
+>     open render item is the **2D UI facade** (raygui/`DrawText`/`DrawRectangle`),
+>     tracked under §17 #1 — a separate, lower-value decision.
 > - **`types.h` split (§13) — assessed 2026-06-15, NOT worth doing.** No engine
 >   file includes `types.h` (verified: `grep '#include.*types.h' src/engine/` is
 >   empty — the only hits are comment mentions). Since the engine is already fully

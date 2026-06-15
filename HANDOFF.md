@@ -82,16 +82,22 @@ source tree is now **`src/engine/`** (a reusable, game-clean static
     `Eng_LoadModel/Texture/Shader/AnimModel` with path-probing + dedup, plus
     `Eng_RegisterContentType`/`Eng_LoadContent` (the `.weapon` parser is
     game-registered). assets.c/weapons.c route through it.
-  - 🔶 **Render seam — pragmatic half** (`6df74ec`) — `src/engine/eng_render.{c,h}`
-    owns the postFX RT + composite, the world/skinned/postfx shader handles +
-    uniform locs (moved out of assets.c), and the lighting bookend
-    (`Eng_RenderSetLighting`/`BeginWorld`/`EndWorld`). The game still issues its
-    own draws via the `Eng_Gfx*` facade between engine begin/end.
-  - **Still deferred:** the full §8 `RenderFrame`/`DrawItem[]` submission model
-    (game emits pure data, engine renders the list) — the one big remaining
-    engine refactor, and the cleanest enabler for the map-editor goal. The
-    `types.h` split was assessed and skipped (engine is already types.h-clean; a
-    split would be cosmetic-only churn).
+  - ✅ **Render seam** (`6df74ec` + `dc9db3e`) — `src/engine/eng_render.{c,h}`
+    owns the frame structure (postFX RT + composite, world/skinned/postfx shader
+    handles + uniform locs, lighting bookend `Eng_RenderSetLighting`/`BeginWorld`/
+    `EndWorld`); `gfx.{c,h}` gained the 3D-scene draw wrappers
+    (`Eng_GfxDrawModel/Ex/Cube/Sphere/Plane/Triangle3D/Line3D/Grid` +
+    `BeginMode3D/EndMode3D`). The game now makes ZERO direct raylib *rendering*
+    calls for the 3D scene — a backend lives entirely behind `engine/{gfx,eng_render}`.
+  - **Decided AGAINST the full §8 `RenderFrame`/`DrawItem[]` submission model.**
+    This renderer is irreducibly procedural (primitives + per-draw shader toggles
+    + animation woven into draws); a `DrawItem[]` list would be a lossy
+    command-recording layer with no separation gain and no second-backend need
+    (the map editor reuses the same backend). The facade is the right boundary;
+    §8 is the wrong abstraction here. See the engine doc's "Open / deferred" block.
+  - **`types.h` split** assessed and skipped (engine is already types.h-clean; a
+    split would be cosmetic-only churn). **Remaining open render item:** the 2D
+    UI facade (raygui/`DrawText`/`DrawRectangle`) — separate, lower value.
 
 ## ✅ DONE (2026-06-14) — MP5 gripping hands + higher-poly arms + correct reload
 

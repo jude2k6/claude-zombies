@@ -27,3 +27,17 @@ void Eng_GfxNormal(float x, float y, float z)  { rlNormal3f(x, y, z); }
 void Eng_GfxTexCoord(float u, float v)     { rlTexCoord2f(u, v); }
 void Eng_GfxVertex(float x, float y, float z)  { rlVertex3f(x, y, z); }
 void Eng_GfxEndQuads(void)                 { rlEnd(); rlSetTexture(0); }
+
+void Eng_GfxBeginMode3D(Camera3D cam)      { BeginMode3D(cam); }
+void Eng_GfxEndMode3D(void)               { EndMode3D(); }
+void Eng_GfxDrawModel(Model m, Vector3 pos, float scale, Color tint) { DrawModel(m, pos, scale, tint); }
+void Eng_GfxDrawModelEx(Model m, Vector3 pos, Vector3 axis, float angDeg, Vector3 scale, Color tint) { DrawModelEx(m, pos, axis, angDeg, scale, tint); }
+void Eng_GfxDrawCube(Vector3 pos, float w, float h, float l, Color c)   { DrawCube(pos, w, h, l, c); }
+void Eng_GfxDrawCubeV(Vector3 pos, Vector3 size, Color c)               { DrawCubeV(pos, size, c); }
+void Eng_GfxDrawCubeWires(Vector3 pos, float w, float h, float l, Color c) { DrawCubeWires(pos, w, h, l, c); }
+void Eng_GfxDrawCubeWiresV(Vector3 pos, Vector3 size, Color c)          { DrawCubeWiresV(pos, size, c); }
+void Eng_GfxDrawSphere(Vector3 center, float radius, Color c)           { DrawSphere(center, radius, c); }
+void Eng_GfxDrawPlane(Vector3 center, Vector2 size, Color c)            { DrawPlane(center, size, c); }
+void Eng_GfxDrawTriangle3D(Vector3 a, Vector3 b, Vector3 c, Color col)  { DrawTriangle3D(a, b, c, col); }
+void Eng_GfxDrawLine3D(Vector3 a, Vector3 b, Color c)                   { DrawLine3D(a, b, c); }
+void Eng_GfxDrawGrid(int slices, float spacing)                         { DrawGrid(slices, spacing); }

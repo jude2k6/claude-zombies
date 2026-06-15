@@ -343,14 +343,14 @@ static void DrawCombinedRigViewmodel(Camera camera, int wi) {
                        &flatSun, SHADER_UNIFORM_VEC3);
         SetShaderValue(sk, Eng_RenderWorldSkinnedShader_ambientColorLoc(),
                        &flatAmb, SHADER_UNIFORM_VEC3);
-        DrawModel(am->model, (Vector3){0,0,0}, 1.0f, WHITE);
+        Eng_GfxDrawModel(am->model, (Vector3){0,0,0}, 1.0f, WHITE);
         Eng_GfxFlushBatch();
         SetShaderValue(sk, Eng_RenderWorldSkinnedShader_sunColorLoc(),
                        &sunColor, SHADER_UNIFORM_VEC3);
         SetShaderValue(sk, Eng_RenderWorldSkinnedShader_ambientColorLoc(),
                        &ambientColor, SHADER_UNIFORM_VEC3);
     } else {
-        DrawModel(am->model, (Vector3){0,0,0}, 1.0f, WHITE);
+        Eng_GfxDrawModel(am->model, (Vector3){0,0,0}, 1.0f, WHITE);
     }
 }
 
@@ -454,12 +454,12 @@ static void DrawArmsViewmodel(Camera camera, int wi) {
         Eng_GfxFlushBatch();
         SetShaderValue(sk, Eng_RenderWorldSkinnedShader_sunColorLoc(),     &flatSun, SHADER_UNIFORM_VEC3);
         SetShaderValue(sk, Eng_RenderWorldSkinnedShader_ambientColorLoc(), &flatAmb, SHADER_UNIFORM_VEC3);
-        DrawModel(armsVM.model, (Vector3){0,0,0}, 1.0f, WHITE);
+        Eng_GfxDrawModel(armsVM.model, (Vector3){0,0,0}, 1.0f, WHITE);
         Eng_GfxFlushBatch();
         SetShaderValue(sk, Eng_RenderWorldSkinnedShader_sunColorLoc(),     &sunColor,     SHADER_UNIFORM_VEC3);
         SetShaderValue(sk, Eng_RenderWorldSkinnedShader_ambientColorLoc(), &ambientColor, SHADER_UNIFORM_VEC3);
     } else {
-        DrawModel(armsVM.model, (Vector3){0,0,0}, 1.0f, WHITE);
+        Eng_GfxDrawModel(armsVM.model, (Vector3){0,0,0}, 1.0f, WHITE);
     }
     // Gun (OBJ world shader) under flat lighting.
     if (Eng_RenderWorldShaderLoaded()) {
@@ -469,12 +469,12 @@ static void DrawArmsViewmodel(Camera camera, int wi) {
         Eng_GfxFlushBatch();
         SetShaderValue(ws, Eng_RenderWorldShader_sunColorLoc(),     &flatSun, SHADER_UNIFORM_VEC3);
         SetShaderValue(ws, Eng_RenderWorldShader_ambientColorLoc(), &flatAmb, SHADER_UNIFORM_VEC3);
-        DrawModel(gm, (Vector3){0,0,0}, 1.0f, WHITE);
+        Eng_GfxDrawModel(gm, (Vector3){0,0,0}, 1.0f, WHITE);
         Eng_GfxFlushBatch();
         SetShaderValue(ws, Eng_RenderWorldShader_sunColorLoc(),     &sunColor,     SHADER_UNIFORM_VEC3);
         SetShaderValue(ws, Eng_RenderWorldShader_ambientColorLoc(), &ambientColor, SHADER_UNIFORM_VEC3);
     } else {
-        DrawModel(gm, (Vector3){0,0,0}, 1.0f, WHITE);
+        Eng_GfxDrawModel(gm, (Vector3){0,0,0}, 1.0f, WHITE);
     }
 
     // Grip-tuning markers, drawn LAST with depth testing off so they show
@@ -500,16 +500,16 @@ static void DrawArmsViewmodel(Camera camera, int wi) {
         Eng_GfxDepthTest(false);
         Matrix mR = MatrixMultiply(bone, root);
         Vector3 pR = { mR.m12, mR.m13, mR.m14 };
-        DrawSphere(pR, 0.010f, RED);
+        Eng_GfxDrawSphere(pR, 0.010f, RED);
         Vector3 ax = Vector3Add(pR, Vector3Scale((Vector3){ mR.m0, mR.m1, mR.m2  }, 0.03f));
         Vector3 ay = Vector3Add(pR, Vector3Scale((Vector3){ mR.m4, mR.m5, mR.m6  }, 0.03f));
         Vector3 az = Vector3Add(pR, Vector3Scale((Vector3){ mR.m8, mR.m9, mR.m10 }, 0.03f));
-        DrawLine3D(pR, ax, ORANGE);
-        DrawLine3D(pR, ay, GREEN);
-        DrawLine3D(pR, az, SKYBLUE);
+        Eng_GfxDrawLine3D(pR, ax, ORANGE);
+        Eng_GfxDrawLine3D(pR, ay, GREEN);
+        Eng_GfxDrawLine3D(pR, az, SKYBLUE);
         if (avmHandL >= 0) {
             Matrix mL = MatrixMultiply(Anim_BoneMatrix(&armsVM, st, avmHandL), root);
-            DrawSphere((Vector3){ mL.m12, mL.m13, mL.m14 }, 0.010f, BLUE);
+            Eng_GfxDrawSphere((Vector3){ mL.m12, mL.m13, mL.m14 }, 0.010f, BLUE);
         }
         Eng_GfxFlushBatch();
         Eng_GfxDepthTest(true);
@@ -517,7 +517,7 @@ static void DrawArmsViewmodel(Camera camera, int wi) {
 }
 
 // Draw the first-person viewmodel for the local player. Must be called inside
-// an active BeginMode3D scope (Render_World3D handles that).
+// an active Eng_GfxBeginMode3D scope (Render_World3D handles that).
 //
 // Transform stack: vertex → (per-weapon yaw around model Y) → camera basis
 // (model +X → world right, +Y → up, -Z → forward) → translate to anchor.
@@ -655,11 +655,11 @@ void Viewmodel_DrawFirstPerson(Camera camera) {
         Eng_GfxFlushBatch();
         SetShaderValue(ws, Eng_RenderWorldShader_sunColorLoc(),     &flatSun, SHADER_UNIFORM_VEC3);
         SetShaderValue(ws, Eng_RenderWorldShader_ambientColorLoc(), &flatAmb, SHADER_UNIFORM_VEC3);
-        DrawModel(m, (Vector3){0,0,0}, 1.0f, WHITE);
+        Eng_GfxDrawModel(m, (Vector3){0,0,0}, 1.0f, WHITE);
         Eng_GfxFlushBatch();
         SetShaderValue(ws, Eng_RenderWorldShader_sunColorLoc(),     &sunColor,     SHADER_UNIFORM_VEC3);
         SetShaderValue(ws, Eng_RenderWorldShader_ambientColorLoc(), &ambientColor, SHADER_UNIFORM_VEC3);
     } else {
-        DrawModel(m, (Vector3){0,0,0}, 1.0f, WHITE);
+        Eng_GfxDrawModel(m, (Vector3){0,0,0}, 1.0f, WHITE);
     }
 }

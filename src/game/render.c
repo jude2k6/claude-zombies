@@ -50,7 +50,7 @@ static const Color PLAYER_COLORS[NET_MAX_PLAYERS] = {
 // site simply tries the model first and falls back to a primitive draw
 // only when the OBJ hasn't been authored yet.
 static inline void DrawPropEx(PropId id, Vector3 pos, float yawDeg, Vector3 scale, Color tint) {
-    DrawModelEx(propModels[id], pos, (Vector3){0, 1, 0}, yawDeg, scale, tint);
+    Eng_GfxDrawModelEx(propModels[id], pos, (Vector3){0, 1, 0}, yawDeg, scale, tint);
 }
 static inline void DrawProp(PropId id, Vector3 pos, float yawDeg, Color tint) {
     DrawPropEx(id, pos, yawDeg, (Vector3){1, 1, 1}, tint);
@@ -144,8 +144,8 @@ static void EndTileVariation(void) {
 static void DrawTexturedBoxTex(Vector3 c, Vector3 s, Texture2D *tex,
                                Color tint, Color fallback) {
     if (!tex) {
-        DrawCubeV(c, s, fallback);
-        DrawCubeWiresV(c, s, BLACK);
+        Eng_GfxDrawCubeV(c, s, fallback);
+        Eng_GfxDrawCubeWiresV(c, s, BLACK);
         return;
     }
     float hx = s.x*0.5f, hy = s.y*0.5f, hz = s.z*0.5f;
@@ -198,7 +198,7 @@ static void DrawTexturedBox(Vector3 c, Vector3 s, TextureId tid,
 static void DrawTexturedFloorTex(Vector3 center, float sizeX, float sizeZ,
                                  Texture2D *tex, Color tint, Color fallback) {
     if (!tex) {
-        DrawPlane(center, (Vector2){sizeX, sizeZ}, fallback);
+        Eng_GfxDrawPlane(center, (Vector2){sizeX, sizeZ}, fallback);
         return;
     }
     float hx = sizeX*0.5f, hz = sizeZ*0.5f;
@@ -251,10 +251,10 @@ static void DrawFloors(void) {
             DrawTexturedFloor((Vector3){ f->cx, f->yLow, f->cz },
                               f->halfX * 2, f->halfZ * 2,
                               TEX_FLOOR, WHITE, (Color){ 70, 80, 95, 255 });
-            DrawCubeV((Vector3){ f->cx, f->yLow - 0.1f, f->cz },
+            Eng_GfxDrawCubeV((Vector3){ f->cx, f->yLow - 0.1f, f->cz },
                       (Vector3){ f->halfX * 2, 0.2f, f->halfZ * 2 },
                       (Color){ 45, 50, 60, 255 });
-            DrawCubeWiresV((Vector3){ f->cx, f->yLow - 0.1f, f->cz },
+            Eng_GfxDrawCubeWiresV((Vector3){ f->cx, f->yLow - 0.1f, f->cz },
                            (Vector3){ f->halfX * 2, 0.2f, f->halfZ * 2 },
                            (Color){ 25, 28, 34, 255 });
         } else {
@@ -263,8 +263,8 @@ static void DrawFloors(void) {
             Vector3 c = { x1, Level_RegionSurfaceY(f, x1, z1), z1 };
             Vector3 d = { x0, Level_RegionSurfaceY(f, x0, z1), z1 };
             Color rc = (Color){ 90, 95, 110, 255 };
-            DrawTriangle3D(a, b, c, rc); DrawTriangle3D(a, c, d, rc);
-            DrawTriangle3D(a, c, b, rc); DrawTriangle3D(a, d, c, rc);
+            Eng_GfxDrawTriangle3D(a, b, c, rc); Eng_GfxDrawTriangle3D(a, c, d, rc);
+            Eng_GfxDrawTriangle3D(a, c, b, rc); Eng_GfxDrawTriangle3D(a, d, c, rc);
         }
     }
 }
@@ -317,8 +317,8 @@ static void DrawArena(void) {
                        g_world.obstacles[i].center, 0.0f,
                        g_world.obstacles[i].size, WHITE);
         } else {
-            DrawCubeV(g_world.obstacles[i].center, g_world.obstacles[i].size, (Color){120,90,70,255});
-            DrawCubeWiresV(g_world.obstacles[i].center, g_world.obstacles[i].size, (Color){40,30,20,255});
+            Eng_GfxDrawCubeV(g_world.obstacles[i].center, g_world.obstacles[i].size, (Color){120,90,70,255});
+            Eng_GfxDrawCubeWiresV(g_world.obstacles[i].center, g_world.obstacles[i].size, (Color){40,30,20,255});
         }
     }
 
@@ -336,8 +336,8 @@ static void DrawMapProps(void) {
                        (Vector3){mp->scale, mp->scale, mp->scale}, WHITE);
         } else {
             // Show the collider so authors can position even with no OBJ.
-            DrawCubeV(mp->collider.center, mp->collider.size, (Color){140,110,80,255});
-            DrawCubeWiresV(mp->collider.center, mp->collider.size, BLACK);
+            Eng_GfxDrawCubeV(mp->collider.center, mp->collider.size, (Color){140,110,80,255});
+            Eng_GfxDrawCubeWiresV(mp->collider.center, mp->collider.size, BLACK);
         }
     }
 }
@@ -383,8 +383,8 @@ static void DrawDoors(void) {
         if (propModelLoaded[PROP_DOOR]) {
             DrawPropEx(PROP_DOOR, doorPos, yaw, s, WHITE);
         } else {
-            DrawCubeV(b.center, b.size, (Color){130, 80, 50, 255});
-            DrawCubeWiresV(b.center, b.size, (Color){40, 25, 15, 255});
+            Eng_GfxDrawCubeV(b.center, b.size, (Color){130, 80, 50, 255});
+            Eng_GfxDrawCubeWiresV(b.center, b.size, (Color){40, 25, 15, 255});
         }
     }
 }
@@ -414,8 +414,8 @@ static void DrawWindows(void) {
                 Vector3 planeSize = (fabsf(w->normal.x) > 0.5f)
                     ? (Vector3){ WALL_THICK + 0.2f, 0.25f, WINDOW_WIDTH }
                     : (Vector3){ WINDOW_WIDTH, 0.25f, WALL_THICK + 0.2f };
-                DrawCubeV(planeCenter, planeSize, (Color){150, 100, 50, 255});
-                DrawCubeWiresV(planeCenter, planeSize, (Color){60, 40, 20, 255});
+                Eng_GfxDrawCubeV(planeCenter, planeSize, (Color){150, 100, 50, 255});
+                Eng_GfxDrawCubeWiresV(planeCenter, planeSize, (Color){60, 40, 20, 255});
             }
         }
     }
@@ -434,15 +434,15 @@ static void DrawWindows(void) {
 static void DrawWeaponDisplay(int weaponIdx, Vector3 pos, float yawDeg, float displayScale) {
     if (weaponIdx >= 0 && weaponIdx < W_COUNT && weaponModelLoaded[weaponIdx]) {
         float s = displayScale * 0.05f * weaponTune[weaponIdx].scale;
-        DrawModelEx(weaponModels[weaponIdx], pos,
+        Eng_GfxDrawModelEx(weaponModels[weaponIdx], pos,
                     (Vector3){0, 1, 0},
                     yawDeg,
                     (Vector3){s, s, s},
                     WHITE);
     } else {
         Vector3 size = { 0.8f * displayScale, 0.3f * displayScale, 0.2f * displayScale };
-        DrawCubeV(pos, size, WEAPONS[weaponIdx].tint);
-        DrawCubeWiresV(pos, size, BLACK);
+        Eng_GfxDrawCubeV(pos, size, WEAPONS[weaponIdx].tint);
+        Eng_GfxDrawCubeWiresV(pos, size, BLACK);
     }
 }
 
@@ -461,8 +461,8 @@ static void DrawWallBuys(void) {
             Vector3 size = (fabsf(wb->normal.x) > 0.5f)
                 ? (Vector3){ 0.2f, 1.0f, 1.6f }
                 : (Vector3){ 1.6f, 1.0f, 0.2f };
-            DrawCubeV(wb->pos, size, w->tint);
-            DrawCubeWiresV(wb->pos, size, BLACK);
+            Eng_GfxDrawCubeV(wb->pos, size, w->tint);
+            Eng_GfxDrawCubeWiresV(wb->pos, size, BLACK);
         }
 
         if (weaponModelLoaded[wb->weaponIdx]) {
@@ -505,12 +505,12 @@ static void DrawPerkMachines(void) {
             Vector3 base = { pm->pos.x, 0.0f, pm->pos.z };
             DrawProp(pid, base, 0.0f, WHITE);
         } else {
-            DrawCube((Vector3){ pm->pos.x, 0.6f, pm->pos.z }, 1.0f, 1.2f, 1.0f, (Color){30,30,30,255});
-            DrawCube((Vector3){ pm->pos.x, 1.7f, pm->pos.z }, 0.8f, 1.0f, 0.8f, pd->tint);
-            DrawCubeWires((Vector3){ pm->pos.x, 1.7f, pm->pos.z }, 0.8f, 1.0f, 0.8f, BLACK);
-            DrawCube((Vector3){ pm->pos.x, 2.5f, pm->pos.z }, 0.6f, 0.4f, 0.6f, (Color){40,40,40,255});
+            Eng_GfxDrawCube((Vector3){ pm->pos.x, 0.6f, pm->pos.z }, 1.0f, 1.2f, 1.0f, (Color){30,30,30,255});
+            Eng_GfxDrawCube((Vector3){ pm->pos.x, 1.7f, pm->pos.z }, 0.8f, 1.0f, 0.8f, pd->tint);
+            Eng_GfxDrawCubeWires((Vector3){ pm->pos.x, 1.7f, pm->pos.z }, 0.8f, 1.0f, 0.8f, BLACK);
+            Eng_GfxDrawCube((Vector3){ pm->pos.x, 2.5f, pm->pos.z }, 0.6f, 0.4f, 0.6f, (Color){40,40,40,255});
             bool myOwn = g_world.players[localPlayerIdx].hasPerk[pm->perkIdx];
-            DrawSphere((Vector3){ pm->pos.x, 2.95f, pm->pos.z }, 0.18f,
+            Eng_GfxDrawSphere((Vector3){ pm->pos.x, 2.95f, pm->pos.z }, 0.18f,
                        myOwn ? (Color){240,240,240,255} : pd->tint);
         }
     }
@@ -532,10 +532,10 @@ static void DrawPaP(void) {
     if (propModelLoaded[PROP_PAP]) {
         DrawProp(PROP_PAP, (Vector3){ px, 0.0f, pz }, 0.0f, WHITE);
     } else {
-        DrawCube(g_world.pap.pos, 2.5f, 0.6f, 2.5f, (Color){25,25,30,255});
-        DrawCubeWires(g_world.pap.pos, 2.5f, 0.6f, 2.5f, BLACK);
-        DrawCube((Vector3){ px, 1.0f, pz }, 2.0f, 0.8f, 2.0f, (Color){50,50,60,255});
-        DrawCube((Vector3){ px, 1.7f, pz }, 0.9f, 0.45f, 0.7f, (Color){80,50,130,255});
+        Eng_GfxDrawCube(g_world.pap.pos, 2.5f, 0.6f, 2.5f, (Color){25,25,30,255});
+        Eng_GfxDrawCubeWires(g_world.pap.pos, 2.5f, 0.6f, 2.5f, BLACK);
+        Eng_GfxDrawCube((Vector3){ px, 1.0f, pz }, 2.0f, 0.8f, 2.0f, (Color){50,50,60,255});
+        Eng_GfxDrawCube((Vector3){ px, 1.7f, pz }, 0.9f, 0.45f, 0.7f, (Color){80,50,130,255});
     }
 
     float workPulse = 0.5f + 0.5f * sinf(g_world.pap.bob * 9.0f);
@@ -555,8 +555,8 @@ static void DrawPaP(void) {
     }
     if (lidClose > 0.02f) {
         float y = PAP_INSIDE_Y + lidClose * (PAP_MOUTH_Y - PAP_INSIDE_Y);
-        DrawCubeV((Vector3){ px, y, pz }, (Vector3){0.58f, 0.07f, 0.46f}, (Color){60,42,90,255});
-        DrawCubeWiresV((Vector3){ px, y, pz }, (Vector3){0.58f, 0.07f, 0.46f}, trimHot);
+        Eng_GfxDrawCubeV((Vector3){ px, y, pz }, (Vector3){0.58f, 0.07f, 0.46f}, (Color){60,42,90,255});
+        Eng_GfxDrawCubeWiresV((Vector3){ px, y, pz }, (Vector3){0.58f, 0.07f, 0.46f}, trimHot);
     }
 
     // --- Phase-driven weapon animation --------------------------------
@@ -574,7 +574,7 @@ static void DrawPaP(void) {
             float a = g_world.pap.bob * 6.0f + i * 1.7f;
             float r = 0.18f + 0.16f * sinf(a * 1.3f);
             Vector3 sp = { px + cosf(a) * r, PAP_MOUTH_Y + sinf(a*2.0f) * 0.1f, pz + sinf(a) * r };
-            DrawCubeV(sp, (Vector3){0.045f,0.045f,0.045f},
+            Eng_GfxDrawCubeV(sp, (Vector3){0.045f,0.045f,0.045f},
                       (Color){255, (unsigned char)(170 + 70*workPulse), 110, 255});
         }
     } else if (g_world.pap.phase == PAP_READY && g_world.pap.weaponIdx >= 0) {
@@ -676,7 +676,7 @@ static void DrawEnemy(Enemy *e) {
         Anim_Draw(&zombieAnim, st, feet, yawDeg, animScale, hpTint);
 
         if (stripe.a) {
-            DrawCube((Vector3){body.x, body.y, body.z},
+            Eng_GfxDrawCube((Vector3){body.x, body.y, body.z},
                      w * 1.02f, h * 0.10f, w * 1.02f, stripe);
         }
         if (runnerWindup) {
@@ -687,8 +687,8 @@ static void DrawEnemy(Enemy *e) {
             float pulse = 0.6f + 0.4f * sinf((0.75f - e->specialTimer) * 30.0f);
             unsigned char r = (unsigned char)(255.0f * pulse);
             Color eye = (Color){ r, 30, 30, 255 };
-            DrawSphere((Vector3){ body.x + fwdDx*0.18f + perpX*0.08f, headY, body.z + fwdDz*0.18f + perpZ*0.08f }, 0.045f, eye);
-            DrawSphere((Vector3){ body.x + fwdDx*0.18f - perpX*0.08f, headY, body.z + fwdDz*0.18f - perpZ*0.08f }, 0.045f, eye);
+            Eng_GfxDrawSphere((Vector3){ body.x + fwdDx*0.18f + perpX*0.08f, headY, body.z + fwdDz*0.18f + perpZ*0.08f }, 0.045f, eye);
+            Eng_GfxDrawSphere((Vector3){ body.x + fwdDx*0.18f - perpX*0.08f, headY, body.z + fwdDz*0.18f - perpZ*0.08f }, 0.045f, eye);
         }
         return;
     }
@@ -700,7 +700,7 @@ static void DrawEnemy(Enemy *e) {
 
         if (stripe.a) {
             // Type stripe ring around the chest, drawn as a thin cube band.
-            DrawCube((Vector3){body.x, body.y, body.z},
+            Eng_GfxDrawCube((Vector3){body.x, body.y, body.z},
                      w * 1.02f, h * 0.10f, w * 1.02f, stripe);
         }
         if (runnerWindup) {
@@ -713,20 +713,20 @@ static void DrawEnemy(Enemy *e) {
             unsigned char r = (unsigned char)(255.0f * pulse);
             Color eye = (Color){ r, 30, 30, 255 };
             float eyeR = 0.045f;
-            DrawSphere((Vector3){ body.x + fwdDx*0.18f + perpX*0.08f, headY, body.z + fwdDz*0.18f + perpZ*0.08f }, eyeR, eye);
-            DrawSphere((Vector3){ body.x + fwdDx*0.18f - perpX*0.08f, headY, body.z + fwdDz*0.18f - perpZ*0.08f }, eyeR, eye);
+            Eng_GfxDrawSphere((Vector3){ body.x + fwdDx*0.18f + perpX*0.08f, headY, body.z + fwdDz*0.18f + perpZ*0.08f }, eyeR, eye);
+            Eng_GfxDrawSphere((Vector3){ body.x + fwdDx*0.18f - perpX*0.08f, headY, body.z + fwdDz*0.18f - perpZ*0.08f }, eyeR, eye);
         }
         return;
     }
 
     // Procedural fallback (no model loaded)
-    DrawCube(body, w, h, w, hpTint);
-    DrawCubeWires(body, w, h, w, BLACK);
+    Eng_GfxDrawCube(body, w, h, w, hpTint);
+    Eng_GfxDrawCubeWires(body, w, h, w, BLACK);
     if (stripe.a) {
-        DrawCube((Vector3){body.x, body.y, body.z}, w * 1.02f, h * 0.10f, w * 1.02f, stripe);
+        Eng_GfxDrawCube((Vector3){body.x, body.y, body.z}, w * 1.02f, h * 0.10f, w * 1.02f, stripe);
     }
     if (drawHead) {
-        DrawSphere((Vector3){body.x, body.y + h*0.5f + 0.3f, body.z},
+        Eng_GfxDrawSphere((Vector3){body.x, body.y + h*0.5f + 0.3f, body.z},
                    (e->type == ZT_BOSS ? 0.45f : 0.28f), hpTint);
     }
 }
@@ -835,7 +835,7 @@ static void DrawOtherPlayer(int idx) {
         float yawDeg = -p->yaw * RAD2DEG; // model -Z forward matches camera yaw
         if (p->alive && p->downed) {
             // Tilt forward 90° around X to read as prone.  raylib's
-            // DrawModelEx only takes a yaw, so we do this with a custom
+            // Eng_GfxDrawModelEx only takes a yaw, so we do this with a custom
             // matrix by leaning the feet pos forward and using a +X-axis
             // rotation via a quick model-transform poke.
             Vector3 fwd = { sinf(p->yaw), 0, -cosf(p->yaw) };
@@ -843,7 +843,7 @@ static void DrawOtherPlayer(int idx) {
             lieAt.y = floorY + 0.05f;
             // Quarter-turn the model on its face by rotating around its
             // forward axis (yaw spec at base + 90 pitch via the existing
-            // transform stack).  Since DrawModelEx rotates around Y only,
+            // transform stack).  Since Eng_GfxDrawModelEx rotates around Y only,
             // approximate by drawing slightly squashed.
             DrawPropEx(PROP_PLAYER_M, lieAt, yawDeg,
                        (Vector3){1.0f, 0.45f, 1.0f}, c);
@@ -856,22 +856,22 @@ static void DrawOtherPlayer(int idx) {
     // Fallback: cube + sphere silhouette.
     if (p->alive && p->downed) {
         Vector3 body = { p->pos.x, floorY + 0.30f, p->pos.z };
-        DrawCube(body, 1.6f, 0.45f, 0.55f, c);
-        DrawCubeWires(body, 1.6f, 0.45f, 0.55f, BLACK);
+        Eng_GfxDrawCube(body, 1.6f, 0.45f, 0.55f, c);
+        Eng_GfxDrawCubeWires(body, 1.6f, 0.45f, 0.55f, BLACK);
         Vector3 fwd = { sinf(p->yaw), 0, -cosf(p->yaw) };
         Vector3 head = Vector3Add(body, Vector3Scale(fwd, 0.7f));
         head.y += 0.1f;
-        DrawSphere(head, 0.25f, c);
+        Eng_GfxDrawSphere(head, 0.25f, c);
         return;
     }
 
     Vector3 body = { p->pos.x, floorY + ENEMY_HEIGHT*0.5f, p->pos.z };
-    DrawCube(body, 0.55f, 1.6f, 0.55f, c);
-    DrawCubeWires(body, 0.55f, 1.6f, 0.55f, BLACK);
-    DrawSphere((Vector3){ body.x, body.y + 0.95f, body.z }, 0.28f, c);
+    Eng_GfxDrawCube(body, 0.55f, 1.6f, 0.55f, c);
+    Eng_GfxDrawCubeWires(body, 0.55f, 1.6f, 0.55f, BLACK);
+    Eng_GfxDrawSphere((Vector3){ body.x, body.y + 0.95f, body.z }, 0.28f, c);
     Vector3 fwd = { sinf(p->yaw), 0, -cosf(p->yaw) };
     Vector3 nose = Vector3Add((Vector3){body.x, body.y + 0.5f, body.z}, Vector3Scale(fwd, 0.45f));
-    DrawSphere(nose, 0.10f, BLACK);
+    Eng_GfxDrawSphere(nose, 0.10f, BLACK);
 }
 
 static const Color POWERUP_COLORS[PU_COUNT] = {
@@ -889,7 +889,7 @@ static void DrawMysteryBox(void) {
     Vector3 b = g_world.mbox.pos;
     if (propModelLoaded[PROP_MYSTERY_BOX]) {
         // mystery_box.obj has its origin at the centre of the base, but
-        // mbox.pos is the centre of the 1.0 m tall crate (DrawCube's
+        // mbox.pos is the centre of the 1.0 m tall crate (Eng_GfxDrawCube's
         // anchor) — offset down by half a height so the new model lines
         // up with where the cube used to sit.
         Vector3 modelPos = { b.x, b.y - 0.5f, b.z };
@@ -897,10 +897,10 @@ static void DrawMysteryBox(void) {
         DrawProp(PROP_MYSTERY_BOX, modelPos, 0.0f, tint);
     } else {
         Color crate = (g_world.mbox.state == MBOX_IDLE) ? (Color){120, 80, 50, 255} : (Color){160, 100, 60, 255};
-        DrawCube(b, 1.8f, 1.0f, 1.2f, crate);
-        DrawCubeWires(b, 1.8f, 1.0f, 1.2f, BLACK);
+        Eng_GfxDrawCube(b, 1.8f, 1.0f, 1.2f, crate);
+        Eng_GfxDrawCubeWires(b, 1.8f, 1.0f, 1.2f, BLACK);
         // Yellow lid for visibility
-        DrawCube((Vector3){ b.x, b.y + 0.55f, b.z }, 1.8f, 0.1f, 1.2f, (Color){240, 200, 80, 255});
+        Eng_GfxDrawCube((Vector3){ b.x, b.y + 0.55f, b.z }, 1.8f, 0.1f, 1.2f, (Color){240, 200, 80, 255});
     }
 
     if (g_world.mbox.state == MBOX_ROLLING || g_world.mbox.state == MBOX_WAITING) {
@@ -922,12 +922,12 @@ static void DrawThrowables(void) {
             if (urge > 1.0f) urge = 1.0f;
             float pulse = 0.5f + 0.5f * sinf((float)GetTime() * (6.0f + 18.0f * urge));
             unsigned char gr = (unsigned char)(160 + (unsigned)(95 * pulse * urge));
-            DrawSphere(t->pos, THROWABLE_RADIUS * 1.2f, (Color){40, 60, 40, 255});
-            DrawSphere((Vector3){t->pos.x, t->pos.y + 0.10f, t->pos.z},
+            Eng_GfxDrawSphere(t->pos, THROWABLE_RADIUS * 1.2f, (Color){40, 60, 40, 255});
+            Eng_GfxDrawSphere((Vector3){t->pos.x, t->pos.y + 0.10f, t->pos.z},
                        THROWABLE_RADIUS * 0.55f, (Color){gr, 80, 30, 255});
         } else {
-            DrawSphere(t->pos, THROWABLE_RADIUS * 1.2f, (Color){25, 25, 30, 255});
-            DrawSphere((Vector3){t->pos.x, t->pos.y + 0.08f, t->pos.z},
+            Eng_GfxDrawSphere(t->pos, THROWABLE_RADIUS * 1.2f, (Color){25, 25, 30, 255});
+            Eng_GfxDrawSphere((Vector3){t->pos.x, t->pos.y + 0.08f, t->pos.z},
                        THROWABLE_RADIUS * 0.5f, (Color){80, 200, 240, 255});
         }
     }
@@ -946,9 +946,9 @@ static void DrawPowerUps(void) {
             float yaw = powerUps[i].bob * 30.0f;
             DrawProp(PROP_POWERUP_DROP, p, yaw, c);
         } else {
-            DrawCube(p, 0.6f, 0.6f, 0.6f, c);
-            DrawCubeWires(p, 0.6f, 0.6f, 0.6f, BLACK);
-            DrawSphere((Vector3){p.x, p.y + 0.55f, p.z}, 0.08f, WHITE);
+            Eng_GfxDrawCube(p, 0.6f, 0.6f, 0.6f, c);
+            Eng_GfxDrawCubeWires(p, 0.6f, 0.6f, 0.6f, BLACK);
+            Eng_GfxDrawSphere((Vector3){p.x, p.y + 0.55f, p.z}, 0.08f, WHITE);
         }
     }
 }
@@ -959,7 +959,7 @@ static void DrawSkybox(Camera camera) {
     if (!skyShaderLoaded) return;
     Eng_GfxBackfaceCull(false);
     Eng_GfxDepthMask(false);
-    DrawModel(skyModel, camera.position, 1.0f, WHITE);
+    Eng_GfxDrawModel(skyModel, camera.position, 1.0f, WHITE);
     Eng_GfxDepthMask(true);
     Eng_GfxBackfaceCull(true);
 }
@@ -1057,7 +1057,7 @@ void Render_UnloadPostFX(void) {
 }
 
 void Render_World3D(Camera camera) {
-    BeginMode3D(camera);
+    Eng_GfxBeginMode3D(camera);
         DrawSkybox(camera);
         BeginWorldShader();
         DrawArena();
@@ -1083,7 +1083,7 @@ void Render_World3D(Camera camera) {
         }
         Decals_Draw();
         DrawTracers(camera);
-        // Particles: drawn inside BeginMode3D but outside the world shader so
+        // Particles: drawn inside Eng_GfxBeginMode3D but outside the world shader so
         // their blend modes (additive / alpha) aren't affected by the fog program.
         // Same discipline as decals/tracers: rlDisableDepthMask during draw,
         // restored after. Particles_Update is called here so it drives off the
@@ -1092,7 +1092,7 @@ void Render_World3D(Camera camera) {
         Particles_Update(GetFrameTime());
         Particles_Draw(camera);
         Viewmodel_DrawFirstPerson(camera);
-    EndMode3D();
+    Eng_GfxEndMode3D();
 }
 
 // Labels are only drawn when the player is close enough, and fade smoothly

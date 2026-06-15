@@ -1,6 +1,7 @@
 #include "devtools.h"
 #include "raylib.h"
 #include "raymath.h"
+#include "gfx.h"
 #include "types.h"
 #include "level.h"
 #include "mapdoc.h"
@@ -361,10 +362,10 @@ static int Dev_AnimTest(int argc, char **argv) {
             BeginDrawing();
             ClearBackground((Color){ 50, 55, 65, 255 });
             PUSH_SKIN_UNIFORMS();
-            BeginMode3D(cam);
-                DrawGrid(10, 0.5f);
+            Eng_GfxBeginMode3D(cam);
+                Eng_GfxDrawGrid(10, 0.5f);
                 Anim_Draw(&am, &st, (Vector3){0,0,0}, yaw, 1.0f, WHITE);
-            EndMode3D();
+            Eng_GfxEndMode3D();
             DrawText(TextFormat("clip %d/%d  %.2fs", clip, am.animCount, st.time), 20, 20, 24, RAYWHITE);
             EndDrawing();
         }
@@ -375,10 +376,10 @@ static int Dev_AnimTest(int argc, char **argv) {
             BeginDrawing();
             ClearBackground((Color){ 50, 55, 65, 255 });
             PUSH_SKIN_UNIFORMS();
-            BeginMode3D(cam);
-                DrawGrid(10, 0.5f);
+            Eng_GfxBeginMode3D(cam);
+                Eng_GfxDrawGrid(10, 0.5f);
                 Anim_Draw(&am, &st, (Vector3){0,0,0}, yaw, 1.0f, WHITE);
-            EndMode3D();
+            Eng_GfxEndMode3D();
             DrawText(TextFormat("%s  clip %d  t=%.2fs/%.2fs", am.name, clip, st.time, dur),
                      20, 20, 22, RAYWHITE);
             EndDrawing();

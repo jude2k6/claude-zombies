@@ -3,6 +3,7 @@
 
 #include "raylib.h"
 #include "types.h"
+#include "content.h"  // engine content registry (EngModel, EngTexture, etc.)
 
 // ---- weapon models -------------------------------------------------------
 // Weapon model storage + per-weapon tune are owned by weapons.{c,h} (loaded

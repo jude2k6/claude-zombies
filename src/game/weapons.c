@@ -5,8 +5,10 @@
 #include "fx.h"
 #include "particles.h"
 #include "assets.h"     // Assets_RegisterWorldShaderModel (world-shader enrol)
+#include "content.h"    // Eng_LoadModel, Eng_ModelGet, Eng_RegisterContentType
 #include "raymath.h"
 #include <math.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -349,14 +351,10 @@ static void DirOf(const char *path, char *out, size_t outSize) {
     out[n] = 0;
 }
 
-// Parse one .weapon file. On success returns the resolved idx; -1 on error.
-static int Weapons_ParseFile(const char *path) {
-    char *text = LoadFileText(path);
-    if (!text) {
-        fprintf(stderr, "weapon: failed to read %s\n", path);
-        return -1;
-    }
-
+// Parse one .weapon file from pre-loaded text.  `text` is a NUL-terminated
+// mutable copy of the file contents (the caller must free it).  On success
+// returns the resolved idx; -1 on error.
+static int Weapons_ParseText(const char *path, char *text) {
     int idx = -1;
     WeaponDef d = {0};   // accumulator — copied into WEAPONS[idx] only if we find a valid id
     WeaponModelTune tune = { .scale = 1.0f, .yawDeg = 0.0f, .offset = {0,0,0} };
@@ -385,7 +383,6 @@ static int Weapons_ParseFile(const char *path) {
             if (idx < 0) {
                 fprintf(stderr, "weapon: %s line %d: unknown id '%s'\n",
                         path, lineNo, toks[1]);
-                free(text);
                 return -1;
             }
             d = WEAPONS[idx];   // zeroed storage (+ idName) — file supplies everything
@@ -397,7 +394,6 @@ static int Weapons_ParseFile(const char *path) {
             // any non-id key before id is a structural error
             fprintf(stderr, "weapon: %s line %d: '%s' before 'id'\n",
                     path, lineNo, k);
-            free(text);
             return -1;
         }
         else if (strcmp(k, "name") == 0 && n >= 2)        { d.name       = xstrdup(toks[1]); }
@@ -498,7 +494,6 @@ static int Weapons_ParseFile(const char *path) {
 
     if (idx < 0) {
         fprintf(stderr, "weapon: %s missing 'id' field\n", path);
-        free(text);
         return -1;
     }
 
@@ -506,36 +501,55 @@ static int Weapons_ParseFile(const char *path) {
     if (tuneSet) weaponTune[idx] = tune;
     if (gripSet) weaponGrip[idx] = grip;
 
-    // Load the model (relative to the .weapon file's directory).
+    // Load the model (relative to the .weapon file's directory) via the
+    // engine content registry so the model is dedup'd and engine-owned.
     if (modelFile[0]) {
         char dir[512]; DirOf(path, dir, sizeof dir);
         char fullPath[768];
         snprintf(fullPath, sizeof fullPath, "%s%s", dir, modelFile);
-        if (FileExists(fullPath)) {
-            // Unload any prior model in this slot first
-            if (weaponModelLoaded[idx]) {
-                UnloadModel(weaponModels[idx]);
-                weaponModelLoaded[idx] = false;
-            }
-            weaponModels[idx] = LoadModel(fullPath);
-            if (weaponModels[idx].meshCount > 0) {
-                weaponModelLoaded[idx] = true;
-                fprintf(stderr, "weapon: loaded %s (meshes=%d)\n",
-                        fullPath, weaponModels[idx].meshCount);
-            } else {
-                fprintf(stderr, "weapon: %s: model %s loaded but empty\n",
-                        path, fullPath);
-            }
+        // Eng_LoadModel probes via its prefix list; pass the full assembled
+        // path (which already exists relative to CWD when the weapon dir was
+        // found via the prefix scan in Weapons_Load).
+        EngModel mh = Eng_LoadModel(fullPath);
+        Model *mp = Eng_ModelGet(mh);
+        if (mp) {
+            weaponModels[idx]      = *mp;
+            weaponModelLoaded[idx] = true;
+            // "model: loaded ..." line printed by Eng_LoadModel.
         } else {
             fprintf(stderr, "weapon: %s: model %s not found\n", path, fullPath);
         }
     }
 
-    free(text);
     return idx;
 }
 
+// ---- Game-registered .weapon content parser --------------------------------
+// This callback is registered with the engine via Eng_RegisterContentType so
+// the engine can load .weapon files without knowing their meaning.  The engine
+// probes the path, reads bytes, and calls us — we parse and populate WEAPONS[].
+// The engine already read the file; we work from those bytes directly (no
+// double-read).  Returns a non-NULL sentinel on success, NULL on error.
+static void *WeaponContentParser(const char *resolvedPath,
+                                  const char *bytes, size_t len,
+                                  void *user) {
+    (void)user;
+    if (!bytes || len == 0) return NULL;
+    // Make a mutable copy (Weapons_ParseText modifies the string in place).
+    char *copy = (char *)malloc(len + 1);
+    if (!copy) return NULL;
+    memcpy(copy, bytes, len);
+    copy[len] = '\0';
+    int idx = Weapons_ParseText(resolvedPath, copy);
+    free(copy);
+    if (idx < 0) return NULL;
+    return (void *)(uintptr_t)(idx + 1);  // non-NULL sentinel
+}
+
 void Weapons_Load(void) {
+    // Register the .weapon content parser with the engine once.
+    Eng_RegisterContentType(".weapon", WeaponContentParser, NULL);
+
     // Reset to a blank slate: zero stats, identity scales, id token as the
     // placeholder display name. Everything real comes from the files.
     for (int i = 0; i < W_COUNT; i++) {
@@ -563,8 +577,16 @@ void Weapons_Load(void) {
         if (!DirectoryExists(prefixes[p])) continue;
         FilePathList files = LoadDirectoryFilesEx(prefixes[p], ".weapon", true);
         for (unsigned i = 0; i < files.count; i++) {
-            int idx = Weapons_ParseFile(files.paths[i]);
-            if (idx >= 0) { claimed[idx] = true; parsed++; }
+            // Route through the engine content registry: engine reads bytes
+            // and calls WeaponContentParser, which calls Weapons_ParseFile.
+            void *r = Eng_LoadContent(files.paths[i]);
+            if (r) {
+                int idx = (int)(uintptr_t)r - 1;
+                if (idx >= 0 && idx < W_COUNT) {
+                    claimed[idx] = true;
+                    parsed++;
+                }
+            }
         }
         UnloadDirectoryFiles(files);
         if (parsed > 0) break;     // first existing root wins
@@ -589,10 +611,10 @@ void Weapons_Load(void) {
 }
 
 void Weapons_Unload(void) {
+    // Weapon models are now owned by the engine content registry (loaded via
+    // Eng_LoadModel in Weapons_ParseText).  The actual GL objects are freed by
+    // Eng_ContentFlush (called from Assets_Unload).  We only clear the flags.
     for (int i = 0; i < W_COUNT; i++) {
-        if (weaponModelLoaded[i]) {
-            UnloadModel(weaponModels[i]);
-            weaponModelLoaded[i] = false;
-        }
+        weaponModelLoaded[i] = false;
     }
 }

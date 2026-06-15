@@ -59,6 +59,7 @@
 #define MAX_WALLBUYS       16
 #define MAX_MAP_PROPS      64
 #define MAX_FLOORS         32   // walkable floor regions (multi-floor maps)
+#define MAX_NAV_SECTORS    32   // nav graph node/edge cap (= MAPDOC_MAX_SECTORS)
 
 #define INV_SLOTS           2
 #define INTERACT_DIST       3.0f
@@ -374,6 +375,23 @@ typedef struct {
     float yLow, yHigh;     // surface Y (flat: equal; ramp: low/high edge)
     RampAxis rampAxis;     // RAMP_FLAT, or slope along +X / +Z
 } FloorRegion;
+
+// Nav graph for region-BFS cross-floor routing (see docs/multi-floor-maps.md §5).
+// NavNode = one FLAT sector (a floor region node in the graph); keyed by the
+// doc sector index so BFS node IDs are stable and map directly to sectors[].
+// NavEdge = one RAMP sector connecting two flat-sector nodes; stores the ramp's
+// FloorRegion geometry so RampLow/HighEntrance can be computed at query time.
+typedef struct {
+    int   docSector;        // doc sector index (the node id)
+    float cx, cz;           // XZ centre of the sector
+    float halfX, halfZ;     // XZ half-extents
+    float y;                // surface Y of the flat sector
+} NavNode;
+
+typedef struct {
+    int         a, b;       // NavNode ids (doc sector indices) this ramp connects
+    FloorRegion ramp;       // ramp geometry (for entrance point computation)
+} NavEdge;
 
 typedef struct {
     Vector3 pos;

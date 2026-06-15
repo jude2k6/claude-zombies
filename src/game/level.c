@@ -237,6 +237,8 @@ static int PerkNameToIdx(const char *s) {
 static void ClearLevel(void) {
     g_world.obstacleCount = 0;
     g_world.floorCount = 0;
+    g_world.navNodeCount = 0;
+    g_world.navEdgeCount = 0;
     for (int i = 0; i < MAX_OBSTACLES; i++) obstacleTexHandle[i] = -1;
     interiorWallCount = 0;
     memset(interiorWallNoClip, 0, sizeof interiorWallNoClip);
@@ -540,6 +542,37 @@ void Level_InstantiateDoc(const MapDoc *doc) {
             .yLow = s->yLow, .yHigh = s->yHigh,
             .rampAxis = (RampAxis)s->rampAxis,
         };
+    }
+
+    // Region nav graph: FLAT sectors become NavNodes; RAMP sectors with valid
+    // linkA/linkB become NavEdges. ALL flat sectors are included (incl. ground
+    // Y=0 — even though it's skipped from floors[] above, it IS a nav node).
+    // Node id == doc sector index, so BFS over edges is O(sectors).
+    for (int i = 0; i < doc->sectorCount; i++) {
+        const MapDocSector *s = &doc->sectors[i];
+        if (s->kind == SECTOR_FLAT) {
+            if (g_world.navNodeCount < MAX_NAV_SECTORS) {
+                g_world.navNodes[g_world.navNodeCount++] = (NavNode){
+                    .docSector = i,
+                    .cx = s->x, .cz = s->z,
+                    .halfX = s->sx * 0.5f, .halfZ = s->sz * 0.5f,
+                    .y = s->yLow,
+                };
+            }
+        } else if (s->kind == SECTOR_RAMP && s->linkA >= 0 && s->linkB >= 0
+                   && s->linkA < doc->sectorCount && s->linkB < doc->sectorCount) {
+            if (g_world.navEdgeCount < MAX_NAV_SECTORS) {
+                g_world.navEdges[g_world.navEdgeCount++] = (NavEdge){
+                    .a = s->linkA, .b = s->linkB,
+                    .ramp = (FloorRegion){
+                        .cx = s->x, .cz = s->z,
+                        .halfX = s->sx * 0.5f, .halfZ = s->sz * 0.5f,
+                        .yLow = s->yLow, .yHigh = s->yHigh,
+                        .rampAxis = (RampAxis)s->rampAxis,
+                    },
+                };
+            }
+        }
     }
 
     // Wallbuys

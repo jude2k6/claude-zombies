@@ -159,48 +159,159 @@ static Vector3 RampHighEntrance(const FloorRegion *f) {
     return (Vector3){ f->cx, f->yHigh, f->cz + f->halfZ };
 }
 
-// Multi-floor pathing. When the enemy (on floor level eY) and target (on tY)
-// are on different floors, redirect the homing goal toward a ramp that moves
-// the enemy one level toward the target, instead of straight at the target
-// (which would walk it into the wall above/below). Greedy and level-by-level:
-// after climbing/descending one ramp the enemy re-evaluates next tick. Reuses
-// the existing XZ homing toward the chosen ramp entrance. Returns true and
-// writes *goal when a detour is needed. On flat maps eY==tY==0, so this never
-// fires and AI is unchanged. (Generalises the existing doorway routing — the
-// graph here is implicit: ramps are the edges between floor levels.)
-static bool CrossFloorGoal(const Enemy *e, float eY, float tY, Vector3 *goal) {
-    if (fabsf(eY - tY) <= FLOOR_LEVEL_EPS) return false;
-    bool goUp = tY > eY;
+// Multi-floor pathing via region BFS over the nav graph (NavNode/NavEdge).
+// Replaces the old greedy Y-level heuristic that dead-ended on maps requiring
+// down-then-up routing (two decks at the same Y connected only via ground).
+//
+// Nav_NodeAt: returns the doc-sector index (NavNode id) of the FLAT region
+// whose XZ footprint contains (x,z) and whose surface Y ≈ feetY (within
+// FLOOR_LEVEL_EPS). Ground fallback: if no node matches and feetY≈0, returns
+// the Y0 node (the ground sector). Returns -1 if truly no matching node.
+static int Nav_NodeAt(float x, float z, float feetY) {
+    int groundNode = -1;
+    for (int i = 0; i < g_world.navNodeCount; i++) {
+        const NavNode *n = &g_world.navNodes[i];
+        if (x < n->cx - n->halfX || x > n->cx + n->halfX) continue;
+        if (z < n->cz - n->halfZ || z > n->cz + n->halfZ) continue;
+        if (fabsf(n->y - feetY) <= FLOOR_LEVEL_EPS) return n->docSector;
+        // Track the ground node (Y0) as a fallback
+        if (fabsf(n->y) < 0.001f) groundNode = n->docSector;
+    }
+    // Ground fallback: entities near ground level (feetY ≤ 2.0f, covering the
+    // lower half of typical ramps) that aren't in any elevated flat-sector
+    // footprint are treated as on-ground for nav purposes. The threshold is
+    // intentionally larger than FLOOR_LEVEL_EPS to cover the low end of ramps
+    // and prevent oscillation at the ramp-to-ground boundary.
+    if (feetY <= 2.0f && groundNode >= 0) return groundNode;
+    return -1;
+}
 
-    // If we're already on a ramp, commit to its far end so we don't oscillate.
-    for (int i = 0; i < g_world.floorCount; i++) {
-        const FloorRegion *f = &g_world.floors[i];
-        if (f->rampAxis == RAMP_FLAT) continue;
-        if (e->pos.x < f->cx - f->halfX || e->pos.x > f->cx + f->halfX) continue;
-        if (e->pos.z < f->cz - f->halfZ || e->pos.z > f->cz + f->halfZ) continue;
-        if (fabsf(Level_RegionSurfaceY(f, e->pos.x, e->pos.z) - eY) < 0.4f) {
-            *goal = goUp ? RampHighEntrance(f) : RampLowEntrance(f);
-            return true;
+// Hop distance between two nav nodes over the ramp-edge graph; -1 if
+// unreachable. Node ids are doc sector indices (all < MAX_NAV_SECTORS).
+static int Nav_HopDist(int from, int to) {
+    if (from < 0 || to < 0) return -1;
+    if (from == to) return 0;
+    bool vis[MAX_NAV_SECTORS]; for (int i = 0; i < MAX_NAV_SECTORS; i++) vis[i] = false;
+    int q[MAX_NAV_SECTORS], dist[MAX_NAV_SECTORS], qh = 0, qt = 0;
+    vis[from] = true; dist[from] = 0; q[qt++] = from;
+    while (qh < qt) {
+        int cur = q[qh++];
+        for (int i = 0; i < g_world.navEdgeCount; i++) {
+            const NavEdge *ed = &g_world.navEdges[i];
+            int nb = -1;
+            if (ed->a == cur && !vis[ed->b]) nb = ed->b;
+            else if (ed->b == cur && !vis[ed->a]) nb = ed->a;
+            if (nb < 0) continue;
+            vis[nb] = true; dist[nb] = dist[cur] + 1;
+            if (nb == to) return dist[nb];
+            if (qt < MAX_NAV_SECTORS) q[qt++] = nb;
         }
     }
+    return -1;
+}
 
-    // Otherwise seek the nearest ramp whose near end sits on our level and
-    // whose far end moves us toward the target's level.
-    const FloorRegion *best = NULL; float bestD = 1e30f; Vector3 bestEnt = {0};
-    for (int i = 0; i < g_world.floorCount; i++) {
-        const FloorRegion *f = &g_world.floors[i];
-        if (f->rampAxis == RAMP_FLAT) continue;
-        float nearY = goUp ? f->yLow  : f->yHigh;
-        float farY  = goUp ? f->yHigh : f->yLow;
-        if (fabsf(nearY - eY) > FLOOR_LEVEL_EPS) continue;
-        if (goUp ? (farY <= eY) : (farY >= eY)) continue;
-        Vector3 ent = goUp ? RampLowEntrance(f) : RampHighEntrance(f);
-        float dx = ent.x - e->pos.x, dz = ent.z - e->pos.z;
-        float dd = dx*dx + dz*dz;
-        if (dd < bestD) { bestD = dd; best = f; bestEnt = ent; }
+// Surface Y of a nav node (flat sector); 0 if the id isn't a node.
+static float Nav_NodeY(int node) {
+    for (int i = 0; i < g_world.navNodeCount; i++)
+        if (g_world.navNodes[i].docSector == node) return g_world.navNodes[i].y;
+    return 0.0f;
+}
+
+// Split a ramp edge into its low (yLow side) and high (yHigh side) nodes. Link
+// order (a=linkA, b=linkB) doesn't encode which end is higher, so compare the
+// two linked sectors' surface Y.
+static void Nav_EdgeEnds(const NavEdge *ed, int *loNode, int *hiNode) {
+    if (Nav_NodeY(ed->a) <= Nav_NodeY(ed->b)) { *loNode = ed->a; *hiNode = ed->b; }
+    else                                       { *loNode = ed->b; *hiNode = ed->a; }
+}
+
+// Multi-floor pathing via region BFS over the nav graph. Two phases:
+//   1. If the enemy is physically ON a ramp slope, walk toward whichever end is
+//      on the shorter graph path to the target (handles up, down, down-then-up).
+//   2. Otherwise the enemy is on a flat sector: BFS to the target's sector and
+//      head for the NEAR entrance (on the enemy's own level) of the first ramp
+//      on that path. Phase 1 takes over once they step onto the slope, walking
+//      them across to the far end. Aiming at the FAR end from a flat sector was
+//      the bug that made zombies walk *under* a ramp instead of up it.
+// Replaces the old greedy Y-level heuristic that dead-ended on down-then-up
+// routes (two decks at the same Y joined only via the ground). On flat maps
+// navNodeCount==0, so this never fires and AI is byte-identical.
+static bool CrossFloorGoalFull(const Enemy *e, float eY, float tY,
+                                float tX, float tZ, Vector3 *goal) {
+    if (g_world.navNodeCount == 0) return false;
+    int targetNode = Nav_NodeAt(tX, tZ, tY);
+    if (targetNode < 0) return false;  // target in unknown region
+
+    // Phase 1 — physically on a ramp slope: aim for the end nearer the target.
+    for (int i = 0; i < g_world.navEdgeCount; i++) {
+        const NavEdge *ed = &g_world.navEdges[i];
+        const FloorRegion *f = &ed->ramp;
+        if (e->pos.x < f->cx - f->halfX || e->pos.x > f->cx + f->halfX) continue;
+        if (e->pos.z < f->cz - f->halfZ || e->pos.z > f->cz + f->halfZ) continue;
+        float rampSurf = Level_RegionSurfaceY(f, e->pos.x, e->pos.z);
+        if (fabsf(rampSurf - eY) >= 0.4f) continue;
+        int loNode, hiNode; Nav_EdgeEnds(ed, &loNode, &hiNode);
+        int dLo = Nav_HopDist(loNode, targetNode);
+        int dHi = Nav_HopDist(hiNode, targetNode);
+        bool goHigh;
+        if (dHi < 0)      goHigh = false;   // target only reachable via the low end
+        else if (dLo < 0) goHigh = true;    // ... or only via the high end
+        else              goHigh = (dHi <= dLo);
+        // If the chosen end is the one we're already standing at (we've reached
+        // the foot/top of this ramp), defer to flat-sector routing below — it
+        // steps us onto the adjacent flat and on toward the next ramp. Without
+        // this, a zombie that must continue past this ramp's near end pins
+        // itself to its own current spot (the down-then-up dead-end).
+        const float ENDZONE = 0.6f;   // < FLOOR_LEVEL_EPS so Nav_NodeAt resolves the flat
+        if (goHigh && f->yHigh - rampSurf < ENDZONE) continue;
+        if (!goHigh && rampSurf - f->yLow < ENDZONE) continue;
+        *goal = goHigh ? RampHighEntrance(f) : RampLowEntrance(f);
+        return true;
     }
-    if (best) { *goal = bestEnt; return true; }
-    return false;  // no route — fall back to homing at the target
+
+    // Phase 2 — on a flat sector.
+    int enemyNode = Nav_NodeAt(e->pos.x, e->pos.z, eY);
+    if (enemyNode < 0 || enemyNode == targetNode) return false;
+
+    // BFS enemyNode -> targetNode; record the edge that first reached each node.
+    int  queue[MAX_NAV_SECTORS], firstEdge[MAX_NAV_SECTORS];
+    bool visited[MAX_NAV_SECTORS];
+    for (int i = 0; i < MAX_NAV_SECTORS; i++) { firstEdge[i] = -1; visited[i] = false; }
+    int head = 0, tail = 0;
+    visited[enemyNode] = true; queue[tail++] = enemyNode;
+    bool found = false;
+    while (head < tail && !found) {
+        int cur = queue[head++];
+        for (int ei = 0; ei < g_world.navEdgeCount; ei++) {
+            const NavEdge *ed = &g_world.navEdges[ei];
+            int nb = -1;
+            if (ed->a == cur && !visited[ed->b]) nb = ed->b;
+            else if (ed->b == cur && !visited[ed->a]) nb = ed->a;
+            if (nb < 0) continue;
+            visited[nb] = true; firstEdge[nb] = ei;
+            if (nb == targetNode) { found = true; break; }
+            if (tail < MAX_NAV_SECTORS) queue[tail++] = nb;
+        }
+    }
+    if (!found) return false;  // no path — fall back to direct homing
+
+    // Walk the parent chain back to the hop that leaves enemyNode.
+    int cur = targetNode, hopEdge = firstEdge[targetNode];
+    while (hopEdge >= 0) {
+        const NavEdge *ed = &g_world.navEdges[hopEdge];
+        int parent = (ed->a == cur) ? ed->b : ed->a;
+        if (parent == enemyNode) break;
+        cur = parent; hopEdge = firstEdge[cur];
+    }
+    if (hopEdge < 0) return false;
+
+    // Head for the NEAR entrance of that ramp — the end on the enemy's own
+    // level — so they reach the foot of the ramp; phase 1 then walks them across.
+    const NavEdge *hop = &g_world.navEdges[hopEdge];
+    int loNode, hiNode; Nav_EdgeEnds(hop, &loNode, &hiNode);
+    *goal = (enemyNode == loNode) ? RampLowEntrance(&hop->ramp)
+                                  : RampHighEntrance(&hop->ramp);
+    return true;
 }
 
 void Enemies_Update(float dt) {
@@ -273,7 +384,8 @@ void Enemies_Update(float dt) {
             // (ramps/doors rarely interact); never fires on flat maps.
             float eFloorY = Level_FloorHeightAt(e->pos.x, e->pos.z, e->pos.y - ENEMY_HEIGHT*0.5f);
             float tFloorY = Level_FloorHeightAt(tp->pos.x, tp->pos.z, tp->pos.y - PLAYER_EYE);
-            bool crossFloor = CrossFloorGoal(e, eFloorY, tFloorY, &goal);
+            bool crossFloor = CrossFloorGoalFull(e, eFloorY, tFloorY,
+                                                  tp->pos.x, tp->pos.z, &goal);
             if (crossFloor) { e->waypoint = goal; e->hasWaypoint = true; }
 
             for (int di = 0; di < doorCount && !crossFloor; di++) {

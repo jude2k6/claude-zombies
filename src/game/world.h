@@ -68,6 +68,14 @@ typedef struct {
     FloorRegion floors[MAX_FLOORS];
     int         floorCount;
 
+    // Region nav graph built from doc sectors in Level_InstantiateDoc.
+    // Nodes = FLAT sectors (keyed by doc sector index); Edges = RAMP sectors.
+    // Used by the BFS-based CrossFloorGoal in entities.c.
+    NavNode  navNodes[MAX_NAV_SECTORS];
+    int      navNodeCount;
+    NavEdge  navEdges[MAX_NAV_SECTORS];
+    int      navEdgeCount;
+
     // ---- session / networking role ---------------------------------------
     // netMode is collision-free (never a struct field), so it is aliased by a
     // macro below. players[] clashes with the SerPlayer players[] field in the

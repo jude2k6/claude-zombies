@@ -1,0 +1,44 @@
+# Claude Zombies - down-then-up nav test map
+#
+# Topology: ground(Y0) <-ramp_a-> deckA(Y4)   ground(Y0) <-ramp_b-> deckB(Y4)
+# deckA and deckB are both at Y=4 but at DIFFERENT XZ locations with NO direct
+# link between them. The only route from deckA to deckB is:
+#   deckA -> ramp_a -> ground -> ramp_b -> deckB
+# The greedy Y-level heuristic sees "same Y" and homes straight across (falling
+# off deckA, never descending); region BFS routes correctly down then up.
+#
+# Ramps slope along Z (north/south); both bases sit on the z=6 line and both
+# decks are to the north (z=12..18). The connecting ground corridor runs east
+# along z<=6, which is perpendicular to the ramp slopes — so the down-then-up
+# route is physically traversable at ground level without re-climbing a ramp
+# (an X-sloped ramp directly on the path would block straight-line homing).
+#
+#   deckA:  x[-18,-12] z[12,18]  Y4         deckB:  x[12,18] z[12,18]  Y4
+#   ramp_a: x[-18,-12] z[6,12]  yLow0@z6 yHigh4@z12   (LINK ground deckA)
+#   ramp_b: x[12,18]  z[6,12]  yLow0@z6 yHigh4@z12    (LINK ground deckB)
+
+NAME DTU Nav Test
+
+ARENA 40 20
+
+# Sector 0: ground (Y=0)
+SECTOR ground  0 0  80 40  0
+    SPAWN  0 0
+    WINDOW  0 -19.5  +z
+END
+
+# Sector 1: deckA — north-west Y4 platform
+SECTOR deckA  -15 15  6 6  4
+END
+
+# Sector 2: ramp_a — slopes along Z; base (Y0) at z=6, top (Y4, deckA) at z=12
+RAMP ramp_a  -15 9  6 6  0 4 Z  LINK ground deckA
+END
+
+# Sector 3: deckB — north-east Y4 platform
+SECTOR deckB  15 15  6 6  4
+END
+
+# Sector 4: ramp_b — slopes along Z; base (Y0) at z=6, top (Y4, deckB) at z=12
+RAMP ramp_b  15 9  6 6  0 4 Z  LINK ground deckB
+END

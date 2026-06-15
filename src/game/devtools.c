@@ -720,6 +720,79 @@ static int Dev_SimNavtest(int argc, char **argv) {
     return pass ? 0 : 1;
 }
 
+// ---- --sim-navtest-dtu <file.map> ------------------------------------------
+// Headless test for down-then-up cross-floor routing.  Places a zombie on
+// deckA (one Y4 platform) and the player on deckB (a DIFFERENT Y4 platform
+// that shares NO direct ramp link with deckA — the only route is via ground).
+// The greedy heuristic would see "same Y" and walk off deckA; region BFS must
+// route ground -> ramp_b -> deckB and the zombie must arrive within 30 s.
+// Exit 0 = PASS.
+
+static int Dev_SimNavtestDtu(int argc, char **argv) {
+    if (argc < 3) { fprintf(stderr, "usage: --sim-navtest-dtu <file.map>\n"); return 1; }
+    const char *path = argv[2];
+    SetTraceLogLevel(LOG_WARNING);
+    InitWindow(320, 240, "navtest-dtu");
+    Weapons_Load();
+    Assets_Load();
+    if (!Level_LoadFromFile(path)) {
+        fprintf(stderr, "failed to load map: %s\n", path);
+        Assets_Unload(); Weapons_Unload(); CloseWindow();
+        return 1;
+    }
+
+    godMode = true;
+    localPlayerIdx = 0;
+    for (int i = 0; i < NET_MAX_PLAYERS; i++) memset(&g_world.players[i], 0, sizeof g_world.players[i]);
+    g_world.players[0].active = true; g_world.players[0].alive = true;
+
+    // Deck centres hardcoded to match navtest_dtu.map.
+    float deckAX = -15.0f, deckAZ = 15.0f;
+    float deckBX =  15.0f, deckBZ = 15.0f;
+    float deckASurf = Level_FloorHeightAt(deckAX, deckAZ, 100.0f);
+    float deckBSurf = Level_FloorHeightAt(deckBX, deckBZ, 100.0f);
+
+    // Player stands on deckB
+    g_world.players[0].pos = (Vector3){ deckBX, deckBSurf + PLAYER_EYE, deckBZ };
+
+    Enemies_ClearAll();
+    // Zombie stands on deckA
+    enemies[0] = (Enemy){
+        .pos = { deckAX, deckASurf + ENEMY_HEIGHT * 0.5f, deckAZ },
+        .hp = 100000, .maxHp = 100000, .alive = true, .speed = 3.5f,
+        .state = ZS_INSIDE, .type = ZT_NORMAL, .targetPlayer = 0, .targetWindow = 0,
+    };
+
+    float wantCentreY = deckBSurf + ENEMY_HEIGHT * 0.5f;
+    int   reachedFrame = -1;
+    const float dt = 1.0f / 60.0f;
+    // PASS condition: zombie reaches deckB's XZ region at deckB's Y within 30s.
+    // "Reached" = zombie centre within 6m of deckB centre AND at deckB Y.
+    for (int f = 0; f < 1800 && reachedFrame < 0; f++) {
+        Enemies_Update(dt);
+        if (f % 60 == 0)
+            fprintf(stderr, "  [t=%.0fs] zombie (%.2f,%.2f,%.2f)\n",
+                    f/60.0f, enemies[0].pos.x, enemies[0].pos.y, enemies[0].pos.z);
+        float dx = enemies[0].pos.x - deckBX;
+        float dz = enemies[0].pos.z - deckBZ;
+        float d2 = dx*dx + dz*dz;
+        if (d2 < 36.0f && fabsf(enemies[0].pos.y - wantCentreY) < 0.8f)
+            reachedFrame = f;
+    }
+    bool pass = reachedFrame >= 0;
+    fprintf(stderr,
+            "navtest-dtu %s: deckA(%.0f,%.0f) Y=%.2f  deckB(%.0f,%.0f) Y=%.2f  "
+            "zombie endPos=(%.2f,%.2f,%.2f)  -> %s",
+            path, deckAX, deckAZ, deckASurf, deckBX, deckBZ, deckBSurf,
+            enemies[0].pos.x, enemies[0].pos.y, enemies[0].pos.z,
+            pass ? "" : "FAIL\n");
+    if (pass)
+        fprintf(stderr, "PASS (reached deckB in %.2fs)\n", reachedFrame / 60.0f);
+
+    Assets_Unload(); Weapons_Unload(); CloseWindow();
+    return pass ? 0 : 1;
+}
+
 // ---- --sim-tick <file.map> [frames] ----------------------------------------
 // The §15 headless-tick litmus for the engine/game split: instantiate the
 // World from a MapDoc and run the full game tick (rounds, spawns, players,
@@ -830,6 +903,10 @@ bool Devtools_HandleCLI(int argc, char **argv, int *exitCode) {
     }
     if (argc >= 3 && strcmp(argv[1], "--sim-navtest") == 0) {
         *exitCode = Dev_SimNavtest(argc, argv);
+        return true;
+    }
+    if (argc >= 3 && strcmp(argv[1], "--sim-navtest-dtu") == 0) {
+        *exitCode = Dev_SimNavtestDtu(argc, argv);
         return true;
     }
     if (argc >= 3 && strcmp(argv[1], "--sim-tick") == 0) {

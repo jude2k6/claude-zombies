@@ -1,6 +1,7 @@
 #include "viewmodel.h"
 #include "types.h"
 #include "assets.h"
+#include "eng_render.h"  // engine render: world shader accessors + uniform locs
 #include "weapons.h"
 #include "player.h"
 #include "anim.h"
@@ -70,8 +71,8 @@ void Viewmodel_LoadCombinedRigs(void) {
         // under data/ so passing "weapons/<id>/<id>_vm.glb" hits the
         // "data/" prefix automatically.
         if (!Anim_Load(&crigVM[wi], relpath)) continue;
-        if (worldSkinnedShaderLoaded)
-            Anim_ApplyShader(&crigVM[wi], worldSkinnedShader);
+        if (Eng_RenderWorldSkinnedShaderLoaded())
+            Anim_ApplyShader(&crigVM[wi], Eng_RenderWorldSkinnedShader());
         CrigClips *c = &crigClips[wi];
         c->idle        = Anim_FindClip(&crigVM[wi], "idle");
         c->fire        = Anim_FindClip(&crigVM[wi], "fire");
@@ -114,7 +115,7 @@ bool vmDebugMarkers = false;
 // gun-only floating OBJ path.
 void Viewmodel_LoadArms(void) {
     if (!Anim_Load(&armsVM, "arms_vm.glb")) return;
-    if (worldSkinnedShaderLoaded) Anim_ApplyShader(&armsVM, worldSkinnedShader);
+    if (Eng_RenderWorldSkinnedShaderLoaded()) Anim_ApplyShader(&armsVM, Eng_RenderWorldSkinnedShader());
     avmIdle        = Anim_FindClip(&armsVM, "idle");
     avmIdlePistol  = Anim_FindClip(&armsVM, "idle_pistol");  // optional clip
     avmFire        = Anim_FindClip(&armsVM, "fire");
@@ -333,19 +334,20 @@ static void DrawCombinedRigViewmodel(Camera camera, int wi) {
     // Draw under flat lighting (same treatment as the arms path) so the rig
     // doesn't colour-swing with the world directional light as the player
     // looks around.
-    if (worldSkinnedShaderLoaded) {
+    if (Eng_RenderWorldSkinnedShaderLoaded()) {
+        Shader sk = Eng_RenderWorldSkinnedShader();
         Vector3 flatSun = { 0.45f, 0.46f, 0.50f };
         Vector3 flatAmb = { 2.40f, 2.42f, 2.50f };
         Eng_GfxFlushBatch();
-        SetShaderValue(worldSkinnedShader, worldSkinnedShader_sunColorLoc,
+        SetShaderValue(sk, Eng_RenderWorldSkinnedShader_sunColorLoc(),
                        &flatSun, SHADER_UNIFORM_VEC3);
-        SetShaderValue(worldSkinnedShader, worldSkinnedShader_ambientColorLoc,
+        SetShaderValue(sk, Eng_RenderWorldSkinnedShader_ambientColorLoc(),
                        &flatAmb, SHADER_UNIFORM_VEC3);
         DrawModel(am->model, (Vector3){0,0,0}, 1.0f, WHITE);
         Eng_GfxFlushBatch();
-        SetShaderValue(worldSkinnedShader, worldSkinnedShader_sunColorLoc,
+        SetShaderValue(sk, Eng_RenderWorldSkinnedShader_sunColorLoc(),
                        &sunColor, SHADER_UNIFORM_VEC3);
-        SetShaderValue(worldSkinnedShader, worldSkinnedShader_ambientColorLoc,
+        SetShaderValue(sk, Eng_RenderWorldSkinnedShader_ambientColorLoc(),
                        &ambientColor, SHADER_UNIFORM_VEC3);
     } else {
         DrawModel(am->model, (Vector3){0,0,0}, 1.0f, WHITE);
@@ -445,30 +447,32 @@ static void DrawArmsViewmodel(Camera camera, int wi) {
     gm.transform = gunTx;
 
     // Arms (skinned shader) under flat lighting so they don't colour-swing.
-    if (worldSkinnedShaderLoaded) {
+    if (Eng_RenderWorldSkinnedShaderLoaded()) {
+        Shader sk = Eng_RenderWorldSkinnedShader();
         Vector3 flatSun = { 0.25f, 0.26f, 0.30f };
         Vector3 flatAmb = { 1.30f, 1.31f, 1.36f };
         Eng_GfxFlushBatch();
-        SetShaderValue(worldSkinnedShader, worldSkinnedShader_sunColorLoc,     &flatSun, SHADER_UNIFORM_VEC3);
-        SetShaderValue(worldSkinnedShader, worldSkinnedShader_ambientColorLoc, &flatAmb, SHADER_UNIFORM_VEC3);
+        SetShaderValue(sk, Eng_RenderWorldSkinnedShader_sunColorLoc(),     &flatSun, SHADER_UNIFORM_VEC3);
+        SetShaderValue(sk, Eng_RenderWorldSkinnedShader_ambientColorLoc(), &flatAmb, SHADER_UNIFORM_VEC3);
         DrawModel(armsVM.model, (Vector3){0,0,0}, 1.0f, WHITE);
         Eng_GfxFlushBatch();
-        SetShaderValue(worldSkinnedShader, worldSkinnedShader_sunColorLoc,     &sunColor,     SHADER_UNIFORM_VEC3);
-        SetShaderValue(worldSkinnedShader, worldSkinnedShader_ambientColorLoc, &ambientColor, SHADER_UNIFORM_VEC3);
+        SetShaderValue(sk, Eng_RenderWorldSkinnedShader_sunColorLoc(),     &sunColor,     SHADER_UNIFORM_VEC3);
+        SetShaderValue(sk, Eng_RenderWorldSkinnedShader_ambientColorLoc(), &ambientColor, SHADER_UNIFORM_VEC3);
     } else {
         DrawModel(armsVM.model, (Vector3){0,0,0}, 1.0f, WHITE);
     }
     // Gun (OBJ world shader) under flat lighting.
-    if (worldShaderLoaded) {
+    if (Eng_RenderWorldShaderLoaded()) {
+        Shader ws = Eng_RenderWorldShader();
         Vector3 flatSun = { 0.12f, 0.13f, 0.16f };
         Vector3 flatAmb = { 0.90f, 0.91f, 0.96f };
         Eng_GfxFlushBatch();
-        SetShaderValue(worldShader, worldShader_sunColorLoc,     &flatSun, SHADER_UNIFORM_VEC3);
-        SetShaderValue(worldShader, worldShader_ambientColorLoc, &flatAmb, SHADER_UNIFORM_VEC3);
+        SetShaderValue(ws, Eng_RenderWorldShader_sunColorLoc(),     &flatSun, SHADER_UNIFORM_VEC3);
+        SetShaderValue(ws, Eng_RenderWorldShader_ambientColorLoc(), &flatAmb, SHADER_UNIFORM_VEC3);
         DrawModel(gm, (Vector3){0,0,0}, 1.0f, WHITE);
         Eng_GfxFlushBatch();
-        SetShaderValue(worldShader, worldShader_sunColorLoc,     &sunColor,     SHADER_UNIFORM_VEC3);
-        SetShaderValue(worldShader, worldShader_ambientColorLoc, &ambientColor, SHADER_UNIFORM_VEC3);
+        SetShaderValue(ws, Eng_RenderWorldShader_sunColorLoc(),     &sunColor,     SHADER_UNIFORM_VEC3);
+        SetShaderValue(ws, Eng_RenderWorldShader_ambientColorLoc(), &ambientColor, SHADER_UNIFORM_VEC3);
     } else {
         DrawModel(gm, (Vector3){0,0,0}, 1.0f, WHITE);
     }
@@ -644,16 +648,17 @@ void Viewmodel_DrawFirstPerson(Camera camera) {
     // flat lighting (tiny directional term for form, high ambient) so the gun
     // shows its authored material colours consistently, then restore the world
     // lighting for everything drawn afterwards.
-    if (worldShaderLoaded) {
+    if (Eng_RenderWorldShaderLoaded()) {
+        Shader ws = Eng_RenderWorldShader();
         Vector3 flatSun = { 0.12f, 0.13f, 0.16f };
         Vector3 flatAmb = { 0.90f, 0.91f, 0.96f };
         Eng_GfxFlushBatch();
-        SetShaderValue(worldShader, worldShader_sunColorLoc,     &flatSun, SHADER_UNIFORM_VEC3);
-        SetShaderValue(worldShader, worldShader_ambientColorLoc, &flatAmb, SHADER_UNIFORM_VEC3);
+        SetShaderValue(ws, Eng_RenderWorldShader_sunColorLoc(),     &flatSun, SHADER_UNIFORM_VEC3);
+        SetShaderValue(ws, Eng_RenderWorldShader_ambientColorLoc(), &flatAmb, SHADER_UNIFORM_VEC3);
         DrawModel(m, (Vector3){0,0,0}, 1.0f, WHITE);
         Eng_GfxFlushBatch();
-        SetShaderValue(worldShader, worldShader_sunColorLoc,     &sunColor,     SHADER_UNIFORM_VEC3);
-        SetShaderValue(worldShader, worldShader_ambientColorLoc, &ambientColor, SHADER_UNIFORM_VEC3);
+        SetShaderValue(ws, Eng_RenderWorldShader_sunColorLoc(),     &sunColor,     SHADER_UNIFORM_VEC3);
+        SetShaderValue(ws, Eng_RenderWorldShader_ambientColorLoc(), &ambientColor, SHADER_UNIFORM_VEC3);
     } else {
         DrawModel(m, (Vector3){0,0,0}, 1.0f, WHITE);
     }

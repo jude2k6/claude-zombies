@@ -57,6 +57,7 @@ add_library(engine STATIC
     src/engine/gfx.c
     src/engine/app.c
     src/engine/content.c
+    src/engine/eng_render.c
 )
 target_include_directories(engine PUBLIC
     ${CMAKE_SOURCE_DIR}/src/engine

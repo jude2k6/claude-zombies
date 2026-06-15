@@ -10,6 +10,7 @@
 #include "entities.h"
 #include "interact.h"
 #include "assets.h"
+#include "eng_render.h"  // engine render: world shader accessors for PUSH_SKIN_UNIFORMS
 #include "anim.h"
 #include "render.h"
 #include "viewmodel.h"
@@ -321,7 +322,7 @@ static int Dev_AnimTest(int argc, char **argv) {
 
     AnimModel am;
     if (!Anim_Load(&am, argv[2])) { CloseWindow(); return 1; }
-    if (worldSkinnedShaderLoaded) Anim_ApplyShader(&am, worldSkinnedShader);
+    if (Eng_RenderWorldSkinnedShaderLoaded()) Anim_ApplyShader(&am, Eng_RenderWorldSkinnedShader());
 
     int clip = (argc >= 4 && argv[3][0] >= '0' && argv[3][0] <= '9')
              ? atoi(argv[3]) : 0;
@@ -339,21 +340,18 @@ static int Dev_AnimTest(int argc, char **argv) {
     AnimState st; Anim_Play(&st, clip, true, 1.0f);
     float dur = Anim_ClipDuration(&am, clip);
 
-    // Helper to push the skinned shader's fog/sun uniforms (BeginWorldShader
-    // is internal to render.c; the test harness sets them directly).
+    // Helper to push the skinned shader's fog/sun uniforms.
+    // Calls Eng_RenderBeginWorld (push uniforms + bind world shader) then
+    // immediately restores the default — the skinned shader is stamped on the
+    // model material and gets its uniforms from the push regardless.
     #define PUSH_SKIN_UNIFORMS() do { \
-        if (worldSkinnedShaderLoaded) { \
-            float fc[4]={fogColor.r/255.f,fogColor.g/255.f,fogColor.b/255.f,1}; \
-            float sd[3]={sunDir.x,sunDir.y,sunDir.z}; \
-            float sc[3]={sunColor.x,sunColor.y,sunColor.z}; \
-            float ac[3]={ambientColor.x,ambientColor.y,ambientColor.z}; \
-            SetShaderValue(worldSkinnedShader, worldSkinnedShader_fogColorLoc, fc, SHADER_UNIFORM_VEC4); \
-            SetShaderValue(worldSkinnedShader, worldSkinnedShader_fogStartLoc, &fogStart, SHADER_UNIFORM_FLOAT); \
-            SetShaderValue(worldSkinnedShader, worldSkinnedShader_fogEndLoc,   &fogEnd,   SHADER_UNIFORM_FLOAT); \
-            SetShaderValue(worldSkinnedShader, worldSkinnedShader_sunDirLoc,       sd, SHADER_UNIFORM_VEC3); \
-            SetShaderValue(worldSkinnedShader, worldSkinnedShader_sunColorLoc,     sc, SHADER_UNIFORM_VEC3); \
-            SetShaderValue(worldSkinnedShader, worldSkinnedShader_ambientColorLoc, ac, SHADER_UNIFORM_VEC3); \
-        } } while (0)
+        Eng_RenderSetLighting((EngLighting){ \
+            .fogStart=fogStart, .fogEnd=fogEnd, .fogColor=fogColor, \
+            .sunDir=sunDir, .sunColor=sunColor, .ambientColor=ambientColor, \
+        }); \
+        Eng_RenderBeginWorld(); \
+        Eng_RenderEndWorld(); \
+    } while (0)
 
     if (live) {
         float yaw = 0.0f;

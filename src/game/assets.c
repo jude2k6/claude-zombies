@@ -1,5 +1,6 @@
 #include "assets.h"
 #include "content.h" // engine content registry: Eng_LoadModel/Texture/Shader
+#include "eng_render.h"  // engine render module: world/skinned/postfx shader ownership
 #include "gfx.h"     // Eng_GfxDefaultShaderId — low-level GL stays engine-side
 #include <stdio.h>
 #include <string.h>
@@ -61,39 +62,16 @@ static const char *TEXTURE_FILES[TEX_COUNT] = {
     [TEX_CEILING]  = "ceiling_wood.png",
 };
 
-// ---- shader storage -----------------------------------------------------
-Shader worldShader;
-bool   worldShaderLoaded;
-int    worldShader_fogColorLoc;
-int    worldShader_fogStartLoc;
-int    worldShader_fogEndLoc;
-int    worldShader_sunDirLoc;
-int    worldShader_sunColorLoc;
-int    worldShader_ambientColorLoc;
-int    worldShader_tileVariationLoc;
-
-Shader worldSkinnedShader;
-bool   worldSkinnedShaderLoaded;
-int    worldSkinnedShader_fogColorLoc;
-int    worldSkinnedShader_fogStartLoc;
-int    worldSkinnedShader_fogEndLoc;
-int    worldSkinnedShader_sunDirLoc;
-int    worldSkinnedShader_sunColorLoc;
-int    worldSkinnedShader_ambientColorLoc;
-
+// ---- sky shader (still game-side — only used by DrawSkybox in render.c) ----
 Shader skyShader;
 bool   skyShaderLoaded;
 Model  skyModel;
 
-Shader postfxShader;
-bool   postfxShaderLoaded;
-int    postfxShader_resolutionLoc;
-int    postfxShader_timeLoc;
-int    postfxShader_hitFlashLoc;
-int    postfxShader_lowHpLoc;
-
+// ---- per-frame lighting state ---------------------------------------------
+// Written by level.c (from map atmosphere block) and by devtools.c (for
+// headless screenshot modes). render.c pushes them into Eng_RenderSetLighting
+// once per frame before Eng_RenderBeginWorld().
 // Defaults match the night-sky aesthetic and Nacht's interior scale.
-// Tweak per-map by editing these globals before Render_World3D.
 float fogStart = 10.0f;
 float fogEnd   = 55.0f;
 Color fogColor = (Color){ 10, 12, 22, 255 };
@@ -143,43 +121,11 @@ void Assets_Load(void) {
         }
     }
 
-    // Shaders — route through the engine content registry.
-    // Eng_LoadShader probes data/shaders/ etc.
-    {
-        EngShader h = Eng_LoadShader("world.vs", "world.fs");
-        Shader *s = Eng_ShaderGet(h);
-        worldShaderLoaded = (s != NULL);
-        if (worldShaderLoaded) {
-            worldShader                  = *s;
-            worldShader_fogColorLoc      = GetShaderLocation(worldShader, "fogColor");
-            worldShader_fogStartLoc      = GetShaderLocation(worldShader, "fogStart");
-            worldShader_fogEndLoc        = GetShaderLocation(worldShader, "fogEnd");
-            worldShader_sunDirLoc        = GetShaderLocation(worldShader, "sunDir");
-            worldShader_sunColorLoc      = GetShaderLocation(worldShader, "sunColor");
-            worldShader_ambientColorLoc  = GetShaderLocation(worldShader, "ambientColor");
-            worldShader_tileVariationLoc = GetShaderLocation(worldShader, "tileVariation");
-        } else {
-            fprintf(stderr, "shader: world.{vs,fs} not found, fog disabled\n");
-        }
-    }
+    // World + skinned + postfx shaders — owned by the engine render module.
+    // Also loads the tileVariation uniform location for the world shader.
+    Eng_RenderLoad();
 
-    {
-        EngShader h = Eng_LoadShader("world_skinned.vs", "world.fs");
-        Shader *s = Eng_ShaderGet(h);
-        worldSkinnedShaderLoaded = (s != NULL);
-        if (worldSkinnedShaderLoaded) {
-            worldSkinnedShader                  = *s;
-            worldSkinnedShader_fogColorLoc     = GetShaderLocation(worldSkinnedShader, "fogColor");
-            worldSkinnedShader_fogStartLoc     = GetShaderLocation(worldSkinnedShader, "fogStart");
-            worldSkinnedShader_fogEndLoc       = GetShaderLocation(worldSkinnedShader, "fogEnd");
-            worldSkinnedShader_sunDirLoc       = GetShaderLocation(worldSkinnedShader, "sunDir");
-            worldSkinnedShader_sunColorLoc     = GetShaderLocation(worldSkinnedShader, "sunColor");
-            worldSkinnedShader_ambientColorLoc = GetShaderLocation(worldSkinnedShader, "ambientColor");
-        } else {
-            fprintf(stderr, "shader: world_skinned.vs not found, animated models unlit\n");
-        }
-    }
-
+    // Sky shader — stays game-side (only used by DrawSkybox in render.c).
     {
         EngShader h = Eng_LoadShader("sky.vs", "sky.fs");
         Shader *s = Eng_ShaderGet(h);
@@ -195,41 +141,25 @@ void Assets_Load(void) {
         }
     }
 
-    {
-        // Post-FX fullscreen shader (postfx.fs — no vertex shader; use raylib's
-        // default VS which emits gl_Position from vertexPosition directly).
-        EngShader h = Eng_LoadShader(NULL, "postfx.fs");
-        Shader *s = Eng_ShaderGet(h);
-        postfxShaderLoaded = (s != NULL);
-        if (postfxShaderLoaded) {
-            postfxShader               = *s;
-            postfxShader_resolutionLoc = GetShaderLocation(postfxShader, "resolution");
-            postfxShader_timeLoc       = GetShaderLocation(postfxShader, "time");
-            postfxShader_hitFlashLoc   = GetShaderLocation(postfxShader, "hitFlash");
-            postfxShader_lowHpLoc      = GetShaderLocation(postfxShader, "lowHp");
-        } else {
-            fprintf(stderr, "shader: postfx.fs not found, post-FX disabled\n");
-        }
-    }
-
     Assets_ApplyWorldShader();
 }
 
 void Assets_ApplyWorldShader(void) {
-    if (!worldShaderLoaded) return;
+    if (!Eng_RenderWorldShaderLoaded()) return;
+    Shader ws = Eng_RenderWorldShader();
     // Replace the shader on every material of every loaded model so
     // DrawModelEx draws through the fog program. Models owned outside assets.c
     // (weapon viewmodels) are enrolled via Assets_RegisterWorldShaderModel.
     for (int i = 0; i < s_wsModelCount; i++) {
         Model *mdl = s_wsModels[i];
         for (int m = 0; m < mdl->materialCount; m++) {
-            mdl->materials[m].shader = worldShader;
+            mdl->materials[m].shader = ws;
         }
     }
     for (int i = 0; i < PROP_COUNT; i++) {
         if (!propModelLoaded[i]) continue;
         for (int m = 0; m < propModels[i].materialCount; m++) {
-            propModels[i].materials[m].shader = worldShader;
+            propModels[i].materials[m].shader = ws;
         }
     }
 }
@@ -238,8 +168,8 @@ void Assets_Unload(void) {
     // Weapons are owned by weapons.{c,h}; Weapons_Unload handles their models.
     // The engine content registry (Eng_ContentFlush) handles the underlying
     // GL resources for all models/textures/shaders loaded via Eng_Load*.
-    // The game arrays (propModels[], textures[], worldShader, etc.) just hold
-    // copies of the handles' values; we clear the loaded flags here.
+    // The game arrays (propModels[], textures[]) just hold copies of the
+    // handles' values; we clear the loaded flags here.
     for (int i = 0; i < PROP_COUNT; i++) {
         propModelLoaded[i] = false;
     }
@@ -252,9 +182,9 @@ void Assets_Unload(void) {
         UnloadModel(skyModel);
         skyShaderLoaded = false;
     }
-    worldShaderLoaded        = false;
-    worldSkinnedShaderLoaded = false;
-    postfxShaderLoaded       = false;
+    // world/skinned/postfx shader state is owned by engine/render.c;
+    // Eng_RenderUnloadPostFX() resets its loaded flags + RT.
+    Eng_RenderUnloadPostFX();
 
     // Flush engine registry (releases all GL objects) and the name cache.
     Eng_ContentFlush();

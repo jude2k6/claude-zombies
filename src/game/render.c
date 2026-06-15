@@ -1,4 +1,5 @@
 #include "render.h"
+#include "eng_render.h"  // engine render module: postFX RT + world shader pass
 #include "viewmodel.h"
 #include "level.h"
 #include "weapons.h"
@@ -14,15 +15,6 @@
 #include "gfx.h"
 #include <math.h>
 #include <stdio.h>
-
-// ---- post-FX render target --------------------------------------------------
-// One fullscreen RenderTexture2D. Recreated whenever the window size changes.
-// When postfxShaderLoaded == false the three public functions are no-ops so
-// the render path degrades gracefully to the pre-RT behaviour.
-static RenderTexture2D postfxRT;
-static int             postfxRT_w = 0;
-static int             postfxRT_h = 0;
-static bool            postfxRT_active = false;  // between Begin/EndPostFX
 
 // ---- shared rigged zombie (glTF skeletal animation) --------------------
 // One shared skinned model + clips; each enemy slot carries a lightweight,
@@ -69,7 +61,7 @@ static inline void DrawProp(PropId id, Vector3 pos, float yawDeg, Color tint) {
 // if the .glb is missing, DrawEnemy falls back to the OBJ / cube draw.
 void Render_LoadZombieAnim(void) {
     if (!Anim_Load(&zombieAnim, "zombie.glb")) return;
-    if (worldSkinnedShaderLoaded) Anim_ApplyShader(&zombieAnim, worldSkinnedShader);
+    if (Eng_RenderWorldSkinnedShaderLoaded()) Anim_ApplyShader(&zombieAnim, Eng_RenderWorldSkinnedShader());
     zClipWalk   = Anim_FindClip(&zombieAnim, "walk");
     zClipAttack = Anim_FindClip(&zombieAnim, "attack_a");
     zClipDeath  = Anim_FindClip(&zombieAnim, "death");
@@ -86,7 +78,7 @@ void Render_UnloadZombieAnim(void) {
 // on its PROP_PLAYER_M / cube path.
 void Render_LoadPlayerAnim(void) {
     if (!Anim_Load(&playerAnim, "player.glb")) return;
-    if (worldSkinnedShaderLoaded) Anim_ApplyShader(&playerAnim, worldSkinnedShader);
+    if (Eng_RenderWorldSkinnedShaderLoaded()) Anim_ApplyShader(&playerAnim, Eng_RenderWorldSkinnedShader());
     pmIdle   = Anim_FindClip(&playerAnim, "idle");
     pmWalk   = Anim_FindClip(&playerAnim, "walk");
     pmRun    = Anim_FindClip(&playerAnim, "run");
@@ -132,16 +124,16 @@ static inline void TexQuad(float ax, float ay, float az,
 // world geometry — not the grid lines, debug cubes, or anything else
 // sharing the immediate-mode batch.
 static void BeginTileVariation(void) {
-    if (!worldShaderLoaded) return;
+    if (!Eng_RenderWorldShaderLoaded()) return;
     Eng_GfxFlushBatch();
     float v = 1.0f;
-    SetShaderValue(worldShader, worldShader_tileVariationLoc, &v, SHADER_UNIFORM_FLOAT);
+    SetShaderValue(Eng_RenderWorldShader(), Eng_RenderWorldShader_tileVariationLoc(), &v, SHADER_UNIFORM_FLOAT);
 }
 static void EndTileVariation(void) {
-    if (!worldShaderLoaded) return;
+    if (!Eng_RenderWorldShaderLoaded()) return;
     Eng_GfxFlushBatch();
     float v = 0.0f;
-    SetShaderValue(worldShader, worldShader_tileVariationLoc, &v, SHADER_UNIFORM_FLOAT);
+    SetShaderValue(Eng_RenderWorldShader(), Eng_RenderWorldShader_tileVariationLoc(), &v, SHADER_UNIFORM_FLOAT);
 }
 
 // Draw a textured axis-aligned box.  Each face's UVs span the face's
@@ -972,44 +964,22 @@ static void DrawSkybox(Camera camera) {
     Eng_GfxBackfaceCull(true);
 }
 
-// Push fog uniforms + swap rlgl's default shader so textured walls / floor
-// go through the same fog program as the loaded Models.  Returns the
-// previously-active default shader id so the caller can restore it.
+// Push the current lighting globals into the engine render module, then bind
+// the world shader so textured walls/floor and models go through the fog
+// program.  EndWorldShader restores the default.
 static void BeginWorldShader(void) {
-    if (!worldShaderLoaded) return;
-    float fc[4] = {
-        fogColor.r / 255.0f, fogColor.g / 255.0f,
-        fogColor.b / 255.0f, fogColor.a / 255.0f,
-    };
-    SetShaderValue(worldShader, worldShader_fogColorLoc, fc, SHADER_UNIFORM_VEC4);
-    SetShaderValue(worldShader, worldShader_fogStartLoc, &fogStart, SHADER_UNIFORM_FLOAT);
-    SetShaderValue(worldShader, worldShader_fogEndLoc,   &fogEnd,   SHADER_UNIFORM_FLOAT);
-    float sd[3] = { sunDir.x, sunDir.y, sunDir.z };
-    float sc[3] = { sunColor.x, sunColor.y, sunColor.z };
-    float ac[3] = { ambientColor.x, ambientColor.y, ambientColor.z };
-    SetShaderValue(worldShader, worldShader_sunDirLoc,       sd, SHADER_UNIFORM_VEC3);
-    SetShaderValue(worldShader, worldShader_sunColorLoc,     sc, SHADER_UNIFORM_VEC3);
-    SetShaderValue(worldShader, worldShader_ambientColorLoc, ac, SHADER_UNIFORM_VEC3);
-
-    // Animated models draw through the skinned variant (their material shader
-    // is worldSkinnedShader, used by DrawMesh regardless of rlSetShader), so
-    // it needs the same fog/sun/ambient values pushed each frame.
-    if (worldSkinnedShaderLoaded) {
-        SetShaderValue(worldSkinnedShader, worldSkinnedShader_fogColorLoc, fc, SHADER_UNIFORM_VEC4);
-        SetShaderValue(worldSkinnedShader, worldSkinnedShader_fogStartLoc, &fogStart, SHADER_UNIFORM_FLOAT);
-        SetShaderValue(worldSkinnedShader, worldSkinnedShader_fogEndLoc,   &fogEnd,   SHADER_UNIFORM_FLOAT);
-        SetShaderValue(worldSkinnedShader, worldSkinnedShader_sunDirLoc,       sd, SHADER_UNIFORM_VEC3);
-        SetShaderValue(worldSkinnedShader, worldSkinnedShader_sunColorLoc,     sc, SHADER_UNIFORM_VEC3);
-        SetShaderValue(worldSkinnedShader, worldSkinnedShader_ambientColorLoc, ac, SHADER_UNIFORM_VEC3);
-    }
-    Eng_GfxUseShader(worldShader);
+    Eng_RenderSetLighting((EngLighting){
+        .fogStart    = fogStart,
+        .fogEnd      = fogEnd,
+        .fogColor    = fogColor,
+        .sunDir      = sunDir,
+        .sunColor    = sunColor,
+        .ambientColor= ambientColor,
+    });
+    Eng_RenderBeginWorld();
 }
 static void EndWorldShader(void) {
-    if (!worldShaderLoaded) return;
-    // CRITICAL: rlSetShader's second arg must point at the default shader's
-    // own locs array; passing NULL leaves currentShaderLocs as NULL and
-    // EndDrawing's render-batch flush dereferences it (SEGV).
-    Eng_GfxUseDefaultShader();
+    Eng_RenderEndWorld();
 }
 
 // Speed → tracer colour. Avoids serialising the firing weapon on every
@@ -1063,58 +1033,27 @@ static void DrawTracers(Camera camera) {
     Eng_GfxBackfaceCull(true);
 }
 
-// Ensure the RT exists and matches the current window size. Called lazily from
-// BeginPostFX each frame so resize / F11 is handled automatically.
-static void PostFX_EnsureRT(int w, int h) {
-    if (postfxRT_w == w && postfxRT_h == h) return;
-    if (postfxRT_w > 0) UnloadRenderTexture(postfxRT);
-    postfxRT   = LoadRenderTexture(w, h);
-    postfxRT_w = w;
-    postfxRT_h = h;
-}
+// Post-FX pass — thin wrappers over the engine render module.
+// The RT lifecycle, composite quad, and shader uniform push all live in
+// src/engine/eng_render.c now.  The game just passes its per-frame params.
 
 void Render_BeginPostFX(void) {
-    if (!postfxShaderLoaded) return;
-    int w = GetScreenWidth();
-    int h = GetScreenHeight();
-    PostFX_EnsureRT(w, h);
-    BeginTextureMode(postfxRT);
-    postfxRT_active = true;
+    Eng_RenderBeginPostFX();
 }
 
 void Render_EndPostFX(float hitFlash, float lowHp) {
-    if (!postfxShaderLoaded) return;
-    if (postfxRT_active) {
-        EndTextureMode();
-        postfxRT_active = false;
-    }
-    int w = postfxRT_w;
-    int h = postfxRT_h;
-
-    // Push per-frame uniforms before the quad draw.
-    float res[2] = { (float)w, (float)h };
-    float t      = (float)GetTime();
-    SetShaderValue(postfxShader, postfxShader_resolutionLoc, res,      SHADER_UNIFORM_VEC2);
-    SetShaderValue(postfxShader, postfxShader_timeLoc,       &t,       SHADER_UNIFORM_FLOAT);
-    SetShaderValue(postfxShader, postfxShader_hitFlashLoc,   &hitFlash, SHADER_UNIFORM_FLOAT);
-    SetShaderValue(postfxShader, postfxShader_lowHpLoc,      &lowHp,   SHADER_UNIFORM_FLOAT);
-
-    // Draw fullscreen quad. Source rect uses negative height so the texture
-    // is not drawn upside-down (raylib RT textures flip V relative to screen).
-    BeginShaderMode(postfxShader);
-    DrawTextureRec(postfxRT.texture,
-                   (Rectangle){ 0, 0, (float)w, -(float)h },
-                   (Vector2){ 0, 0 },
-                   WHITE);
-    EndShaderMode();
+    Eng_RenderEndPostFX((EngPostFxParams){
+        .hitFlash = hitFlash,
+        .lowHp    = lowHp,
+        .time     = (float)GetTime(),
+    });
 }
 
 void Render_UnloadPostFX(void) {
-    if (postfxRT_w > 0) {
-        UnloadRenderTexture(postfxRT);
-        postfxRT_w = 0;
-        postfxRT_h = 0;
-    }
+    // Engine-owned RT is released inside Assets_Unload → Eng_RenderUnloadPostFX.
+    // This function is kept for callers that explicitly want to release the RT
+    // (e.g. devtools) and is now a no-op — the engine manages the lifetime.
+    (void)0;
 }
 
 void Render_World3D(Camera camera) {

@@ -12,6 +12,7 @@
 // ============================================================================
 
 void Eng_GfxFlushBatch(void);               // rlDrawRenderBatchActive()
+void Eng_GfxClearDepth(void);               // flush batch then glClear(GL_DEPTH_BUFFER_BIT)
 void Eng_GfxDepthMask(bool on);             // on -> rlEnableDepthMask(), else rlDisableDepthMask()
 void Eng_GfxDepthTest(bool on);             // on -> rlEnableDepthTest(),  else rlDisableDepthTest()
 void Eng_GfxBackfaceCull(bool on);          // on -> rlEnableBackfaceCulling(), else rlDisableBackfaceCulling()

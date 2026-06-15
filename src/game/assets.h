@@ -62,48 +62,20 @@ extern bool      textureLoaded[TEX_COUNT];
 #define TILE_SIZE 4.0f
 
 // ---- shaders ------------------------------------------------------------
-// `worldShader` replaces raylib's default shader for the 3D pass so every
-// model and every rlgl immediate draw goes through one program that does
-// texture * tint * fog. `skyShader` paints the procedural night sky.
-// Both share data/shaders/*.{vs,fs}; falling back to the default shader
-// if the files don't load means missing-asset state still runs.
-extern Shader worldShader;
-extern bool   worldShaderLoaded;
-extern int    worldShader_fogColorLoc;
-extern int    worldShader_fogStartLoc;
-extern int    worldShader_fogEndLoc;
-extern int    worldShader_sunDirLoc;
-extern int    worldShader_sunColorLoc;
-extern int    worldShader_ambientColorLoc;
-extern int    worldShader_tileVariationLoc;
-
-// Skinned variant of the world shader (world_skinned.vs + world.fs): same
-// lighting + fog, but with GPU skeletal skinning. Assigned to animated
-// (glTF) models' materials. Its fog/sun/ambient uniforms are pushed every
-// frame alongside worldShader's (see render BeginWorldShader).
-extern Shader worldSkinnedShader;
-extern bool   worldSkinnedShaderLoaded;
-extern int    worldSkinnedShader_fogColorLoc;
-extern int    worldSkinnedShader_fogStartLoc;
-extern int    worldSkinnedShader_fogEndLoc;
-extern int    worldSkinnedShader_sunDirLoc;
-extern int    worldSkinnedShader_sunColorLoc;
-extern int    worldSkinnedShader_ambientColorLoc;
-
+// world/skinned/postfx shaders and their uniform locations are now owned by
+// the engine render module (src/engine/render.{c,h}) and accessed via the
+// Eng_Render* API.  Use Eng_RenderWorldShader(), Eng_RenderBeginWorld(), etc.
+//
+// The sky shader is still game-side (used only by DrawSkybox in render.c).
 extern Shader skyShader;
 extern bool   skyShaderLoaded;
 extern Model  skyModel;             // unit cube, materials[0].shader = skyShader
 
-// Post-process fullscreen-quad shader (postfx.fs). Loaded alongside the world
-// shaders; postfxShaderLoaded == false triggers the "no RT, draw direct" path.
-extern Shader postfxShader;
-extern bool   postfxShaderLoaded;
-extern int    postfxShader_resolutionLoc;
-extern int    postfxShader_timeLoc;
-extern int    postfxShader_hitFlashLoc;
-extern int    postfxShader_lowHpLoc;
-
-// Tuning the renderer applies to worldShader every frame.
+// ---- per-frame lighting state ------------------------------------------
+// The game sets lighting once per frame via Eng_RenderSetLighting(EngLighting).
+// Level_InstantiateDoc writes the map's atmosphere block here; render.c passes
+// it through before calling Eng_RenderBeginWorld().  Defaults are in
+// engine/render.c; the game may override them freely.
 extern float   fogStart;
 extern float   fogEnd;
 extern Color   fogColor;

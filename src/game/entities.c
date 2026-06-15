@@ -236,8 +236,11 @@ static void Nav_EdgeEnds(const NavEdge *ed, int *loNode, int *hiNode) {
 // Replaces the old greedy Y-level heuristic that dead-ended on down-then-up
 // routes (two decks at the same Y joined only via the ground). On flat maps
 // navNodeCount==0, so this never fires and AI is byte-identical.
+// climbRampOut (optional) receives the NavEdge index of the ramp the enemy
+// intends to mount/traverse this tick, so the caller's obstacle-avoidance can
+// steer the enemy AROUND every other ramp instead of auto-climbing it.
 static bool CrossFloorGoalFull(const Enemy *e, float eY, float tY,
-                                float tX, float tZ, Vector3 *goal) {
+                                float tX, float tZ, Vector3 *goal, int *climbRampOut) {
     if (g_world.navNodeCount == 0) return false;
     int targetNode = Nav_NodeAt(tX, tZ, tY);
     if (targetNode < 0) return false;  // target in unknown region
@@ -266,6 +269,7 @@ static bool CrossFloorGoalFull(const Enemy *e, float eY, float tY,
         if (goHigh && f->yHigh - rampSurf < ENDZONE) continue;
         if (!goHigh && rampSurf - f->yLow < ENDZONE) continue;
         *goal = goHigh ? RampHighEntrance(f) : RampLowEntrance(f);
+        if (climbRampOut) *climbRampOut = i;   // we're on this ramp — don't avoid it
         return true;
     }
 
@@ -311,7 +315,29 @@ static bool CrossFloorGoalFull(const Enemy *e, float eY, float tY,
     int loNode, hiNode; Nav_EdgeEnds(hop, &loNode, &hiNode);
     *goal = (enemyNode == loNode) ? RampLowEntrance(&hop->ramp)
                                   : RampHighEntrance(&hop->ramp);
+    if (climbRampOut) *climbRampOut = hopEdge;   // mounting this ramp — avoid others
     return true;
+}
+
+// Locomotion guard for cross-floor routing: true if a short step along `dir`
+// would put the enemy onto a ramp surface meaningfully above its current floor
+// — i.e. auto-climb a ramp it isn't trying to take. `allowRamp` is the NavEdge
+// index of the ramp the enemy intends to mount this tick (-1 = none); that one
+// is never blocked. Lets the existing fan-probe steer around stray ramps the
+// same way it steers around walls (e.g. detour in Z past an X-sloped ramp that
+// lies across a ground path between two other ramps).
+static bool RampAscentAhead(const Enemy *e, Vector3 dir, float floorY, int allowRamp) {
+    const float LOOK = 1.6f;   // far enough to see a gentle ramp rising ahead
+    const float RISE = 0.6f;   // ignore tangential brushes along a ramp's foot
+    Vector3 p = { e->pos.x + dir.x * LOOK, 0.0f, e->pos.z + dir.z * LOOK };
+    for (int i = 0; i < g_world.navEdgeCount; i++) {
+        if (i == allowRamp) continue;
+        const FloorRegion *f = &g_world.navEdges[i].ramp;
+        if (p.x < f->cx - f->halfX || p.x > f->cx + f->halfX) continue;
+        if (p.z < f->cz - f->halfZ || p.z > f->cz + f->halfZ) continue;
+        if (Level_RegionSurfaceY(f, p.x, p.z) > floorY + RISE) return true;
+    }
+    return false;
 }
 
 void Enemies_Update(float dt) {
@@ -384,8 +410,9 @@ void Enemies_Update(float dt) {
             // (ramps/doors rarely interact); never fires on flat maps.
             float eFloorY = Level_FloorHeightAt(e->pos.x, e->pos.z, e->pos.y - ENEMY_HEIGHT*0.5f);
             float tFloorY = Level_FloorHeightAt(tp->pos.x, tp->pos.z, tp->pos.y - PLAYER_EYE);
+            int climbRamp = -1;
             bool crossFloor = CrossFloorGoalFull(e, eFloorY, tFloorY,
-                                                  tp->pos.x, tp->pos.z, &goal);
+                                                  tp->pos.x, tp->pos.z, &goal, &climbRamp);
             if (crossFloor) { e->waypoint = goal; e->hasWaypoint = true; }
 
             for (int di = 0; di < doorCount && !crossFloor; di++) {
@@ -479,7 +506,10 @@ void Enemies_Update(float dt) {
             if (e->escapeTimer <= 0 && d > 0.6f) {
                 float lookahead = e->speed * speedMul * 0.45f;
                 if (lookahead < 0.6f) lookahead = 0.6f;
-                if (!Level_PathClearXZ(e->pos, moveDir, ENEMY_RADIUS + 0.05f, lookahead)) {
+                bool rampBlock = crossFloor && RampAscentAhead(e, moveDir, eFloorY, climbRamp);
+                bool blocked = rampBlock
+                            || !Level_PathClearXZ(e->pos, moveDir, ENEMY_RADIUS + 0.05f, lookahead);
+                if (blocked) {
                     static const float baseAngles[] = { 30.0f, 60.0f, 90.0f, 125.0f };
                     int sign = e->stuckBias ? +1 : -1;
                     bool found = false;
@@ -492,9 +522,15 @@ void Enemies_Update(float dt) {
                                 dirGoal.x * c - dirGoal.z * si, 0.0f,
                                 dirGoal.x * si + dirGoal.z * c
                             };
-                            if (Level_PathClearXZ(e->pos, cand, ENEMY_RADIUS + 0.05f, lookahead)) {
+                            if (Level_PathClearXZ(e->pos, cand, ENEMY_RADIUS + 0.05f, lookahead)
+                                && !(crossFloor && RampAscentAhead(e, cand, eFloorY, climbRamp))) {
                                 e->escapeDir = cand;
-                                e->escapeTimer = 0.30f;
+                                // Ramp detours need to clear the whole footprint
+                                // (several metres in Z) before re-evaluating, or
+                                // phase-1 re-grabs the enemy onto the ramp and it
+                                // oscillates. Commit long enough to circumnavigate;
+                                // wall detours keep the short anti-jitter commit.
+                                e->escapeTimer = rampBlock ? 1.0f : 0.30f;
                                 found = true;
                             }
                         }

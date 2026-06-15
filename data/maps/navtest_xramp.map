@@ -1,0 +1,39 @@
+# Claude Zombies - down-then-up nav test, X-sloped ramps (locomotion stress)
+#
+# Same routing challenge as navtest_dtu.map (deckA -> ground -> deckB, no direct
+# deckA<->deckB link), but the ramps slope along X and sit DIRECTLY ACROSS the
+# east-west ground path between the two decks. ramp_a's footprint (x[-21,-15])
+# is right where a zombie leaving deckA must travel east toward ramp_b, so naive
+# straight-line homing re-climbs ramp_a forever. The cross-floor ramp-avoidance
+# guard (RampAscentAhead in entities.c) must steer the zombie AROUND ramp_a in Z
+# (the ground is wide in Z) to reach ramp_b and ascend to deckB.
+#
+#   deckA:  x[-15,-9] z[-5,5]  Y4        deckB:  x[15,21] z[-5,5]  Y4
+#   ramp_a: x[-21,-15]        yLow0@x-21 yHigh4@x-15   (LINK ground deckA)
+#   ramp_b: x[9,15]           yLow0@x9   yHigh4@x15     (LINK ground deckB)
+
+NAME XRamp Nav Test
+
+ARENA 40 20
+
+# Sector 0: ground (Y=0)
+SECTOR ground  0 0  80 40  0
+    SPAWN  0 0
+    WINDOW  0 -19.5  +z
+END
+
+# Sector 1: deckA — west Y4 platform (east of ramp_a)
+SECTOR deckA  -12 0  6 10  4
+END
+
+# Sector 2: ramp_a — slopes along X; base (Y0) at x=-21, top (Y4, deckA) at x=-15
+RAMP ramp_a  -18 0  6 6  0 4 X  LINK ground deckA
+END
+
+# Sector 3: deckB — east Y4 platform (east of ramp_b)
+SECTOR deckB  18 0  6 10  4
+END
+
+# Sector 4: ramp_b — slopes along X; base (Y0) at x=9, top (Y4, deckB) at x=15
+RAMP ramp_b  12 0  6 6  0 4 X  LINK ground deckB
+END

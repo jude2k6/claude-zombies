@@ -746,9 +746,21 @@ static int Dev_SimNavtestDtu(int argc, char **argv) {
     for (int i = 0; i < NET_MAX_PLAYERS; i++) memset(&g_world.players[i], 0, sizeof g_world.players[i]);
     g_world.players[0].active = true; g_world.players[0].alive = true;
 
-    // Deck centres hardcoded to match navtest_dtu.map.
-    float deckAX = -15.0f, deckAZ = 15.0f;
-    float deckBX =  15.0f, deckBZ = 15.0f;
+    // Auto-detect the two elevated decks (FLAT sectors at Y>0) from the nav
+    // graph, so the same test serves any down-then-up map (RAMP_Z or RAMP_X).
+    float deckAX = 0, deckAZ = 0, deckBX = 0, deckBZ = 0;
+    int decksFound = 0;
+    for (int i = 0; i < g_world.navNodeCount && decksFound < 2; i++) {
+        if (g_world.navNodes[i].y <= 0.5f) continue;   // skip ground
+        if (decksFound == 0) { deckAX = g_world.navNodes[i].cx; deckAZ = g_world.navNodes[i].cz; }
+        else                 { deckBX = g_world.navNodes[i].cx; deckBZ = g_world.navNodes[i].cz; }
+        decksFound++;
+    }
+    if (decksFound < 2) {
+        fprintf(stderr, "navtest-dtu: map needs 2 elevated decks (found %d)\n", decksFound);
+        Assets_Unload(); Weapons_Unload(); CloseWindow();
+        return 1;
+    }
     float deckASurf = Level_FloorHeightAt(deckAX, deckAZ, 100.0f);
     float deckBSurf = Level_FloorHeightAt(deckBX, deckBZ, 100.0f);
 

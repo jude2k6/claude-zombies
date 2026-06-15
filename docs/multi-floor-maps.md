@@ -36,9 +36,19 @@
 > belongs to one and derives its floor Y from it, and `RAMP … LINK a b` records
 > the nav edges. The flat 2D-entity + ROOM format is gone.
 
-**Still TODO (refinements, not blockers):** the nav is *greedy* — it climbs
-> level-by-level and can dead-end on maps needing down-then-up routing (a real
-> region/portal BFS, §5, would fix that); ramp bullet-blocking uses one AABB
+> **Region-BFS nav — DONE (2026-06-15, commit `352922d`).** The greedy
+> level-by-level heuristic is replaced by a real BFS over the sector graph
+> (§5): FLAT sectors are nodes, RAMP `LINK a b` edges connect them (built into
+> `g_world.navNodes/navEdges` from the MapDoc). `entities.c CrossFloorGoalFull`
+> routes two-phase — on a ramp, head for the end with the shorter hop-distance
+> to the target's region; on a flat sector, BFS and head for the first ramp's
+> near entrance. This fixes down-then-up dead-ends (proven by
+> `--sim-navtest-dtu data/maps/navtest_dtu.map`). Known locomotion limit: an
+> X-sloped ramp lying directly across a ground traversal path can still trap
+> straight-line homing (the zombie re-climbs it); that's an obstacle-avoidance
+> gap, not a routing one — the BFS picks the right regions.
+>
+**Still TODO (refinements, not blockers):** ramp bullet-blocking uses one AABB
 > spanning yLow..yHigh (slightly over-blocks the air beside a ramp); grenades
 > still detonate on the Y=0 plane, not on decks; spawns/perks/wallbuys don't yet
 > carry a floor Y. Core multi-floor *gameplay* (walk, stand, shoot, get chased

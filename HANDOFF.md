@@ -1176,9 +1176,11 @@ See `TODO.md` for the full live list. Impact-ordered short version:
    `blender-game-asset` skill's proven MP5 recipe, then retire the bolt-on
    fallback (`DrawArmsViewmodel`/`weaponGrip[]`/`vm_grip_*`/`arms_vm.glb`/
    gun-only OBJ). Decision: `docs/arms-rig-generalisation.md` §0.
-2. **Region-BFS zombie nav** — `RAMP … LINK a b` edges are stored but AI
-   still uses the greedy `CrossFloorGoal`; a real BFS over the sector graph
-   fixes down-then-up dead-ends (`docs/multi-floor-maps.md` §5).
+2. ✅ **Region-BFS zombie nav — DONE (352922d).** The greedy `CrossFloorGoal`
+   is replaced by a BFS over the sector graph (`g_world.navNodes/navEdges` from
+   the `RAMP … LINK a b` edges); `CrossFloorGoalFull` in entities.c. Fixes
+   down-then-up dead-ends; verified by `--sim-navtest-dtu`. (Open: X-ramp across
+   a ground path can still trap straight-line homing — locomotion, not routing.)
 3. **Author music + ambience .oggs** — the per-map music engine path is in
    (streams `data/audio/<name>.ogg` if present); no audio ships yet.
    nacht.map references `nacht_loop`.

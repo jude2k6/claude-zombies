@@ -282,10 +282,13 @@ connectivity auditor). Remaining work is authoring + per-entity wiring:
       player+enemy floor snap, floor-slab bullet collision, cross-floor
       zombie nav. Done; verified by `--validate`/`--map-roundtrip`/
       `--sim-navtest`/`--screenshot-map`.
-- [ ] **Region-BFS nav** — `RAMP … LINK a b` edges are stored but the AI
-      still uses the *greedy* `CrossFloorGoal`; wire a real BFS over the
-      sector link graph (docs/multi-floor-maps.md §5) to fix greedy
-      dead-ends on down-then-up routes.
+- [x] **Region-BFS nav** — done (352922d). `RAMP … LINK a b` edges now build a
+      `g_world.navNodes/navEdges` graph; `entities.c CrossFloorGoalFull` runs a
+      two-phase BFS (on-ramp: shorter-hop end; on-flat: first ramp's near
+      entrance), fixing greedy down-then-up dead-ends. Verified by the new
+      `--sim-navtest-dtu data/maps/navtest_dtu.map`. Remaining: an X-ramp lying
+      across a ground path can still trap straight-line homing (obstacle-
+      avoidance gap, not routing).
 - [ ] **`LIGHTS x y z r g b range`** in `.map` — per-map placed lights;
       pass an array of N to the lit shader.
 - [ ] **`sky_tint` → `sky.fs`** — already parses, just needs the uniform

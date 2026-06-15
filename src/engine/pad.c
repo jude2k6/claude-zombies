@@ -63,7 +63,7 @@ bool Pad_TriggerR(void) {
 typedef struct {
     int key;          // raylib KEY_* (0/KEY_NULL = none)
     int mouseButton;  // raylib MOUSE_BUTTON_* (-1 = none; note LEFT == 0)
-    int padButton;    // GAMEPAD_BUTTON_* (0/UNKNOWN = none)
+    int padButton;    // GAMEPAD_BUTTON_* (0/UNKNOWN = none), or ENG_BIND_TRIG_L/R
 } ActionBind;
 
 // Default every slot to fully-unbound: mouseButton must start at -1 because
@@ -74,10 +74,14 @@ static bool       s_bindsInit = false;
 static float      s_mouseSens = ENG_DEFAULT_MOUSE_SENS;
 static float      s_padSens   = ENG_DEFAULT_PAD_SENS;
 
+// Per-action trigger-edge state for ENG_BIND_TRIG_L/R press detection.
+static bool s_trigPrev[ENG_MAX_ACTIONS];
+
 static void EnsureBindsInit(void) {
     if (s_bindsInit) return;
     for (int i = 0; i < ENG_MAX_ACTIONS; i++) {
         s_binds[i].key = 0; s_binds[i].mouseButton = -1; s_binds[i].padButton = 0;
+        s_trigPrev[i] = false;
     }
     s_bindsInit = true;
 }
@@ -85,12 +89,16 @@ static void EnsureBindsInit(void) {
 void Eng_InputBind(Action a, int key, int mouseButton, int padButton) {
     if (a < 0 || a >= ENG_MAX_ACTIONS) return;
     EnsureBindsInit();
-    // key/padButton: callers pass -1 for "none"; normalise to 0 (KEY_NULL /
-    // GAMEPAD_BUTTON_UNKNOWN). mouseButton keeps -1 as "none" because
-    // MOUSE_BUTTON_LEFT == 0 is a valid button.
-    s_binds[a].key         = (key       < 0) ? 0 : key;
+    // key: -1 → 0 (KEY_NULL). mouseButton: keep -1 as "none" sentinel because
+    // MOUSE_BUTTON_LEFT == 0 is a real button. padButton: ENG_BIND_TRIG_L/R are
+    // stored verbatim (negative); other negative values → 0 (GAMEPAD_BUTTON_UNKNOWN).
+    s_binds[a].key         = (key < 0) ? 0 : key;
     s_binds[a].mouseButton = mouseButton;
-    s_binds[a].padButton   = (padButton < 0) ? 0 : padButton;
+    if (padButton == ENG_BIND_TRIG_L || padButton == ENG_BIND_TRIG_R) {
+        s_binds[a].padButton = padButton;
+    } else {
+        s_binds[a].padButton = (padButton < 0) ? 0 : padButton;
+    }
 }
 
 bool Eng_InputPressed(Action a) {
@@ -102,6 +110,10 @@ bool Eng_InputPressed(Action a) {
     int m = s_binds[a].mouseButton;
     if (m >= 0 && IsMouseButtonPressed(m)) return true;
     int b = s_binds[a].padButton;
+    // Trigger axes: rising-edge detection via per-action s_trigPrev[] state that
+    // Eng_InputTickTriggerEdges() advances once at end-of-frame.
+    if (b == ENG_BIND_TRIG_L) return Pad_TriggerL() && !s_trigPrev[a];
+    if (b == ENG_BIND_TRIG_R) return Pad_TriggerR() && !s_trigPrev[a];
     if (b > 0 && IsGamepadAvailable(PAD_ID) && IsGamepadButtonPressed(PAD_ID, b)) return true;
     return false;
 }
@@ -114,8 +126,24 @@ bool Eng_InputDown(Action a) {
     int m = s_binds[a].mouseButton;
     if (m >= 0 && IsMouseButtonDown(m)) return true;
     int b = s_binds[a].padButton;
+    if (b == ENG_BIND_TRIG_L) return Pad_TriggerL();
+    if (b == ENG_BIND_TRIG_R) return Pad_TriggerR();
     if (b > 0 && IsGamepadAvailable(PAD_ID) && IsGamepadButtonDown(PAD_ID, b)) return true;
     return false;
+}
+
+void Eng_InputTickTriggerEdges(void) {
+    // Advance per-action trigger-prev state so the next frame's Eng_InputPressed
+    // can detect rising edges.  Call once per frame, after all Eng_InputPressed
+    // queries, before the next frame begins.
+    EnsureBindsInit();
+    bool tl = Pad_TriggerL();
+    bool tr = Pad_TriggerR();
+    for (int i = 0; i < ENG_MAX_ACTIONS; i++) {
+        int b = s_binds[i].padButton;
+        if (b == ENG_BIND_TRIG_L) s_trigPrev[i] = tl;
+        else if (b == ENG_BIND_TRIG_R) s_trigPrev[i] = tr;
+    }
 }
 
 Vector2 Eng_InputMoveAxis(void) {

@@ -7,10 +7,14 @@
 //  Controller bindings
 // ---------------------------------------------------------------------------
 //
-// Every gameplay action that can be triggered on a gamepad routes through
-// Bind_Pressed / Bind_Down with one of these action ids. The button each
-// action maps to is configurable at runtime via the Settings -> Bindings UI
-// and persisted to settings.cfg next to the binary.
+// Gamepad bindings are stored in bindButton[] indexed by BindAction.  They
+// are configurable at runtime via the Settings -> Bindings UI and persisted
+// to settings.cfg.  Settings_SyncEngineBindings() pushes them (along with the
+// fixed keyboard/mouse defaults) into the engine action map so gameplay call
+// sites only query Eng_InputPressed/Down — never Bind_Pressed/Down directly.
+//
+// Bind_Pressed/Down are kept for potential future use and for test purposes;
+// Bind_PollAny is still used by the rebind-capture UI in menu.c.
 
 typedef enum {
     BA_FIRE = 0,
@@ -64,7 +68,14 @@ int  Bind_PollAny(void);
 void Settings_Load(void);
 void Settings_Save(void);
 
-// Call once per frame at end-of-input so BIND_TRIG_L/R edge detection works.
+// Push the current bindButton[] table into the engine action map so every
+// BA_* action's gamepad binding is reflected in Eng_InputPressed/Down.
+// Called automatically by Settings_Load and Settings_Save; call explicitly
+// after any in-place mutation of bindButton[] (e.g. reset-defaults in the UI).
+void Settings_SyncEngineBindings(void);
+
+// Call once per frame at end-of-input so BIND_TRIG_L/R edge detection works
+// for Bind_PollAny (used by the rebind-capture UI in menu.c).
 void Settings_TickTriggerEdges(void);
 
 #endif

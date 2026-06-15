@@ -56,9 +56,16 @@ bool  Pad_TriggerR(void);
 // Opaque integer id chosen by the game.  The engine does not enumerate names.
 typedef int Action;
 
+// Special pad-slot sentinels for trigger axes (analog, not digital buttons).
+// Pass these as the padButton argument to route through Pad_TriggerL/R.
+#define ENG_BIND_TRIG_L  -10
+#define ENG_BIND_TRIG_R  -11
+
 // Bind a raylib KEY_*, MOUSE_BUTTON_*, and/or GAMEPAD_BUTTON_* to an action.
 // Pass -1 for "none" on any slot. (MOUSE_BUTTON_LEFT == 0 is a real button, so
 // only -1 — not 0 — disables the mouse slot.)
+// ENG_BIND_TRIG_L / ENG_BIND_TRIG_R may be passed as padButton to bind to the
+// left / right trigger axis (threshold-based, via Pad_TriggerL/R).
 void    Eng_InputBind(Action a, int key, int mouseButton, int padButton);
 
 // True on the first frame the action becomes active (edge trigger).
@@ -78,5 +85,11 @@ Vector2 Eng_InputLookDelta(void);
 
 // Override the default look sensitivities.
 void    Eng_InputSetLookSensitivity(float mouse, float pad);
+
+// Advance trigger-axis edge state for actions bound to ENG_BIND_TRIG_L/R.
+// Must be called once per frame after all Eng_InputPressed queries.
+// (Mirrors Settings_TickTriggerEdges — replace it or call both; the engine
+// version covers gameplay actions while settings covers the rebind-UI poll.)
+void    Eng_InputTickTriggerEdges(void);
 
 #endif

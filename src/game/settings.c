@@ -102,10 +102,63 @@ bool Bind_Down(BindAction a) {
 }
 
 // Caller must advance the trigger edge state once per frame (after all input
-// handlers have read it). Wired from main.c at end-of-frame.
+// handlers have read it). Wired from main.c at end-of-frame.  This covers the
+// Bind_PollAny rebind-capture path; gameplay actions use Eng_InputTickTriggerEdges.
 void Settings_TickTriggerEdges(void) {
     lastTrigL = Pad_TriggerL();
     lastTrigR = Pad_TriggerR();
+}
+
+// Translate a bindButton[] value (BIND_TRIG_L/R, BIND_NONE, or a raw
+// GAMEPAD_BUTTON_*) into the engine's padButton sentinel convention.
+static int ToEngPadButton(int btn) {
+    if (btn == BIND_NONE)   return -1;          // unbound
+    if (btn == BIND_TRIG_L) return ENG_BIND_TRIG_L;
+    if (btn == BIND_TRIG_R) return ENG_BIND_TRIG_R;
+    return btn;                                 // regular GAMEPAD_BUTTON_*
+}
+
+// Keyboard / mouse defaults for each BA_* action.  These never change at
+// runtime; only the pad column (bindButton[]) is user-configurable.
+static const struct { int key; int mouse; } kbdDefaults[BA_COUNT] = {
+    [BA_FIRE]           = { KEY_NULL,  MOUSE_BUTTON_LEFT  },
+    [BA_ADS]            = { KEY_NULL,  MOUSE_BUTTON_RIGHT },
+    [BA_RELOAD]         = { KEY_R,     -1                 },
+    [BA_INTERACT]       = { KEY_F,     -1                 },  // edge buy/interact
+    [BA_MELEE]          = { KEY_V,     -1                 },
+    [BA_SWAP]           = { KEY_Q,     -1                 },
+    [BA_SLOT1]          = { KEY_ONE,   -1                 },
+    [BA_SLOT2]          = { KEY_TWO,   -1                 },
+    [BA_JUMP]           = { KEY_SPACE, -1                 },
+    [BA_CROUCH]         = { KEY_C,     -1                 },  // also KEY_LEFT_CONTROL in player.c
+    [BA_SPRINT]         = { KEY_LEFT_SHIFT, -1            },
+    [BA_PAUSE]          = { KEY_NULL,  -1                 },  // ESC handled separately in main.c
+    [BA_SCORE]          = { KEY_TAB,   -1                 },
+    [BA_NOCLIP]         = { KEY_F4,    -1                 },
+    [BA_THROW_LETHAL]   = { KEY_G,     -1                 },
+    [BA_THROW_TACTICAL] = { KEY_H,     -1                 },
+};
+
+void Settings_SyncEngineBindings(void) {
+    // Push every BA_* action's complete binding (kbd + mouse + current pad) into
+    // the engine action map so Eng_InputPressed/Down becomes the single source
+    // of truth for all gameplay input.  Also re-registers the IA_INTERACT_HOLD
+    // virtual action (hold-E / hold-interact-pad) which shares the same gamepad
+    // button as BA_INTERACT.
+    for (int i = 0; i < BA_COUNT; i++) {
+        Eng_InputBind((Action)i,
+                      kbdDefaults[i].key,
+                      kbdDefaults[i].mouse,
+                      ToEngPadButton(bindButton[i]));
+    }
+    // IA_INTERACT_HOLD is a keyboard-only action whose gamepad equivalent is
+    // holding the BA_INTERACT pad button; bind it to the same pad button.
+    // BA_COUNT == IA_INTERACT_HOLD (defined as an enum value past BA_COUNT in
+    // main.c) — forward-declare the constant here via a local.
+    int ia_interact_hold = BA_COUNT;  // must match the enum in main.c
+    Eng_InputBind(ia_interact_hold, KEY_E, -1, ToEngPadButton(bindButton[BA_INTERACT]));
+
+    Eng_InputTickTriggerEdges();   // reset trigger edge state after a binding change
 }
 
 int Bind_PollAny(void) {
@@ -204,6 +257,7 @@ void Settings_Load(void) {
         }
     }
     fclose(f);
+    Settings_SyncEngineBindings();
 }
 
 void Settings_Save(void) {
@@ -223,4 +277,5 @@ void Settings_Save(void) {
     }
     fclose(f);
     if (!loadedPath[0]) strncpy(loadedPath, path, sizeof loadedPath - 1);
+    Settings_SyncEngineBindings();
 }

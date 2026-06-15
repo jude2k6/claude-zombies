@@ -116,52 +116,31 @@ static void PollNetwork(void) {
 }
 
 // Engine input action ids. The gameplay actions reuse the BindAction (BA_*)
-// ids directly, so a single id names the action across the engine action map
-// (keyboard + mouse) and the configurable gamepad layer (Bind_*). A few
-// keyboard-only variants that don't have their own gamepad bind live past
-// BA_COUNT.
+// ids directly, so a single id names the action across the engine action map.
+// IA_INTERACT_HOLD lives past BA_COUNT; its value must match the constant
+// Settings_SyncEngineBindings uses to register it (BA_COUNT itself).
 enum {
-    IA_INTERACT_HOLD = BA_COUNT,   // hold-E revive/repair (gamepad: BA_INTERACT held)
+    IA_INTERACT_HOLD = BA_COUNT,   // hold-E / hold-interact-pad: revive/repair
 };
-
-// Bind the keyboard + mouse defaults into the engine action map. The
-// configurable gamepad bindings stay on the Bind_* layer (rebind UI +
-// settings.cfg persistence), so each call site is "engine OR Bind_".
-static void BindGameInputDefaults(void) {
-    //              action            key       mouse               pad (-1 = via Bind_*)
-    Eng_InputBind(BA_FIRE,           KEY_NULL, MOUSE_BUTTON_LEFT,  -1);
-    Eng_InputBind(BA_ADS,            KEY_NULL, MOUSE_BUTTON_RIGHT, -1);
-    Eng_InputBind(BA_RELOAD,         KEY_R,    -1,                 -1);
-    Eng_InputBind(BA_INTERACT,       KEY_F,    -1,                 -1);  // edge interact
-    Eng_InputBind(BA_MELEE,          KEY_V,    -1,                 -1);
-    Eng_InputBind(BA_SWAP,           KEY_Q,    -1,                 -1);
-    Eng_InputBind(BA_SLOT1,          KEY_ONE,  -1,                 -1);
-    Eng_InputBind(BA_SLOT2,          KEY_TWO,  -1,                 -1);
-    Eng_InputBind(BA_THROW_LETHAL,   KEY_G,    -1,                 -1);
-    Eng_InputBind(BA_THROW_TACTICAL, KEY_H,    -1,                 -1);
-    Eng_InputBind(IA_INTERACT_HOLD,  KEY_E,    -1,                 -1);  // hold revive/repair
-}
 
 static void HandleLocalActions(Player *me) {
     // Downed g_world.players can't act. They lay there until revived or bled out.
     bool canAct = me->alive && !me->downed;
-    bool kbdSwap  = Eng_InputPressed(BA_SWAP) && canAct;
-    bool padSwap  = Bind_Pressed(BA_SWAP) && canAct;
-    if (kbdSwap || padSwap) {
+    bool swapEdge = Eng_InputPressed(BA_SWAP) && canAct;
+    if (swapEdge) {
         int other = (me->currentSlot + 1) % INV_SLOTS;
         if (me->inventory[other].owned) me->currentSlot = other; // local predict
     }
-    if (canAct && (Eng_InputPressed(BA_SLOT1) || Bind_Pressed(BA_SLOT1)))  { if (me->inventory[0].owned) me->currentSlot = 0; }
-    if (canAct && (Eng_InputPressed(BA_SLOT2) || Bind_Pressed(BA_SLOT2))) { if (me->inventory[1].owned) me->currentSlot = 1; }
+    if (canAct && Eng_InputPressed(BA_SLOT1)) { if (me->inventory[0].owned) me->currentSlot = 0; }
+    if (canAct && Eng_InputPressed(BA_SLOT2)) { if (me->inventory[1].owned) me->currentSlot = 1; }
 
-    bool reloadEdge   = (Eng_InputPressed(BA_RELOAD) || Bind_Pressed(BA_RELOAD)) && canAct;
-    bool swapEdge     = (kbdSwap || padSwap);
-    bool slot1Edge    = canAct && (Eng_InputPressed(BA_SLOT1) || Bind_Pressed(BA_SLOT1));
-    bool slot2Edge    = canAct && (Eng_InputPressed(BA_SLOT2) || Bind_Pressed(BA_SLOT2));
-    bool interactEdge = canAct && (Eng_InputPressed(BA_INTERACT) || Bind_Pressed(BA_INTERACT));
-    bool meleeEdge    = canAct && (Eng_InputPressed(BA_MELEE) || Bind_Pressed(BA_MELEE));
-    bool lethalEdge   = canAct && (Eng_InputPressed(BA_THROW_LETHAL) || Bind_Pressed(BA_THROW_LETHAL));
-    bool tacticalEdge = canAct && (Eng_InputPressed(BA_THROW_TACTICAL) || Bind_Pressed(BA_THROW_TACTICAL));
+    bool reloadEdge   = Eng_InputPressed(BA_RELOAD) && canAct;
+    bool slot1Edge    = canAct && Eng_InputPressed(BA_SLOT1);
+    bool slot2Edge    = canAct && Eng_InputPressed(BA_SLOT2);
+    bool interactEdge = canAct && Eng_InputPressed(BA_INTERACT);
+    bool meleeEdge    = canAct && Eng_InputPressed(BA_MELEE);
+    bool lethalEdge   = canAct && Eng_InputPressed(BA_THROW_LETHAL);
+    bool tacticalEdge = canAct && Eng_InputPressed(BA_THROW_TACTICAL);
 
     int swapTarget = -1;
     if (swapEdge) {
@@ -220,8 +199,7 @@ static void GameMod_Init(void) {
     Viewmodel_LoadArms();           // shared first-person arms (non-pistol guns bolt onto hand.R)
     Viewmodel_LoadCombinedRigs();   // per-weapon combined rigs (arms+gun glTF, if present)
     Render_LoadPlayerAnim();        // rigged third-person soldier for co-op teammates
-    Settings_Load();
-    BindGameInputDefaults();    // keyboard+mouse → engine action map (gamepad stays on Bind_*)
+    Settings_Load();   // loads cfg + calls Settings_SyncEngineBindings → full action map
     Decals_Init();
     Particles_Reset();
     if (fullscreen && !IsWindowFullscreen()) Menu_ToggleFullscreenSafe();
@@ -252,7 +230,9 @@ static void GameMod_Frame(float dt, int sw, int sh) {
 
     // Suppress pad pause-edge in the bindings screen so the user can rebind
     // START itself without bouncing back to Settings.
-    bool padPause = (uiState != UI_BINDINGS) && Bind_Pressed(BA_PAUSE);
+    // BA_PAUSE is bound to KEY_ESCAPE + pad START in the engine action map;
+    // suppress the engine query in the bindings screen the same way.
+    bool padPause = (uiState != UI_BINDINGS) && Eng_InputPressed(BA_PAUSE);
     bool escEdge  = IsKeyPressed(KEY_ESCAPE);
     // In the bindings UI, ESC is consumed by an in-progress capture (to
     // cancel) before it can pop the screen.
@@ -269,8 +249,7 @@ static void GameMod_Frame(float dt, int sw, int sh) {
     }
     if (IsKeyPressed(KEY_F11)) Menu_ToggleFullscreenSafe();
     if (IsKeyPressed(KEY_F3))  godMode = !godMode;
-    bool noclipToggle = IsKeyPressed(KEY_F4);
-    if (uiState == UI_PLAY && Bind_Pressed(BA_NOCLIP)) noclipToggle = true;
+    bool noclipToggle = Eng_InputPressed(BA_NOCLIP);
     if (noclipToggle) { noclipMode = !noclipMode; specInit = false; }
 
     if (netMode != NET_SOLO) PollNetwork();
@@ -303,7 +282,7 @@ static void GameMod_Frame(float dt, int sw, int sh) {
             }
             // Press F / A to cycle to next teammate while spectating dead.
             if (!me->alive && !noclipMode &&
-                (IsKeyPressed(KEY_F) || IsMouseButtonPressed(MOUSE_BUTTON_LEFT) || Bind_Pressed(BA_JUMP))) {
+                (Eng_InputPressed(BA_INTERACT) || Eng_InputPressed(BA_JUMP))) {
                 int next = Spectator_NextTeammate(specTarget >= 0 ? specTarget : localPlayerIdx);
                 if (next >= 0) Spectator_SnapTo(next);
             }
@@ -334,10 +313,10 @@ static void GameMod_Frame(float dt, int sw, int sh) {
             // player. (Dead spectating doesn't move the body either.)
         }
         bool actable = me->alive && !me->downed && !noclipMode;
-        me->fireHeld     = (Eng_InputDown(BA_FIRE) || Bind_Down(BA_FIRE)) && actable;
-        // E (keyboard) or holding the interact bind (gamepad) drives revive/repair.
-        me->interactHeld = (Eng_InputDown(IA_INTERACT_HOLD) || Bind_Down(BA_INTERACT)) && actable;
-        me->adsHeld      = (Eng_InputDown(BA_ADS) || Bind_Down(BA_ADS)) && actable;
+        me->fireHeld     = Eng_InputDown(BA_FIRE) && actable;
+        // E (keyboard) or holding the interact pad button drives revive/repair.
+        me->interactHeld = Eng_InputDown(IA_INTERACT_HOLD) && actable;
+        me->adsHeld      = Eng_InputDown(BA_ADS) && actable;
 
         HandleLocalActions(me);
 
@@ -460,7 +439,8 @@ static void GameMod_Frame(float dt, int sw, int sh) {
         camera.fovy += (targetFov - camera.fovy) * fminf(1.0f, dt * 12.0f);
     }
 
-    Settings_TickTriggerEdges();
+    Eng_InputTickTriggerEdges();  // advance trigger-axis edge state for gameplay actions
+    Settings_TickTriggerEdges();  // advance trigger edge state for Bind_PollAny (rebind UI)
 }
 
 static void GameMod_Draw(int sw, int sh) {

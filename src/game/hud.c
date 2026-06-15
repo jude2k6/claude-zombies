@@ -743,5 +743,5 @@ void Hud_Draw(int sw, int sh, Player *me, Interact ix) {
 
     HudDrawBonusToast(sw, sh);
     HudDrawRoundSplash(sw, sh);
-    if (IsKeyDown(KEY_TAB) || Bind_Down(BA_SCORE)) HudDrawScoreboard(sw, sh);
+    if (Eng_InputDown(BA_SCORE)) HudDrawScoreboard(sw, sh);
 }

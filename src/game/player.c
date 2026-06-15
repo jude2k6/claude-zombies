@@ -125,7 +125,7 @@ void Player_ApplyLocalMove(Player *p, float dt) {
 
     float speed = Perk_EffMoveSpeed(p);
     float padX = Pad_StickX(0), padY = Pad_StickY(0);  // forward = -Y
-    bool wantSprint = IsKeyDown(KEY_LEFT_SHIFT) || Bind_Down(BA_SPRINT);
+    bool wantSprint = Eng_InputDown(BA_SPRINT);
     bool kbdMove   = (IsKeyDown(KEY_W) || IsKeyDown(KEY_S) || IsKeyDown(KEY_A) || IsKeyDown(KEY_D));
     bool padMove   = (fabsf(padX) > 0.01f || fabsf(padY) > 0.01f);
     bool moving    = kbdMove || padMove;
@@ -145,7 +145,7 @@ void Player_ApplyLocalMove(Player *p, float dt) {
     float moveRate   = moving ? 10.0f : 13.0f;
     p->moveBlend += (moveTarget - p->moveBlend) * (1.0f - expf(-moveRate * dt));
     if (p->moveBlend < 0.001f) p->moveBlend = 0.0f;
-    if (IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_C) || Bind_Down(BA_CROUCH)) speed *= 0.55f; // crouch
+    if (IsKeyDown(KEY_LEFT_CONTROL) || Eng_InputDown(BA_CROUCH)) speed *= 0.55f; // crouch
     if (p->adsHeld) speed *= ADS_MOVE_MUL;
 
     // Stamina drain/regen (local only)
@@ -171,7 +171,7 @@ void Player_ApplyLocalMove(Player *p, float dt) {
     }
 
     // Jump: triggered only on rising edge while grounded.
-    if (p->onGround && (IsKeyPressed(KEY_SPACE) || Bind_Pressed(BA_JUMP))) {
+    if (p->onGround && Eng_InputPressed(BA_JUMP)) {
         p->velY = PLAYER_JUMP_VEL;
         p->onGround = false;
     }

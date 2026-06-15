@@ -72,11 +72,26 @@ source tree is now **`src/engine/`** (a reusable, game-clean static
   `Game_Tick` with no window / no GL (the §15 litmus). CI
   (`.github/workflows/ci.yml`) runs seam-check + build + `--validate` +
   `--sim-tick` on every map.
-- **Deferred (optional, NOT §15 blockers):** the gamepad `Bind_*` fold-in into
-  the engine action map (keyboard/mouse already migrated); the full handle-based
-  content registry; the `RenderFrame`/`DrawItem` submission model (the facade
-  meets the rlgl criterion); the `types.h` split. See the engine doc's "Open /
-  deferred" list.
+- **Post-§15 deferred items — three landed 2026-06-15** (see the engine doc's
+  "Open / deferred" list for detail):
+  - ✅ **Gamepad fold-in** (`985efe3`) — engine action map (`src/engine/pad`) is
+    now the single source of truth for kbd+mouse+pad; no `|| Bind_*` parallel
+    queries at gameplay sites; `Settings_SyncEngineBindings` re-pushes on
+    load/rebind. (Gamepad path is playtest-verifiable only.)
+  - ✅ **Content registry** (`8b0f153`) — `src/engine/content.{c,h}`: handle-based
+    `Eng_LoadModel/Texture/Shader/AnimModel` with path-probing + dedup, plus
+    `Eng_RegisterContentType`/`Eng_LoadContent` (the `.weapon` parser is
+    game-registered). assets.c/weapons.c route through it.
+  - 🔶 **Render seam — pragmatic half** (`6df74ec`) — `src/engine/eng_render.{c,h}`
+    owns the postFX RT + composite, the world/skinned/postfx shader handles +
+    uniform locs (moved out of assets.c), and the lighting bookend
+    (`Eng_RenderSetLighting`/`BeginWorld`/`EndWorld`). The game still issues its
+    own draws via the `Eng_Gfx*` facade between engine begin/end.
+  - **Still deferred:** the full §8 `RenderFrame`/`DrawItem[]` submission model
+    (game emits pure data, engine renders the list) — the one big remaining
+    engine refactor, and the cleanest enabler for the map-editor goal. The
+    `types.h` split was assessed and skipped (engine is already types.h-clean; a
+    split would be cosmetic-only churn).
 
 ## ✅ DONE (2026-06-14) — MP5 gripping hands + higher-poly arms + correct reload
 

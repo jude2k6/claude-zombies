@@ -83,8 +83,14 @@
 >   engine renders the list; what would let a second renderer backend touch only
 >   `engine/render`, and the cleanest path for the map editor) is NOT done. That
 >   remains the one big deferred refactor.
-> - **`types.h` split (§13)** — still one header in `src/game/`; the engine no
->   longer depends on it at all.
+> - **`types.h` split (§13) — assessed 2026-06-15, NOT worth doing.** No engine
+>   file includes `types.h` (verified: `grep '#include.*types.h' src/engine/` is
+>   empty — the only hits are comment mentions). Since the engine is already fully
+>   independent of it, the §13 split would be a purely cosmetic game-side reorg of
+>   one 494-line header that touches every game file's includes for zero
+>   seam/architectural value. Skipped on impact-per-effort grounds. (If `types.h`
+>   ever becomes a genuine merge-conflict hotspot, revisit as pure hygiene — but
+>   it is no longer an engine-separation concern.)
 >
 > **Subagent note:** worktree agents keep forking from stale bases — only spawn
 > them for additive, independent, green-building units, tell them to rebase onto

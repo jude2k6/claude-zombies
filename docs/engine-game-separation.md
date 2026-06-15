@@ -71,9 +71,18 @@
 >   logic). The full handle-pool/AnimInstance generalisation (§9) is NOT done —
 >   draw sites still pull the underlying raylib `Model`/`Texture` from the handle;
 >   that converges with the render-submission seam below.
-> - **Phase 5 full submission (§8)** — the `RenderFrame`/`DrawItem` model. The
->   facade meets the rlgl criterion; full submission would let a second renderer
->   backend touch only `engine/render`. Bigger, screenshot-only-verifiable.
+> - 🔶 **Phase 5 render seam — PRAGMATIC version DONE (commit `6df74ec`);**
+>   full `DrawItem` submission still deferred. The engine now owns the frame
+>   STRUCTURE (the §17 decision-#2 path): `src/engine/eng_render.{c,h}` owns the
+>   postFX RT lifecycle + composite (`Eng_RenderBeginPostFX/EndPostFX`), the
+>   `worldShader`/`worldSkinnedShader`/`postfxShader` handles + uniform locs
+>   (moved out of assets.c), and the lighting bookend
+>   (`Eng_RenderSetLighting`/`Eng_RenderBeginWorld/EndWorld`). The game still
+>   issues its own draws between the engine begin/end via the `Eng_Gfx*` facade —
+>   the full §8 `RenderFrame`/`DrawItem[]` submission model (game emits pure data,
+>   engine renders the list; what would let a second renderer backend touch only
+>   `engine/render`, and the cleanest path for the map editor) is NOT done. That
+>   remains the one big deferred refactor.
 > - **`types.h` split (§13)** — still one header in `src/game/`; the engine no
 >   longer depends on it at all.
 >

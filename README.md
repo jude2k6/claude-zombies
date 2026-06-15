@@ -172,7 +172,9 @@ data/shaders/         world (lit + fog), world_skinned (GPU skinning), sky, post
 ```
 
 A deeper map for contributors lives in `HANDOFF.md` (architecture table,
-conventions, gotchas) and `TODO.md` (live punch list).
+conventions, gotchas) and `TODO.md` (live punch list). To build *on* the engine
+(a new game/tool, e.g. the map editor), see `docs/engine-usage.md` — the
+`GameModule` contract and the `Eng_*` subsystem APIs.
 
 ## Maps
 

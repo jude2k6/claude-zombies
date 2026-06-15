@@ -128,19 +128,12 @@ taken to it. The goal was a clean, reusable **engine** that owns
 >   collision-free names, explicit relocation for colliders (leave `hdr->X`
 >   snapshot fields alone). Pure storage relocation — linker-proven,
 >   `--screenshot-{zombies,coop}` + 5s run clean.
-> - Remaining Phase 0: relocate the rest (`players[]` — 277 uses/13 files,
->   `mbox`, `mapName`, level state) the same way, then thread `World *` through
->   the sim so it can tick headless (the §15 litmus). Macros are removed as call
->   sites take a `World *`.
-> - Remaining: Phase 0 (players[]/level/mbox/mapName + headless tick), Phase 2
->   gamepad fold-in + movement/look, Phase 4 content registry, Phase 5 render
->   seam, Phase 6 `main.c` flip, Phase 7 full dir split.
->
-> **Note on Phase 0:** the doc's §14 macro-shim (`#define players …`) is unsafe
-> as-is — `players`, `mbox`, `mapName`, `roundNum` and the power-up timers are
-> also field names in the protocol/mapdoc structs, so an object-like macro would
-> corrupt `hdr->players` / `doc->mbox` / `s->mapName`. Phase 0 therefore needs
-> real `World *` threading for those names (or a rename), not a blanket macro.
+> - **All the "remaining" Phase 0/2/4/5/6/7 work noted above subsequently
+>   landed** — see the DONE block at the top of this file for how each phase
+>   resolved. The notes in this block are kept only as the historical path; the
+>   split is complete (§15 met). (Phase 0 used `World *` threading / explicit
+>   `g_world.X` rather than the §14 macro-shim, since `players`/`mbox`/`mapName`/
+>   `roundNum` collide with protocol/mapdoc struct field names.)
 
 all infrastructure — content loading, rendering, audio, animation, particles,
 input, networking transport — and a **game** that is pure rules + content

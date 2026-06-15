@@ -12,6 +12,43 @@ and **enet 1.3.18** (all via CMake `FetchContent`). Host-authoritative
 
 Repo: `git@github.com:jude2k6/claude-zombies.git` · branch: `main`.
 
+## ✅ DONE (2026-06-15, later) — Avatar fidelity + viewmodel fixes
+
+Follow-ups from a clean-room review of the FP-viewmodel vs third-person-avatar
+split (the two views had diverged more than they should).
+
+- **`NET_PROTO_VERSION` is now 11.** `SerPlayer` gained `fireHeld` (uint8_t) and
+  `reviverIdx` (int8_t). Closes three "what teammates see ≠ reality" gaps:
+  - **Fire clip works on clients.** `fireHeld` was input-only (client→host), so
+    the third-person fire branch in `DrawOtherPlayer` was dead on clients —
+    teammates never animated firing. Now serialized. The local player still
+    owns its own `fireHeld` from live input (only remote avatars adopt the
+    host's value).
+  - **Revive clip is authoritative.** `reviverIdx` (set on the DOWNED player =
+    "who is reviving me", `interact.c`) is serialized; the reviver test is "does
+    any downed player point back at me", replacing the old proximity guess that
+    false-fired when players stood near a downed teammate.
+  - **Third-person body stands on the right floor.** `DrawOtherPlayer` used a
+    hardcoded `feet.y = 0`; now `feet.y = pos.y - PLAYER_EYE` (= the player's
+    floor). Flat maps unchanged; fixes bodies floating at ground level on
+    multi-floor decks.
+- **Viewmodel swap edge-detect unified.** The combined-rig and shared-arms draw
+  paths had separate function-`static` prev-state, so swapping between a
+  combined-rig gun and an arms-path gun and back skipped the raise clip. One
+  shared `Viewmodel_Edges()` tracker now drives both (only one weapon is drawn
+  per frame).
+- **Gun bob is phase-locked to the camera bob.** `ViewmodelMotion` ran its own
+  oscillator that drifted against the camera bob in `GameMod_Frame`; the game
+  now passes one phase via `Viewmodel_SetBobPhase`.
+- **MP5 viewmodel arms no longer clip.** `smg_vm.glb` arm geometry extends
+  ~0.31 m behind the rig origin, but `CRIG_FWD_OFFSET` anchored it only 0.13 m
+  ahead of the camera → arms behind the near plane. Bumped the anchor
+  (`CRIG_FWD_OFFSET` 0.13→0.35, `CRIG_DOWN_OFFSET` −0.03→−0.08,
+  `CRIG_RIGHT_OFFSET` 0.06→0.10); scale and the canted pitch/roll are unchanged.
+  (Diagnosed by a sandboxed agent; **gotcha:** its worktree branched from a stale
+  base, so its branch diff was useless — the real change was extracted by
+  diffing the worktree file against `main`.)
+
 ## ✅ DONE (2026-06-15) — Engine/game split COMPLETE (§15 met)
 
 The `docs/engine-game-separation.md` plan reached its definition of done. The
@@ -719,7 +756,7 @@ are new), `CMakeLists.txt`, `data/maps/*.map`, and new files under
 `data/models/` + `data/shaders/`. `TODO.md` and `HANDOFF.md` are also
 updated.
 
-`NET_PROTO_VERSION` is **9** (`src/net.h`). Bump it whenever you change
+`NET_PROTO_VERSION` is **11** (`src/engine/net.h`). Bump it whenever you change
 anything in `SerPlayer` / `SerEnemy` / `SerThrowable` / `PktSnapshotHeader`.
 
 ## Build / run
@@ -743,12 +780,17 @@ from the build dir). On first run with no file, defaults are written.
 
 ## Architecture
 
-`src/main.c` is just the entry point + game loop (~430 lines). Everything else
-is one translation unit per responsibility, sharing `types.h`:
+The tree is split into a reusable **`src/engine/`** (→ `libengine.a`) and the
+game in **`src/game/`** (which links it). `src/game/main.c` holds `main()` + the
+per-frame gameplay body; `src/engine/app.c` owns the window / frame-loop / time
+and hosts the `GameModule` vtable. Engine modules (zero game knowledge):
+`app gfx anim audio decals fx mapdoc net pad particles`. Game TUs share
+`src/game/types.h` and are one translation unit per responsibility:
 
 | File              | Owns                                                   |
 |-------------------|--------------------------------------------------------|
 | `types.h`         | All shared structs/enums/constants (incl. `MapProp`, bumped `MAX_*`) |
+| `world.{c,h}`     | `g_world` — the `World` struct holding all game state (players/enemies/bullets/level/round/timers); the single state owner introduced by the engine split |
 | `assets.{c,h}`    | `propModels[]`, `textures[]`, `worldShader`, `skyShader`, fog globals, `TILE_SIZE`. (Weapon storage moved out — see `weapons.{c,h}`.) |
 | `level.{c,h}`     | Map tokeniser + parser, `Level_Validate`, `obstacles/walls/doors/windows/mapProps`, `Level_Reset`, `UnstickXZ`, `Level_PathClearXZ` (AI lookahead), `PROP_DEFS[]` |
 | `player.{c,h}`    | `players[]`, look/move, sprint/crouch, stamina, sprintBlend, push-out |
@@ -760,7 +802,7 @@ is one translation unit per responsibility, sharing `types.h`:
 | `protocol.{c,h}`  | Serialization (`SerPlayer`, `SerEnemy`, `PktSnapshotHeader`) |
 | `net.{c,h}`       | enet wrapper, `Net_GetLocalIPs` for the host's join prompt |
 | `render.{c,h}`    | 3D world draw (model-first with cube fallbacks), textured walls/floor via rlgl, fog/sky/lit shader swap, tracer billboards |
-| `viewmodel.{c,h}` | First-person viewmodel system: shared arms VM (`arms_vm.glb`) + bone-bolted gun for ALL 5 guns (seating from `weaponGrip[]`, i.e. `.weapon` `vm_grip_*` keys), procedural walk-bob/sprint motion, `Viewmodel_LoadArms`/`Viewmodel_UnloadArms`, `Viewmodel_DrawFirstPerson(Camera)` |
+| `viewmodel.{c,h}` | First-person viewmodel. Primary path: per-weapon **combined rigs** (`<id>/<id>_vm.glb` = arms+gun+mechanism in one skinned glTF) via `Viewmodel_LoadCombinedRigs` + `DrawCombinedRigViewmodel`, framed by shared `CRIG_*` constants. Fallback order: combined rig → shared `arms_vm.glb` + gun bolted to `hand.R` (`weaponGrip[]`/`vm_grip_*`) → gun-only OBJ. Only the MP5 has a combined rig so far; the other 4 guns use the arms fallback. `Viewmodel_DrawFirstPerson(Camera)` |
 | `devtools.{c,h}`  | The 5 CLI debug/validation modes (`--validate`, `--screenshot-viewmodels`, `--screenshot-coop`, `--screenshot-pap`, `--anim-test`) behind `Devtools_HandleCLI(argc, argv, &exitCode)` |
 | `decals.{c,h}`    | 96-slot ring buffer for blood + impact decals, drawn from `Render_World3D` |
 | `anim.{c,h}`      | Skeletal animation pipeline. `AnimModel` (shared skinned glTF + clips) + per-instance `AnimState`; load/find-clip/update/draw via raylib 5.5 GPU skinning. `Anim_Pose` (pose without draw, for custom transforms), `Anim_FindBone`/`Anim_BoneMatrix` (bolt a separate object — e.g. a gun — onto a skeleton bone) |
@@ -768,7 +810,7 @@ is one translation unit per responsibility, sharing `types.h`:
 | `menu.{c,h}`      | Menu screens incl. game-over stats table, controller bindings UI, map picker |
 | `pad.{c,h}`       | Raw gamepad axis/button readers                        |
 | `settings.{c,h}`  | `bindButton[]` runtime bindings, `Bind_Pressed/Down/PollAny`, `Settings_Load/Save` |
-| `audio.{c,h}`     | Procedural SFX, snapshot-delta event detection         |
+| `audio_director.{c,h}` | Game-side audio event detection (snapshot-delta diff + timers); fires `Audio_*` calls. The mixer itself is `src/engine/audio.{c,h}` (pure, positional). |
 | `fx.{c,h}`        | Camera shake (no real particle system yet)             |
 
 Data layout under `data/`:
@@ -782,15 +824,15 @@ data/
 │   ├── *.obj/*.mtl              # static props (mystery box, doors, perks, …)
 │   ├── zombie.glb               # rigged enemy (walk/attack_a/death)
 │   ├── player.glb               # rigged co-op third-person soldier
-│   └── arms_vm.glb              # shared first-person arms (4 non-pistol guns)
-├── weapons/                     # NEW — per-folder weapon defs + assets
-│   ├── pistol/{pistol.weapon,pistol.obj,pistol.mtl,pistol_vm.glb}
-│   ├── smg/...
+│   └── arms_vm.glb              # shared first-person arms — fallback for guns lacking a combined rig
+├── weapons/                     # per-folder weapon defs + assets
+│   ├── pistol/{pistol.weapon,pistol.obj,pistol.mtl,pistol_vm.legacy.glb}
+│   ├── smg/{smg.weapon,smg.obj,smg.mtl,smg_vm.glb,smg_vm.blend}   # only combined rig so far
 │   ├── shotgun/...
 │   ├── rifle/...
-│   └── raygun/...
+│   └── raygun/...               # guns 2–5 still need <id>_vm.glb combined rigs
 ├── shaders/{world,sky}.{vs,fs}
-└── textures/*.png               # currently empty; specs in ASSETS.md
+└── textures/*.png               # 5 seamless 1024² PNGs (floor/ground/wall_ext/wall_int/ceiling)
 ```
 
 ## Conventions & gotchas
@@ -930,25 +972,28 @@ data/
     the per-frame `pos` delta (snapshots are 20 Hz but we render at 60 fps, so a
     raw delta spikes on snapshot frames — an EMA of `dist/dt`, clamped, recovers
     the true average). `reload` reads `inventory[currentSlot].reloadTimer` (it
-    IS serialized). `revive` is INFERRED: `reviverIdx` isn't serialized, so it
-    fires when a downed teammate with `reviveAsTarget>0` is within ~2.2 m. `fire`
-    keys off `fireHeld`, which is host-only (absent from the snapshot) — so it
-    just never plays on clients. Harmless, but if you want clients to see
-    teammates fire, add a fire flag to `SerPlayer` (protocol bump).
+    IS serialized). `revive` reads the serialized `reviverIdx` (set on the
+    DOWNED player = "who is reviving me"): the reviver is whoever a downed
+    teammate points back at — authoritative, no proximity guess. `fire` keys off
+    `fireHeld`, now serialized in `SerPlayer` (proto 11), so teammates animate
+    firing. (Both were added in the 2026-06-15 avatar-fidelity pass; the old
+    text here said they were unsynced/inferred — that's no longer true.)
   - **Ground clips own the lay-down.** `downed`/`death` lower the `pelvis` (root)
-    to the floor in the animation itself, so the draw passes `feet.y=0` with NO
-    tilt hack (unlike the old OBJ path's Y-squash). Facing is `-p->yaw*RAD2DEG`,
+    to the floor in the animation itself. The draw passes `feet.y = pos.y -
+    PLAYER_EYE` (the player's floor; 0 on flat maps, the deck height on
+    multi-floor maps) with NO tilt hack. Facing is `-p->yaw*RAD2DEG`,
     same as the OBJ path (the glb is +Y-in-Blender → -Z-forward in raylib).
   - **Team colour is a *lightened* wash** (`128 + c/2` toward white), not the raw
     team colour — a full-saturation multiply would flatten the soldier's
     materials. Dead/downed keep the existing grey/red `c`.
   - **Verify without MP:** `./build/shooter --screenshot-coop` spawns dummy
     teammates in locomotion/reload/downed/dead/revive states → `coop_*.png`.
-- **Shared arms viewmodel + bone-bolted gun (`arms_vm.glb`, 2026-06-03).** The
-  non-pistol guns share ONE rigged arms model; the gun is a separate object
-  attached to the `hand.R` bone each frame instead of being baked into a combined
-  arms+gun glb. So skins/new guns are cheap (retexture the arms once, drop in any
-  gun OBJ). Implementation notes for `viewmodel.c:DrawArmsViewmodel`:
+- **Shared arms viewmodel + bone-bolted gun (`arms_vm.glb`, 2026-06-03) — now
+  the FALLBACK path.** Combined per-weapon rigs are primary and the only path for
+  new guns; this arms+bolted-gun path runs only for guns that lack a
+  `<id>_vm.glb` (currently pistol/shotgun/rifle/raygun). It shares ONE rigged
+  arms model with the gun attached to the `hand.R` bone each frame. Implementation
+  notes for `viewmodel.c:DrawArmsViewmodel`:
   - **The attach math.** `Anim_BoneMatrix(am, st, boneIdx)` returns the bone's
     model-space transform at the current frame; the gun's world matrix is
     `gunLocal * bone * root` (raylib `MatrixMultiply` applies the LEFT operand
@@ -959,16 +1004,18 @@ data/
     `pos` nudge in hand-local metres.
   - **Pistol rides the arms path too (since ef1afe2).** The old
     `wi != W_PISTOL` gate is gone — `pistol.obj` bolts onto hand.R like every
-    other gun. `pistol_vm.glb` is still on disk (authored content, unused).
-    The gun-only floating OBJ path survives only as the fallback when
-    `arms_vm.glb` is missing.
+    other gun. `pistol_vm.legacy.glb` is still on disk (renamed off
+    auto-discovery; unused). The gun-only floating OBJ path survives only as the
+    fallback when `arms_vm.glb` is missing.
   - **Two shaders, two flat-light overrides.** Arms are skinned
     (`worldSkinnedShader`); the gun is a rigid OBJ (`worldShader`). Each gets its
     own flat sun/ambient override (restored after) so neither colour-swings —
     note the gun's override is darker (it's gunmetal, not skin).
-  - **Grips are data-driven (ef1afe2, abf709e) — BUT the hands still don't
-    sit on the guns as of 2026-06-13 (see the IN PROGRESS section at the top
-    of this file).** Seating lives in the `vm_grip_pos/rot/scale` keys of each
+  - **Grips are data-driven (ef1afe2, abf709e) — but the hands never sat
+    cleanly on the guns on this path. That bug (unfixable by tuning) is the whole
+    reason combined per-weapon rigs were adopted — it's moot there, since hands
+    are authored on the gun. On this fallback path it persists.** Seating lives
+    in the `vm_grip_pos/rot/scale` keys of each
     `.weapon` file (`weaponGrip[]` is just storage). The seat math is
     self-consistent — the gun and the debug markers both ride `hand.R` via
     `Anim_BoneMatrix`, so tuning `vm_grip_*` moves the gun relative to a hand
@@ -1103,26 +1150,23 @@ throw tactical. Keyboard equivalents (hardcoded alongside binds in
 
 See `TODO.md` for the full live list. Impact-ordered short version:
 
-1. **Author the first rigged glTF asset** — the engine animation
-   pipeline is in (`anim.{c,h}`, `--anim-test`); only assets are
-   missing. Per `data/ANIMATIONS.md`, start with one Normal zombie
-   (`walk`/`attack_a`/`death`) built rig-first via the
-   `blender-game-asset` skill, then wire an `AnimState` onto `Enemy` and
-   swap its `DrawProp` for `Anim_Draw`. This is the proof-of-pipeline.
-2. **Roll animation out** — fill the remaining zombie clips + per-type
-   variants (runner `lunge`, crawler `crawl`, boss `steamroll`); the
-   gunGrip table is tuned and death/attack are sim-driven now. Clip
-   lists in `data/ANIMATIONS.md`.
-3. **Author music + ambience .oggs** — the per-map music *engine* path
-   is in (audio.c streams `data/audio/<name>.ogg` if present); no audio
-   files ship yet. nacht.map references `nacht_loop`.
-4. **`LIGHTS x y z r g b range`** in `.map` + `sky_tint` plumbing.
-5. **Textures (5)** — `floor_concrete.png`, `ground_dirt.png`,
-   `wall_brick.png`, `wall_plaster.png`, `ceiling_wood.png`.
-6. **Frustum culling for props** — bounding-sphere test before each
-   `DrawProp`. Matters once more props ship.
-7. **`tests/map_parser_test.c`** + CI step running `--validate` on
-    every shipped map.
+1. **Combined viewmodel rigs for guns 2–5** — only the MP5 (`smg_vm.glb`)
+   has one. Author `pistol/shotgun/rifle/raygun` `<id>_vm.glb` via the
+   `blender-game-asset` skill's proven MP5 recipe, then retire the bolt-on
+   fallback (`DrawArmsViewmodel`/`weaponGrip[]`/`vm_grip_*`/`arms_vm.glb`/
+   gun-only OBJ). Decision: `docs/arms-rig-generalisation.md` §0.
+2. **Region-BFS zombie nav** — `RAMP … LINK a b` edges are stored but AI
+   still uses the greedy `CrossFloorGoal`; a real BFS over the sector graph
+   fixes down-then-up dead-ends (`docs/multi-floor-maps.md` §5).
+3. **Author music + ambience .oggs** — the per-map music engine path is in
+   (streams `data/audio/<name>.ogg` if present); no audio ships yet.
+   nacht.map references `nacht_loop`.
+4. **Zombie clip set + per-type variants** — `spawn`/`run`/`attack_b`,
+   runner `lunge`, crawler `crawl`, boss `steamroll` (`data/ANIMATIONS.md`).
+5. **`LIGHTS x y z r g b range`** in `.map` + `sky_tint` plumbing (both parse
+   but aren't fed to the shaders yet).
+6. **Parser tests** — `tests/map_parser_test.c` / `weapon_parser_test.c`.
+   CI already runs `--validate` + `--sim-tick`; add fixture-based tests.
 
 Tune-on-playtest flags from the 2026-06-02 balance pass: boss melee
 (100 dmg = 1-shot a no-Jug player from full), HP regen rate/delay

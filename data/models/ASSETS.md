@@ -79,7 +79,15 @@ rigged deformation. Stay readable as "stylised cubes with character."
 
 ### Guns (first-person viewmodel)
 
-The viewmodel draw code is in `src/render.c:DrawFirstPersonViewmodel`:
+> **Superseded for first person:** viewmodels are now authored as **combined
+> per-weapon rigs** (`data/weapons/<id>/<id>_vm.glb` — arms + gun + mechanism in
+> one rigged glTF), not gun-only OBJs scaled near the camera. See
+> `data/ANIMATIONS.md` and `docs/arms-rig-generalisation.md` §0. The gun OBJ +
+> `model_scale` notes below still apply to **world** draws (wall-buy / Mystery
+> Box / PaP display) and to the legacy bolt-on fallback. The draw code moved to
+> `src/game/viewmodel.c` (`Viewmodel_DrawFirstPerson`).
+
+The legacy gun-only viewmodel scale (`src/game/viewmodel.c`, fallback path):
 
 ```
 float s = 0.025f * weaponTune[wi].scale;   // base scale × per-weapon tune
@@ -692,11 +700,11 @@ doesn't currently draw a ceiling on Nacht. Drop the others in
 
 ### Texture checklist
 
-- [ ] `floor_concrete.png` (512² seamless)
-- [ ] `ground_dirt.png` (512² seamless)
-- [ ] `wall_brick.png` (512² seamless)
-- [ ] `wall_plaster.png` (512² seamless)
-- [ ] `ceiling_wood.png` (512² seamless) — reserved, not yet drawn
+- [x] `floor_concrete.png` (present, 1024²)
+- [x] `ground_dirt.png` (present, 1024²)
+- [x] `wall_brick.png` (present, 1024²)
+- [x] `wall_plaster.png` (present, 1024²)
+- [x] `ceiling_wood.png` (present, 1024²) — reserved, not yet drawn
 
 ## Shaders (`data/shaders/`)
 
@@ -734,20 +742,23 @@ back to raylib's default flat shader with no fog and a plain
 
 ## Round-2 checklist
 
-- [ ] `door.obj` + `.mtl` (1500–2200 tris)
-- [ ] `door_frame.obj` + `.mtl` (600–900 tris)
-- [ ] `obstacle_crate.obj` + `.mtl` (1200–1800 tris)
-- [ ] `obstacle_barrel.obj` + `.mtl` (800–1400 tris)
-- [ ] `perk_juggernog.obj` + `.mtl` (2500–3500 tris)
-- [ ] `perk_speed_cola.obj` + `.mtl` (2500–3500 tris)
-- [ ] `perk_double_tap.obj` + `.mtl` (2500–3500 tris)
-- [ ] `perk_staminup.obj` + `.mtl` (2500–3500 tris)
-- [ ] `pap_machine.obj` + `.mtl` (3500–5000 tris)
-- [ ] `wallbuy_panel.obj` + `.mtl` (700–1200 tris)
-- [ ] `powerup_drop.obj` + `.mtl` (700–1100 tris)
-- [ ] `player_m.obj` + `.mtl` (2500–4000 tris)
-- [ ] Parse `PROP <name> x z yawDeg [scale]` in `level.c:Level_LoadFile`
-- [ ] `PROP_COLLIDERS[]` table in `level.c` for prop collision boxes
+All Round-2 prop OBJs below are authored and present in `data/models/`, and the
+`PROP` map line + per-prop collision are wired (`PROP_DEFS[]` in `level.c`).
+
+- [x] `door.obj`
+- [x] `door_frame.obj`
+- [x] `obstacle_crate.obj`
+- [x] `obstacle_barrel.obj`
+- [x] `perk_juggernog.obj`
+- [x] `perk_speed_cola.obj`
+- [x] `perk_double_tap.obj`
+- [x] `perk_staminup.obj`
+- [x] `pap_machine.obj`
+- [x] `wallbuy_panel.obj`
+- [x] `powerup_drop.obj`
+- [x] `player_m.obj`
+- [x] Parse `PROP <name> x z yawDeg [scale]` in `level.c` (`MapProp`)
+- [x] `PROP_DEFS[]` table in `level.c` for prop collision boxes
 
 ## Round-2 acceptance test
 

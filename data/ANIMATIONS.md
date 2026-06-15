@@ -132,19 +132,12 @@ clips are authored once.
 > per-weapon viewmodel rig — proven recipe". Decision: `docs/arms-rig-
 > generalisation.md` §0. The struggle below is retained for historical context.
 >
-> ⚠️ **2026-06-13: the hands still don't sit on the guns.** A Blender pass
-> (commit 5cf3a4e) welded the arm meshes (were disconnected vertex islands)
-> and re-exported with `export_yup=False` so the forearms point forward —
-> arms now render fully. BUT the yup flip rotated the arms frame (`hand.R`
-> Y/Z swapped), invalidating the gun-seating calibration: the base
-> `MatrixRotateX(PI*0.5)` in `viewmodel.c:DrawArmsViewmodel` and every
-> `.weapon` `vm_grip_*` value were tuned for the OLD frame. NEXT step is to
-> re-derive those against the new frame (re-tune `vm_grip_rot/pos/scale` and
-> likely the base rotation) with `--screenshot-viewmodels`. See HANDOFF "IN
-> PROGRESS". Note the asset ships **7 clips** (`fire idle lower raise reload
-> reload_empty sprint`) — the `idle_pistol` and `inspect` clips referenced
-> elsewhere in this doc are NOT in `arms_vm.glb` yet, so `vm_pose PISTOL` is a
-> no-op until authored.
+> ℹ️ The shared-arms path now exists only as the **fallback** for guns without a
+> combined rig. Its long-standing "hands don't sit on the guns" problem is what
+> motivated combined rigs (where it's moot — hands are authored on the gun); do
+> **not** try to fix it by re-tuning `vm_grip_*`. Note `arms_vm.glb` ships
+> **7 clips** (`fire idle lower raise reload reload_empty sprint`) — no
+> `idle_pistol`/`inspect`, so `vm_pose PISTOL` is a no-op on the fallback path.
 
 > Gameplay timings (current `.weapon` files): reload — pistol **1.3s**,
 > smg **1.8s**, shotgun **2.0s**, rifle **1.5s**, raygun **2.6s**. Fire
@@ -312,10 +305,9 @@ Keep these code-/shader-driven; rigging them is wasted effort.
 2. Fill out zombie clips (`spawn`, `run`, `attack_b`) + per-type overrides.
 3. **M1911 viewmodel** with `idle`/`fire`/`reload`/`raise` — replaces the
    procedural viewmodel anim; proves the weapon view path + reload sync.
-4. Roll the viewmodel clip set across the other 4 guns (shared arm rig).
-   *Engine path done (`arms_vm.glb` + bone-bolted gun, 2026-06-03). 🚧
-   2026-06-13: hands still don't sit on the guns — asset-side fix in progress
-   (bad skin weights / idle pose in `arms_vm.glb`), plus `idle_pistol` clip
-   still to author. See HANDOFF "IN PROGRESS".*
+4. Roll the viewmodel set across the other 4 guns. *Superseded: each gun is now
+   its own combined rig (`<id>_vm.glb`). The MP5 is done; guns 2–5 remain. The
+   shared-arms path is now just the fallback. See
+   `docs/arms-rig-generalisation.md` §0.*
 5. Player third-person model (co-op visibility). *Done (`player.glb`, wired).*
 6. Machine polish (PaP, box, perks) as time allows.

@@ -130,8 +130,10 @@ connectivity auditor). Remaining work is authoring + per-entity wiring:
         `W_PISTOL` uses the gun-only OBJ path. Still open: authoring per-gun
         vm clips (fire blowback etc. currently come from the shared arms
         clips). See HANDOFF "shared arms viewmodel" gotcha.
-  - [~] **🚧 IN PROGRESS (2026-06-13): hands still don't sit on the guns —
-        Blender pass landed (5cf3a4e) but reset the seating calibration.**
+  - [x] **✅ RESOLVED (2026-06-13) by switching to combined per-weapon rigs.**
+        The shared-arms seating bug was never tuned out — it's moot on the
+        combined-rig path (hands are authored on the gun). MP5 rig done; guns
+        2–5 remain (see the top "NEXT SESSION" block). Historical detail:
         A Blender agent welded the 4 arm meshes (were unconnected vertex soup,
         78–80 islands each → 1 island, audit PASS) and re-exported with
         `export_yup=False`, which fixed the forearms being pointed the wrong
@@ -290,10 +292,11 @@ connectivity auditor). Remaining work is authoring + per-entity wiring:
       hooked up.
 
 ### Assets (specs already in `data/models/ASSETS.md`)
-- [ ] **Textures (5)** — `floor_concrete.png`, `ground_dirt.png`,
-      `wall_brick.png`, `wall_plaster.png`, `ceiling_wood.png` (last is
-      reserved, no current map draws a ceiling). 512² seamless PNGs;
-      engine, mipmaps, wrap mode, tile UVs all already wired.
+- [x] **Textures (5)** — `floor_concrete.png`, `ground_dirt.png`,
+      `wall_brick.png`, `wall_plaster.png`, `ceiling_wood.png` all present
+      (1024² PNGs in `data/textures/`); engine, mipmaps, wrap mode, tile UVs
+      wired. `ceiling_wood` is reserved (no current map draws a ceiling).
+      Optional: re-author any that don't tile seamlessly.
 - [x] ~~`pap_chamber.obj`~~ — superseded: the 2026-06-04 `pap_machine.obj`
       bakes the chamber into the cabinet; the shutter stays procedural by
       design (aligned to the model's mouth at y≈1.99).

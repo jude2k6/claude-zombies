@@ -26,9 +26,9 @@
 // The combined rig is authored with origin ≈ the eye point, looking down the
 // arms; start with near-identity framing and small downward offset.
 #define CRIG_SCALE        1.0f   // uniform framing scale for combined-rig VMs
-#define CRIG_FWD_OFFSET   0.13f  // metres forward — push the rig off the lens
-#define CRIG_RIGHT_OFFSET 0.06f  // metres right from camera.position
-#define CRIG_DOWN_OFFSET  -0.03f // metres downward from camera.position (positive = down; negative lifts the gun up)
+#define CRIG_FWD_OFFSET   0.35f  // metres forward — MUST exceed the rig's rear arm extent (~0.31 m) or the arms clip behind the near plane and vanish
+#define CRIG_RIGHT_OFFSET 0.10f  // metres right from camera.position
+#define CRIG_DOWN_OFFSET  -0.08f // metres downward from camera.position (positive = down; negative lifts the gun up)
 // Optional base pitch (radians) applied before camera basis; negative tilts
 // muzzle down (matching a slight downward author pose). 0 = none.
 // Positive = muzzle up, giving the diagonal "held up toward centre" FPS look.

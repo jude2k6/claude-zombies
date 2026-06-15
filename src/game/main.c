@@ -320,21 +320,11 @@ static void GameMod_Frame(float dt, int sw, int sh) {
 
         HandleLocalActions(me);
 
+        // The authoritative sim (Game_Tick) runs in GameMod_Fixed on the engine's
+        // fixed-step accumulator. Clients don't tick the sim — they apply
+        // snapshots — so their input send stays here, per-frame.
         bool isHost = (netMode != NET_CLIENT);
-        if (isHost) {
-            Game_Tick(dt);
-            if (godMode) {
-                Player *gp = &g_world.players[localPlayerIdx];
-                gp->points = 999999;
-                gp->hp = Perk_EffMaxHP(gp);
-                gp->alive = true;
-            }
-            snapshotAccum += dt;
-            if (snapshotAccum >= 1.0f / SNAPSHOT_HZ && netMode == NET_HOST) {
-                snapshotAccum = 0;
-                Protocol_HostBroadcastSnapshot();
-            }
-        } else {
+        if (!isHost) {
             inputAccum += dt;
             if (inputAccum >= 1.0f / INPUT_HZ) {
                 inputAccum = 0;
@@ -443,6 +433,28 @@ static void GameMod_Frame(float dt, int sw, int sh) {
     Settings_TickTriggerEdges();  // advance trigger edge state for Bind_PollAny (rebind UI)
 }
 
+// Fixed-step authoritative simulation, driven by the engine's accumulator at
+// ENG_FIXED_DT (60 Hz) regardless of render frame rate. Host/solo only — clients
+// apply snapshots instead of ticking. Runs after GameMod_Frame each rendered
+// frame, so it consumes the input that frame sampled.
+static void GameMod_Fixed(float dt) {
+    if (uiState != UI_PLAY) return;
+    if (netMode == NET_CLIENT) return;   // clients don't run the sim
+
+    Game_Tick(dt);
+    if (godMode) {
+        Player *gp = &g_world.players[localPlayerIdx];
+        gp->points = 999999;
+        gp->hp = Perk_EffMaxHP(gp);
+        gp->alive = true;
+    }
+    snapshotAccum += dt;
+    if (snapshotAccum >= 1.0f / SNAPSHOT_HZ && netMode == NET_HOST) {
+        snapshotAccum = 0;
+        Protocol_HostBroadcastSnapshot();
+    }
+}
+
 static void GameMod_Draw(int sw, int sh) {
     Player *me = &g_world.players[localPlayerIdx];
 
@@ -498,6 +510,7 @@ static GameModule Game_Module(void) {
     return (GameModule){
         .init     = GameMod_Init,
         .frame    = GameMod_Frame,
+        .fixed    = GameMod_Fixed,
         .draw     = GameMod_Draw,
         .shutdown = GameMod_Shutdown,
     };

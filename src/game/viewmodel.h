@@ -21,6 +21,11 @@ void Viewmodel_UnloadCombinedRigs(void);
 // Must be called inside an active BeginMode3D scope.
 void Viewmodel_DrawFirstPerson(Camera camera);
 
+// Set the walk-bob phase for this frame (from the camera-bob computation in the
+// game's per-frame step), so the first-person gun bob stays phase-locked to the
+// camera bob instead of free-running on its own oscillator.
+void Viewmodel_SetBobPhase(float phase);
+
 // Grip-tuning aid: when true, the arms path draws a red sphere + axis ticks
 // at the hand.R bone origin and a blue sphere at hand.L. Set by
 // --screenshot-viewmodels so vm_grip_* keys can be dialled geometrically.

@@ -432,6 +432,9 @@ static void GameMod_Frame(float dt, int sw, int sh) {
     }
     bobPrevPos = me->pos;
     bobPrevValid = (uiState == UI_PLAY);
+    // Hand the same bob phase to the viewmodel so the gun bob is phase-locked
+    // to the camera bob (one oscillator, not two that drift apart).
+    Viewmodel_SetBobPhase(bobPhase);
 
     float yawJ = 0, pitchJ = 0;
     Vector3 shakeOff = Fx_CameraOffset(&yawJ, &pitchJ);

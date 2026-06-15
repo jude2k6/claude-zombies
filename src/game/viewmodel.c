@@ -141,6 +141,14 @@ void Viewmodel_UnloadArms(void) {
 // `rotDeg` is extra fine rotation, `scale` sizes the gun against the arms.
 // Tune via --screenshot-viewmodels — edit the .weapon, rerun, no recompile.
 
+// Walk-bob phase, owned by the game: GameMod_Frame computes one bob phase for
+// the camera and hands it here via Viewmodel_SetBobPhase, so the first-person
+// gun bob is phase-LOCKED to the camera bob. (They used to be two independent
+// oscillators at different frequencies that could drift into opposite phase —
+// the gun visibly sinking as the view rose.)
+static float s_bobPhase = 0.0f;
+void Viewmodel_SetBobPhase(float phase) { s_bobPhase = phase; }
+
 // Procedural viewmodel movement: a gentle bob while walking and a stronger
 // sink + high-frequency jitter while sprinting. `outPos` is a world-space
 // offset built from the camera basis; `outTilt` is an extra muzzle-down tilt
@@ -148,15 +156,12 @@ void Viewmodel_UnloadArms(void) {
 // sprintBlend; ADS settles it all down.
 static void ViewmodelMotion(Player *me, Vector3 fwd, Vector3 right, Vector3 up,
                             Vector3 *outPos, float *outTilt) {
-    static float phase = 0.0f;
-    float dt     = GetFrameTime();
+    float phase  = s_bobPhase;            // shared with the camera bob (phase-locked)
     float walk   = me->moveBlend;
     float sprint = me->sprintBlend;
     float ads    = me->adsHeld ? 0.25f : 1.0f;
 
-    // Bob frequency rises with sprint; amplitude scales with how much we move.
-    float freq = 6.5f + 4.5f * sprint;
-    phase += dt * freq;
+    // Amplitude scales with how much we move; phase comes from the camera bob.
     float amp  = (0.012f + 0.05f * sprint) * walk * ads;
     float bobV = sinf(phase * 2.0f) * amp;        // vertical (double freq)
     float bobH = sinf(phase)        * amp * 0.7f; // lateral sway
@@ -175,6 +180,35 @@ static void ViewmodelMotion(Player *me, Vector3 fwd, Vector3 right, Vector3 up,
     *outTilt = sprint * 0.35f * ads;              // muzzle dips while sprinting
 }
 
+// ---- shared viewmodel edge-detect (combined-rig + shared-arms paths) --------
+// Tracks the identity of the weapon last *driven* across BOTH skinned paths, so
+// swapping between a combined-rig gun and an arms-path gun still re-triggers the
+// raise clip. Per-function statics missed that: the path you swapped AWAY from
+// kept stale prev values, so returning to it saw "no change" and skipped the
+// raise. One tracker (only one weapon is drawn per frame) keeps it consistent.
+static struct {
+    int   slot, wi;
+    float prevFire, prevReload;
+    bool  reloadEmpty;
+    bool  valid;
+} s_vmEdge = { -1, -1, 0.0f, 0.0f, false, false };
+
+typedef struct { bool swap, fire, reloadStart, reloading, reloadEmpty; } VmEdges;
+
+static VmEdges Viewmodel_Edges(int slot, int wi, const WeaponSlot *s) {
+    VmEdges e;
+    e.swap        = (!s_vmEdge.valid || slot != s_vmEdge.slot || wi != s_vmEdge.wi);
+    e.fire        = (s->fireTimer   > 0.0f && s_vmEdge.prevFire   <= 0.0f);
+    e.reloadStart = (s->reloadTimer > 0.0f && s_vmEdge.prevReload <= 0.0f);
+    e.reloading   = (s->reloadTimer > 0.0f);
+    if (e.reloadStart) s_vmEdge.reloadEmpty = (s->ammo == 0);
+    e.reloadEmpty = s_vmEdge.reloadEmpty;
+    s_vmEdge.slot     = slot;            s_vmEdge.wi         = wi;
+    s_vmEdge.prevFire = s->fireTimer;    s_vmEdge.prevReload = s->reloadTimer;
+    s_vmEdge.valid    = true;
+    return e;
+}
+
 // ---- combined-rig first-person draw ----------------------------------------
 // Draws the combined per-weapon glTF (arms + gun + mechanical parts) using the
 // same player-state → clip state machine as DrawArmsViewmodel. Called only when
@@ -185,22 +219,13 @@ static void DrawCombinedRigViewmodel(Camera camera, int wi) {
     WeaponSlot *slot = &me->inventory[cs];
     float dt = GetFrameTime();
 
-    // State tracking (persistent across frames, per-weapon-slot edge detect).
-    static int   cr_prevSlot   = -1;
-    static int   cr_prevWi     = -1;
-    static float cr_prevFire   = 0.0f;
-    static float cr_prevReload = 0.0f;
-    static bool  cr_reloadEmpty = false;
-
-    bool swapEdge    = (cs != cr_prevSlot || wi != cr_prevWi);
-    bool fireEdge    = (slot->fireTimer  > 0.0f && cr_prevFire   <= 0.0f);
-    bool reloadStart = (slot->reloadTimer > 0.0f && cr_prevReload <= 0.0f);
-    bool reloading   = (slot->reloadTimer > 0.0f);
-    if (reloadStart) cr_reloadEmpty = (slot->ammo == 0);
-    cr_prevSlot   = cs;
-    cr_prevWi     = wi;
-    cr_prevFire   = slot->fireTimer;
-    cr_prevReload = slot->reloadTimer;
+    // Edge detection shared across both skinned paths (see Viewmodel_Edges).
+    VmEdges ed = Viewmodel_Edges(cs, wi, slot);
+    bool swapEdge       = ed.swap;
+    bool fireEdge       = ed.fire;
+    bool reloadStart    = ed.reloadStart;
+    bool reloading      = ed.reloading;
+    bool cr_reloadEmpty = ed.reloadEmpty;
     bool sprinting = (me->sprintBlend > 0.6f) && !reloading;
 
     AnimModel *am = &crigVM[wi];
@@ -337,15 +362,13 @@ static void DrawArmsViewmodel(Camera camera, int wi) {
     WeaponSlot *slot = &me->inventory[cs];
     float dt = GetFrameTime();
 
-    static int prevSlot = -1, prevWi = -1;
-    static float prevFire = 0.0f, prevReload = 0.0f;
-    static bool reloadEmpty = false;
-    bool swapEdge    = (cs != prevSlot || wi != prevWi);
-    bool fireEdge    = (slot->fireTimer  > 0.0f && prevFire   <= 0.0f);
-    bool reloadStart = (slot->reloadTimer > 0.0f && prevReload <= 0.0f);
-    bool reloading   = (slot->reloadTimer > 0.0f);
-    if (reloadStart) reloadEmpty = (slot->ammo == 0);
-    prevSlot = cs; prevWi = wi; prevFire = slot->fireTimer; prevReload = slot->reloadTimer;
+    // Edge detection shared across both skinned paths (see Viewmodel_Edges).
+    VmEdges ed = Viewmodel_Edges(cs, wi, slot);
+    bool swapEdge    = ed.swap;
+    bool fireEdge    = ed.fire;
+    bool reloadStart = ed.reloadStart;
+    bool reloading   = ed.reloading;
+    bool reloadEmpty = ed.reloadEmpty;
     bool sprinting = (me->sprintBlend > 0.6f) && !reloading;
 
     AnimState *st = &armsVMState;

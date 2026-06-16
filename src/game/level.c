@@ -397,11 +397,13 @@ void Level_InstantiateDoc(const MapDoc *doc) {
         // sky_tint and music reserved — no game consumer yet
     }
 
-    // Spawns — game array is sized NET_MAX_PLAYERS; warn if more in doc
+    // Player spawns — only PLAYER-tagged points; game array is sized
+    // NET_MAX_PLAYERS. (MOB spawns are read separately by the enemy system.)
     for (int i = 0; i < doc->spawnCount; i++) {
+        if (strcmp(doc->spawns[i].mob, "PLAYER") != 0) continue;
         if (mapSpawnCount >= NET_MAX_PLAYERS) {
-            fprintf(stderr, "map: warning: %d spawns in map, game cap is %d — ignoring extras\n",
-                    doc->spawnCount, NET_MAX_PLAYERS);
+            fprintf(stderr, "map: warning: more player spawns than game cap %d — ignoring extras\n",
+                    NET_MAX_PLAYERS);
             break;
         }
         float sx = doc->spawns[i].x, sz = doc->spawns[i].z;

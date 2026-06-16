@@ -16,10 +16,10 @@ END
 SECTOR bunker  -32 -32  16 16  0
     # --- SW SPAWN BUNKER (x: -40..-25, z: -40..-25) ---
 
-    SPAWN -32 -32
-    SPAWN -30 -32
-    SPAWN -32 -30
-    SPAWN -34 -30
+    SPAWN PLAYER -32 -32
+    SPAWN PLAYER -30 -32
+    SPAWN PLAYER -32 -30
+    SPAWN PLAYER -34 -30
 
     # North wall (z=-25) with a $1000 stairs door at x=-32, 2 m wide
     WALL -40 -25  -25 -25  DOOR -32 2 1000  AS north_door

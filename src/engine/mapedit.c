@@ -232,6 +232,7 @@ int EngMapEnt_Add(MapDoc *doc, EngMapEntKind kind) {
             if (doc->spawnCount >= MAPDOC_MAX_SPAWNS) return -1;
             MapDocSpawn *e = &doc->spawns[doc->spawnCount++];
             memset(e, 0, sizeof *e);
+            strcpy(e->mob, "PLAYER");   /* default; caller may retag to a mob */
             e->sectorId = -1;
             e->id = MapDoc_AllocId(doc);
             return e->id;

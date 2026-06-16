@@ -48,6 +48,7 @@
 #define MAPDOC_NAME_LEN       64
 #define MAPDOC_DOOR_NAME_LEN  24
 #define MAPDOC_PROP_NAME_LEN  32
+#define MAPDOC_SPAWN_MOB_LEN  24
 
 /* ---- texture name length (shared by TEX slots and per-surface names) ---- */
 #define MAPDOC_TEX_NAME_LEN  64
@@ -64,8 +65,18 @@ typedef struct {
 
 /* ---- sub-structs ---- */
 
+/* A spawn point. Generic by design: `mob` is a free-form tag the engine never
+ * interprets — the GAME maps a tag to behaviour, so a new mob is a new tag
+ * value with zero engine/parser changes (the "primitives not policy" rule).
+ *   mob == "PLAYER"  → a player start; `lockedBy` is unused.
+ *   mob == anything else (e.g. "ZOMBIE") → a mob spawn; `lockedBy` may name a
+ *     door that gates it (the spawn is dormant until that door is opened),
+ *     resolved game-side exactly like a window's LOCKED_BY.
+ * Grammar: `SPAWN PLAYER x z`  /  `SPAWN MOB <mob> x z [LOCKED_BY <door>]`. */
 typedef struct {
     float x, z;
+    char  mob[MAPDOC_SPAWN_MOB_LEN];     /* "PLAYER" or a mob name; never empty */
+    char  lockedBy[MAPDOC_DOOR_NAME_LEN];/* "" = ungated; mob spawns only */
     int   sectorId;  /* -1 = ungrouped */
     int   id;        /* runtime-only stable handle; see header comment */
 } MapDocSpawn;

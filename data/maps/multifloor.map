@@ -17,10 +17,10 @@ END
 
 # Ground level (spawns + ground gameplay)
 SECTOR ground  0 0  80 80  0
-    SPAWN  0 0
-    SPAWN  2 0
-    SPAWN -2 0
-    SPAWN  0 2
+    SPAWN PLAYER  0 0
+    SPAWN PLAYER  2 0
+    SPAWN PLAYER -2 0
+    SPAWN PLAYER  0 2
 
     OBSTACLE -12 -8    6 3
     OBSTACLE -20  12   5 5 3

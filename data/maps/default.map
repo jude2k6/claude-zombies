@@ -13,7 +13,8 @@
 #        their floor height from it...
 #   END
 #
-#   SPAWN x z
+#   SPAWN PLAYER x z                         (player start)
+#   SPAWN MOB <mob> x z [LOCKED_BY <door>]   (mob spawn, e.g. ZOMBIE; optional gate)
 #   WALL  x1 z1 x2 z2 [DOOR center width cost [AS name]] [TEX name]
 #   WINDOW x z <+x|-x|+z|-z> [LOCKED_BY <door_name>]
 #   WALLBUY x z <+x|-x|+z|-z> WEAPON         (PISTOL/SMG/SHOTGUN/RIFLE/RAYGUN)
@@ -31,10 +32,10 @@ ATMOSPHERE
 END
 
 SECTOR ground  0 0  80 80  0
-    SPAWN  0 0
-    SPAWN  2 0
-    SPAWN -2 0
-    SPAWN  0 2
+    SPAWN PLAYER  0 0
+    SPAWN PLAYER  2 0
+    SPAWN PLAYER -2 0
+    SPAWN PLAYER  0 2
 
     OBSTACLE  10  5    4 4 3
     OBSTACLE -12 -8    6 3

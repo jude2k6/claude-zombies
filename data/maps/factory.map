@@ -10,10 +10,10 @@ ATMOSPHERE
 END
 
 SECTOR ground  0 0  80 80  0
-    SPAWN  0 0
-    SPAWN  3 0
-    SPAWN -3 0
-    SPAWN  0 3
+    SPAWN PLAYER  0 0
+    SPAWN PLAYER  3 0
+    SPAWN PLAYER -3 0
+    SPAWN PLAYER  0 3
 
     # --- Floor clutter ---------------------------------------------------
     OBSTACLE   6   6   3 3

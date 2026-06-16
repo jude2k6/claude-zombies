@@ -290,13 +290,43 @@ int MapDoc_Parse(const char *path, MapDoc *out, FILE *errs) {
         }
 
         if (strcmp(key, "SPAWN") == 0) {
-            if (n != 3) {
-                fprintf(errs, "map: line %d: SPAWN expects x z\n", lineNo);
+            /* SPAWN PLAYER x z   |   SPAWN MOB <mob> x z [LOCKED_BY <door>] */
+            char  mob[MAPDOC_SPAWN_MOB_LEN]      = {0};
+            char  lockedBy[MAPDOC_DOOR_NAME_LEN] = {0};
+            float x, z;
+            if (n < 2) {
+                fprintf(errs, "map: line %d: SPAWN expects PLAYER or MOB\n", lineNo);
                 errors++; continue;
             }
-            float x, z;
-            if (!ParseFloat(toks[1], &x) || !ParseFloat(toks[2], &z)) {
-                fprintf(errs, "map: line %d: SPAWN bad number\n", lineNo);
+            if (strcmp(toks[1], "PLAYER") == 0) {
+                if (n != 4) {
+                    fprintf(errs, "map: line %d: SPAWN PLAYER expects x z\n", lineNo);
+                    errors++; continue;
+                }
+                if (!ParseFloat(toks[2], &x) || !ParseFloat(toks[3], &z)) {
+                    fprintf(errs, "map: line %d: SPAWN bad number\n", lineNo);
+                    errors++; continue;
+                }
+                strcpy(mob, "PLAYER");
+            } else if (strcmp(toks[1], "MOB") == 0) {
+                if (n < 5) {
+                    fprintf(errs, "map: line %d: SPAWN MOB expects <mob> x z\n", lineNo);
+                    errors++; continue;
+                }
+                strncpy(mob, toks[2], MAPDOC_SPAWN_MOB_LEN - 1);
+                if (!ParseFloat(toks[3], &x) || !ParseFloat(toks[4], &z)) {
+                    fprintf(errs, "map: line %d: SPAWN bad number\n", lineNo);
+                    errors++; continue;
+                }
+                if (n >= 7 && strcmp(toks[5], "LOCKED_BY") == 0) {
+                    strncpy(lockedBy, toks[6], MAPDOC_DOOR_NAME_LEN - 1);
+                } else if (n != 5) {
+                    fprintf(errs, "map: line %d: SPAWN MOB trailing tokens\n", lineNo);
+                    errors++; continue;
+                }
+            } else {
+                fprintf(errs, "map: line %d: SPAWN expects PLAYER or MOB, got '%s'\n",
+                        lineNo, toks[1]);
                 errors++; continue;
             }
             if (out->spawnCount >= MAPDOC_MAX_SPAWNS) {
@@ -304,7 +334,21 @@ int MapDoc_Parse(const char *path, MapDoc *out, FILE *errs) {
                         lineNo, MAPDOC_MAX_SPAWNS);
                 errors++; continue;
             }
-            out->spawns[out->spawnCount++] = (MapDocSpawn){ x, z, curSectorIdx, NextParseId(out) };
+            MapDocSpawn sp;
+            memset(&sp, 0, sizeof sp);
+            sp.x = x; sp.z = z;
+            snprintf(sp.mob, sizeof sp.mob, "%s", mob);
+            snprintf(sp.lockedBy, sizeof sp.lockedBy, "%s", lockedBy);
+            sp.sectorId = curSectorIdx;
+            sp.id = NextParseId(out);
+            out->spawns[out->spawnCount++] = sp;
+
+            /* defer LOCKED_BY validation (door must exist); reuses pending list */
+            if (lockedBy[0] && pendingCount < MAPDOC_MAX_WINDOWS) {
+                pending[pendingCount].winIdx = -1;   /* -1 marks a spawn ref */
+                snprintf(pending[pendingCount].name, sizeof pending[pendingCount].name, "%s", lockedBy);
+                pendingCount++;
+            }
             continue;
         }
 
@@ -555,7 +599,7 @@ int MapDoc_Parse(const char *path, MapDoc *out, FILE *errs) {
             memset(&win, 0, sizeof win);
             win.x = x; win.z = z;
             memcpy(win.dir, dir, 4);
-            strncpy(win.lockedBy, lockedBy, MAPDOC_DOOR_NAME_LEN - 1);
+            snprintf(win.lockedBy, sizeof win.lockedBy, "%s", lockedBy);
             win.sectorId = curSectorIdx;
             win.id = NextParseId(out);
             int widx = out->windowCount++;
@@ -564,7 +608,7 @@ int MapDoc_Parse(const char *path, MapDoc *out, FILE *errs) {
             /* deferred door-name resolution for LOCKED_BY */
             if (lockedBy[0] && pendingCount < MAPDOC_MAX_WINDOWS) {
                 pending[pendingCount].winIdx = widx;
-                strncpy(pending[pendingCount].name, lockedBy, MAPDOC_DOOR_NAME_LEN - 1);
+                snprintf(pending[pendingCount].name, sizeof pending[pendingCount].name, "%s", lockedBy);
                 pendingCount++;
             }
             continue;
@@ -643,9 +687,20 @@ int MapDoc_Parse(const char *path, MapDoc *out, FILE *errs) {
         }
     }
 
-    /* Ensure at least one spawn exists (sector -1 => ground at Y0) */
-    if (out->spawnCount == 0)
-        out->spawns[out->spawnCount++] = (MapDocSpawn){ 0.0f, 0.0f, -1, NextParseId(out) };
+    /* Ensure at least one PLAYER spawn exists (sector -1 => ground at Y0) */
+    {
+        bool hasPlayer = false;
+        for (int i = 0; i < out->spawnCount; i++)
+            if (strcmp(out->spawns[i].mob, "PLAYER") == 0) { hasPlayer = true; break; }
+        if (!hasPlayer && out->spawnCount < MAPDOC_MAX_SPAWNS) {
+            MapDocSpawn sp;
+            memset(&sp, 0, sizeof sp);
+            strcpy(sp.mob, "PLAYER");
+            sp.sectorId = -1;
+            sp.id = NextParseId(out);
+            out->spawns[out->spawnCount++] = sp;
+        }
+    }
 
     return errors;
 }
@@ -661,8 +716,16 @@ static void EmitEntities(FILE *f, const MapDoc *doc, int sectorId) {
     const char *ind = "    ";
 
     for (int i = 0; i < doc->spawnCount; i++) {
-        if (doc->spawns[i].sectorId != sectorId) continue;
-        fprintf(f, "%sSPAWN %.4g %.4g\n", ind, doc->spawns[i].x, doc->spawns[i].z);
+        const MapDocSpawn *s = &doc->spawns[i];
+        if (s->sectorId != sectorId) continue;
+        if (strcmp(s->mob, "PLAYER") == 0) {
+            fprintf(f, "%sSPAWN PLAYER %.4g %.4g\n", ind, s->x, s->z);
+        } else if (s->lockedBy[0]) {
+            fprintf(f, "%sSPAWN MOB %s %.4g %.4g LOCKED_BY %s\n",
+                    ind, s->mob, s->x, s->z, s->lockedBy);
+        } else {
+            fprintf(f, "%sSPAWN MOB %s %.4g %.4g\n", ind, s->mob, s->x, s->z);
+        }
     }
 
     for (int i = 0; i < doc->wallCount; i++) {
@@ -811,7 +874,8 @@ static bool SEq(const char *a, const char *b) { return strcmp(a, b) == 0; }
  * values remain directly comparable. */
 
 static bool SpawnEq(const MapDocSpawn *x, const MapDocSpawn *y) {
-    return FEq(x->x, y->x) && FEq(x->z, y->z) && x->sectorId == y->sectorId;
+    return FEq(x->x, y->x) && FEq(x->z, y->z) && x->sectorId == y->sectorId &&
+           SEq(x->mob, y->mob) && SEq(x->lockedBy, y->lockedBy);
 }
 static bool WallEq(const MapDocWall *x, const MapDocWall *y) {
     if (!FEq(x->x1, y->x1) || !FEq(x->z1, y->z1)) return false;

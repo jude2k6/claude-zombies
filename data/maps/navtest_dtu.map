@@ -23,7 +23,7 @@ ARENA 40 20
 
 # Sector 0: ground (Y=0)
 SECTOR ground  0 0  80 40  0
-    SPAWN  0 0
+    SPAWN PLAYER  0 0
     WINDOW  0 -19.5  +z
 END
 

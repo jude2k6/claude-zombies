@@ -101,43 +101,21 @@ Each gun has up to **two** rigs:
   static OBJ can keep serving world display until teammates-see-reloads
   matters.
 
-Shared viewmodel arm skeleton across all 5 guns is ideal (one set of arms,
-swap the gun mesh + gun-specific bones), so hand poses and the `raise/lower`
-clips are authored once.
+**Path: combined per-weapon rigs.** Each gun is ONE rigged `.glb` (arms + gun +
+mechanism bones, hands posed *on* the gun) with its own clip set; the engine
+auto-loads `data/weapons/<id>/<id>_vm.glb` and plays it
+(`viewmodel.c:DrawCombinedRigViewmodel`). Hands are authored on the gun, so
+there's no runtime seating bug, and mechanism bones can move (the MP5's charging
+handle racks). **Proven on the MP5; guns 2–5 remain.** Authoring recipe:
+`blender-game-asset` skill → "Combined per-weapon viewmodel rig". Decision:
+`docs/arms-rig-generalisation.md` §0.
 
-> **Implemented (2026-06-03): shared arms + bone-bolted gun.** The 4 non-pistol
-> guns now use ONE rigged arms model, `data/models/arms_vm.glb` (arms+hands, the
-> full clip set above, no gun baked in). The equipped gun is a *separate* model
-> attached to the **`hand.R`** bone each frame in `render.c:DrawArmsViewmodel`
-> (via `Anim_BoneMatrix(am, st, handR)` — the bone's model-space transform —
-> composed as `gunLocal * bone * root`). So authoring a new gun viewmodel = just
-> the gun mesh (any of the existing world OBJs works); the arms, hand pose, and
-> recoil/reload motion are inherited. **The arms model must include a `hand.R`
-> bone** for the gun to ride. A per-gun grip nudge (now the `vm_grip_pos/rot/
-> scale` keys of each `.weapon` file, read into `weaponGrip[]`; the code moved
-> from `render.c` to `viewmodel.c:DrawArmsViewmodel`) seats each gun — re-check
-> with `--screenshot-viewmodels`. **Since ef1afe2 the M1911 also rides the
-> shared arms path** (the `wi != W_PISTOL` gate is gone); `pistol_vm.glb`
-> remains on disk as authored-but-unused content. New guns follow the
-> shared-arms model, not a combined glb.
->
-> ✅ **2026-06-13 (later): SUPERSEDED by combined per-weapon rigs — proven on
-> the MP5.** The shared-arms + bone-bolted-gun approach described above is no
-> longer the path for new guns. Each gun is now ONE rigged `.glb` (arms + gun +
-> mechanism bones, hands posed on the gun) with its own clip set; the engine
-> auto-loads `data/weapons/<id>/<id>_vm.glb` and plays it
-> (`viewmodel.c:DrawCombinedRigViewmodel`). This kills the hand-placement bug
-> (hands are authored on the gun) and enables moving parts (the MP5's charging
-> handle racks). Authoring recipe: `blender-game-asset` skill → "Combined
-> per-weapon viewmodel rig — proven recipe". Decision: `docs/arms-rig-
-> generalisation.md` §0. The struggle below is retained for historical context.
->
-> ℹ️ The shared-arms path now exists only as the **fallback** for guns without a
-> combined rig. Its long-standing "hands don't sit on the guns" problem is what
-> motivated combined rigs (where it's moot — hands are authored on the gun); do
-> **not** try to fix it by re-tuning `vm_grip_*`. Note `arms_vm.glb` ships
-> **7 clips** (`fire idle lower raise reload reload_empty sprint`) — no
-> `idle_pistol`/`inspect`, so `vm_pose PISTOL` is a no-op on the fallback path.
+> ℹ️ **Fallback:** `data/models/arms_vm.glb` (shared arms + gun bolted to
+> `hand.R` via `vm_grip_*`) serves only guns without a combined rig. Its
+> hands-don't-quite-sit problem is *why* combined rigs were adopted — do **not**
+> try to fix it by re-tuning `vm_grip_*`. It ships **7 clips**
+> (`fire idle lower raise reload reload_empty sprint`) — no `idle_pistol`/
+> `inspect`, so `vm_pose PISTOL` is a no-op on the fallback path.
 
 > Gameplay timings (current `.weapon` files): reload — pistol **1.3s**,
 > smg **1.8s**, shotgun **2.0s**, rifle **1.5s**, raygun **2.6s**. Fire

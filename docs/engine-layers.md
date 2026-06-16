@@ -158,16 +158,18 @@ engine reusable as an SDK.
 |---|---|---|
 | UI substrate | raygui `#include`d + called directly by `game/ui/*` | `ui.h` / `Eng_Ui*` facade in engine; apps stop touching raygui directly |
 | Game menus/HUD | `src/game/menu.c`, `hud.c` on raw raygui + `DrawText` | same files, rebuilt on `Eng_Ui*` |
-| Editor | does not exist; primitives (`pick`/`gizmo`/`mapedit`/`mapdoc`) all shipped | `src/editor/` app (own `GameModule`) → `editor` binary |
+| Editor | **skeleton shipped** — `src/editor/` → `editor` binary (loads/flies/draws/selects + translate-gizmo drag); see [scene-builder.md](scene-builder.md) | grow into a full builder (inspector, add/delete, save) |
 | Editor packaging | n/a | standalone binary first; optional in-game embed later |
 
 **Suggested order** (small, independently shippable, none blocks the game):
 1. `ui.h` facade — wrap the raygui calls already in use (button, label, panel, slider,
    text field, toggle) as `Eng_Ui*`; port `menu.c`/`hud.c` onto it. *(Closes Open #1.)*
-2. `src/editor/` skeleton — a `GameModule` that loads a `MapDoc`, flies a camera, draws
-   the scene via `Eng_Gfx*`, and selects with `pick.h`. Produces the `editor` binary.
+2. ~~`src/editor/` skeleton — a `GameModule` that loads a `MapDoc`, flies a camera, draws
+   the scene via `Eng_Gfx*`, and selects with `pick.h`.~~ **Done** — produces the `editor`
+   binary; see [scene-builder.md](scene-builder.md).
 3. Wire the editor verbs — `gizmo.h` drag → `mapedit.h` mutator → `EngMapHistory`
-   commit; an `Eng_Ui*` inspector panel for the selected entity.
+   commit (translate **done** in the skeleton; rotate/scale + an `Eng_Ui*` inspector
+   panel for the selected entity still to do).
 4. Save/load + a tool palette; then consider the in-game embed.
 
 ## 7. Open decisions (pick later; defaults in **bold**)

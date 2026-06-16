@@ -98,6 +98,18 @@ target_include_directories(shooter PRIVATE
 )
 target_link_libraries(shooter PRIVATE engine)
 
+# ---- editor executable (src/editor/ — the scene/map builder) ----------------
+# A SIBLING application to the game: its own GameModule on the engine, linking
+# libengine.a and NOTHING from src/game/. The map editor built on the toolkit
+# (MapDoc + pick/gizmo/mapedit/debugdraw). See docs/scene-builder.md.
+add_executable(editor
+    src/editor/editor_main.c
+)
+target_link_libraries(editor PRIVATE engine)
+if(NOT MSVC)
+    target_compile_options(editor PRIVATE -Wall -Wextra -Wno-unused-parameter)
+endif()
+
 # ---- warning flags (our code only, not FetchContent deps) ------------------
 if(NOT MSVC)
     target_compile_options(engine  PRIVATE -Wall -Wextra -Wno-unused-parameter)

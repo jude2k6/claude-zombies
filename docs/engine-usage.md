@@ -146,6 +146,8 @@ Eng_ResolveAssetPath("maps/a.map", buf, sizeof buf);
 // Game-registered parser: engine loads bytes, hands them to fn(path,bytes,n,user).
 Eng_RegisterContentType(".weapon", parse_weapon, userptr);
 void *def = Eng_LoadContent("weapons/smg/smg.weapon");
+Eng_UnloadModel(m);  Eng_UnloadTexture(t);         // per-handle release (refcounted)
+Eng_ReloadTexture(t2);                             // re-read same path from disk (hot-reload)
 Eng_ContentFlush();                                // release everything (e.g. on map unload)
 ```
 
@@ -153,8 +155,16 @@ Eng_ContentFlush();                                // release everything (e.g. o
 load returns an invalid handle (`id==0`) and logs one stderr line — it never
 crashes; `Eng_ModelGet`/`Eng_TextureGet` hand back a safe placeholder for an
 invalid handle, so you can defer the check. `Eng_LoadContent` (and any registered
-parser) returns `NULL` on failure. **Unload is all-or-nothing** — `Eng_ContentFlush`
-only; there is no per-handle unload or hot-reload (see §3b).
+parser) returns `NULL` on failure.
+
+**Unload / reload:** `Eng_Unload{Model,Texture,Shader,ClipSet}(handle)` release a
+single resource. Slots are **refcounted** — because loads dedup by resolved path,
+N loads of one path share a slot and take N unloads to actually free; the freed
+slot is then recycled by later loads. Unloading an invalid handle is a no-op, and
+any stale handle to a freed slot reads back as the placeholder (never crashes).
+`Eng_Reload{Model,Texture}(handle)` re-read the slot's path from disk in place (for
+live editing); a failed reload keeps the old data and returns `false`. Bulk teardown
+is still `Eng_ContentFlush()` (frees everything regardless of refcounts).
 
 ### anim — `anim.h` (skeletal animation, GPU skinning)
 `AnimModel` is the shared rig+clips; `AnimState` is a lightweight per-instance
@@ -196,6 +206,9 @@ bool reload  = Eng_InputPressed(ACT_RELOAD);          // rising edge
 Vector2 look = Eng_InputLookDelta();                  // {yaw, pitch} this frame — mouse delta or right stick, sensitivity-scaled
 Eng_InputSetLookSensitivity(mouse, pad);
 Eng_InputTickTriggerEdges();                          // once per frame, end of frame
+Vector2 mp = Eng_InputMousePos();                     // absolute cursor px (editor: drag-select, gizmos)
+Vector2 md = Eng_InputMouseDelta();                   // raw unscaled mouse px this frame
+float   wz = Eng_InputMouseWheel();                   // scroll this frame (editor: zoom)
 // Raw readers still available: Pad_Connected/StickX/StickY/Down/Pressed/TriggerL/R.
 ```
 `Eng_InputLookDelta()` is the mouselook primitive: call it in `frame`, add
@@ -203,6 +216,10 @@ Eng_InputTickTriggerEdges();                          // once per frame, end of 
 and applies the sensitivities set above. **Cursor capture is game-side** — the
 engine doesn't grab the mouse for you; toggle raylib's `DisableCursor()` (locked
 mouselook) / `EnableCursor()` (menus) yourself (see `src/game/main.c`).
+
+`Eng_InputMousePos`/`MouseDelta`/`MouseWheel` route raw cursor state through the
+same facade for an unlocked-cursor tool UI (the editor). Note `MouseDelta` is *raw
+pixels, mouse-only* — distinct from `LookDelta` (sensitivity-scaled, mouse-or-stick).
 
 Re-call `Eng_InputBind` whenever the player rebinds (see `Settings_SyncEngineBindings`
 in the game for the pattern).
@@ -227,7 +244,14 @@ into its own world. **This is the seam the map editor is built on.**
 MapDoc doc; MapDoc_Parse("maps/nacht.map", &doc, stderr);   // returns error count
 MapDoc_Save("maps/out.map", &doc);
 MapDoc_Equal(&a, &b);                                       // round-trip check
+int id = MapDoc_AllocId(&doc);                              // stable id for a newly added entity
 ```
+**Stable entity IDs:** every placed-entity struct carries an `int id`; `MapDoc_Parse`
+assigns fresh monotonic ids and sets `doc.nextId`. IDs are **runtime-only** — not
+serialised by `MapDoc_Save` and ignored by `MapDoc_Equal` (so the round-trip stays
+intact). The editor uses them as persistent handles for selection / undo / drag,
+minting new ones with `MapDoc_AllocId` — array indices shift on insert/delete and
+can't serve as identity.
 
 ### fx — `fx.h`, `particles.h`, `decals.h`
 Generic camera-shake/trauma, particle emitters, and decals.
@@ -237,6 +261,36 @@ Fx_Punch(trauma); Fx_Rumble(lo, hi, secs); Vector3 off = Fx_CameraOffset(&yawJ, 
 Eng_FxEmit((EngEmitterDesc){ … });   Particles_Update(dt); Particles_Draw(cam);
 Eng_FxDecal(ENG_DECAL_SPLAT, pos, normal, size);   Decals_Update(dt); Decals_Draw();
 ```
+
+### pick — `pick.h` (ray construction + intersection)
+Pure, stateless helpers for turning a screen pixel into a world ray and testing it
+— the core primitive the map editor selects and places with.
+
+```c
+Ray r = Eng_PickRayFromScreen(cam, Eng_InputMousePos(), w, h);  // cursor → world ray
+float t; if (Eng_PickRayAABB(r, box, &t))    … ;                // ray vs AABB (nearest hit dist)
+if (Eng_PickRaySphere(r, c, radius, &t))     … ;
+Vector3 hit; if (Eng_PickRayPlane(r, pPt, pN, &t, &hit)) … ;    // ray vs infinite plane
+if (Eng_PickRayGroundY(r, 0.0f, &hit))       … ;                // where on the floor was clicked
+```
+(Hit-testing against *game* world geometry is still game-side — see §3a; these are
+the math/picking primitives that test was missing.)
+
+### debugdraw — `debugdraw.h` (deferred overlay)
+Toggleable, queued line/box/sphere/3D-text overlay. Submit from anywhere in the
+frame; the queue is drawn once and cleared. Off by default, so calls can live
+permanently in code at ~zero cost.
+
+```c
+Eng_DebugSetEnabled(true);                              // dev toggle (hotkey/console)
+Eng_DebugLine(a, b, RED);  Eng_DebugBox(bbox, GREEN);  Eng_DebugSphere(c, r, BLUE);
+Eng_DebugText3D(worldPos, "spawn", YELLOW);
+// at frame end:
+Eng_GfxBeginMode3D(cam);  …world…  Eng_DebugDraw3D(cam);  Eng_GfxEndMode3D();
+Eng_DebugDrawLabels(cam);                               // 2D text, AFTER EndMode3D
+```
+Order matters: shapes (`Eng_DebugDraw3D`) inside `Mode3D`, labels
+(`Eng_DebugDrawLabels`) after. Both clear their queues even when disabled.
 
 ---
 
@@ -276,9 +330,11 @@ structure. This covers three things, not just weapons:
   door headers/lintels block shots, open doorways don't.
 - **AI / line-of-sight & nav:** also game-side, against the same colliders.
 
-If a second module needs picking (the editor's ray-vs-scene select), it builds the
-ray from the camera and tests against `MapDoc` geometry itself — reuse the shared
-floor-height / region-nav spatial helpers in [multi-floor-maps.md](multi-floor-maps.md) §7.
+If a second module needs picking (the editor's ray-vs-scene select), the engine now
+provides the ray math — `Eng_PickRayFromScreen` + `Eng_PickRay*` (§3 `pick.h`) — but
+*what* the ray tests against is still the module's own geometry: walk the `MapDoc` and
+intersect, reusing the shared floor-height / region-nav helpers in
+[multi-floor-maps.md](multi-floor-maps.md) §7.
 
 ### Screenshots & runtime window control — raylib direct
 Like the HUD, these aren't wrapped: the window opens **resizable + vsync + MSAA-4x**
@@ -300,16 +356,17 @@ action map but never touches disk for you.
 Genuinely absent — not a deliberate game-side punt, just unbuilt. Know these before
 you start the map editor; some are on its critical path.
 
-- **Per-handle content unload / hot-reload** — only `Eng_ContentFlush` (all-or-nothing).
-  An editor's load→edit→reload loop currently means re-flush + re-load everything.
-  The most likely first thing the editor will need from the engine.
-- **Debug-draw channel** — no toggleable, draw-after-the-fact line/box/3D-text overlay.
-  `Eng_GfxCubeWires`/`Line3D`/`Grid` work for ad-hoc viz, but there's no persistent
-  debug layer for collision volumes, nav, or gizmo state. (§4 names "gizmos" — the
-  editor draws them itself with `Eng_Gfx*`; the engine provides no gizmo API.)
+- **Gizmo manipulation** — there's now picking (§3 `pick.h`) and a debug-draw overlay
+  (§3 `debugdraw.h`), but no translate/rotate/scale *handle* widget with drag logic;
+  the editor builds that on top of `Eng_PickRay*` + `Eng_Debug*` itself.
 - **Profiling / timing query** — no frame-time / fixed-step-count / draw-call API.
 - **Generic (de)serialization** — `MapDoc` covers the `.map` format only; save-games and
   net payloads are hand-packed.
+- **`EngConfig` launch options** — only `{w,h,title}`; vsync / MSAA / resizable /
+  fullscreen-at-launch / FPS cap are hardcoded in `app.c`, not parameterised.
+- **Async / background asset loading** — `content.h` loaders are main-thread, synchronous;
+  no job system anywhere in the engine.
+- **gfx convenience draws** — no billboard or bounding-box helper in the `Eng_Gfx*` facade.
 
 If you build any of these into `src/engine/`, add it to §3 and delete it here.
 

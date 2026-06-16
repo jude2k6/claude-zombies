@@ -36,7 +36,9 @@
 #include <string.h>
 #include <math.h>
 
-#define ED_PANEL_W 220   // left toolbar width (px); 3D viewport is to its right
+#define ED_PANEL_W_BASE 220   // unscaled toolbar width; actual = base * uiScale
+#define ED_UI_MIN 0.7f
+#define ED_UI_MAX 3.0f
 
 // ---- editor state (single instance; the editor is a single document tool) --
 
@@ -80,6 +82,7 @@ static struct {
 
     EdPlaceTool   placeTool;        // active placement tool (NONE = select mode)
     bool          barricadeAutoSpawn; // place a paired ZOMBIE spawn with a barricade
+    float         uiScale;          // toolbar font/layout scale (recommended from screen)
 
     bool          dragging;
     EngGizmoDrag  drag;
@@ -89,6 +92,20 @@ static struct {
     EdProxy       proxies[ED_MAX_ENTS];
     int           proxyCount;
 } ed;
+
+// Toolbar width tracks the UI scale so the panel grows with the font.
+static int EdPanelW(void) { return (int)(ED_PANEL_W_BASE * ed.uiScale); }
+
+// A sensible default UI scale for the current display: ~1.0 at 720p, ~1.5 at
+// 1080p, up to 3.0 on a 4K monitor. The user adjusts from here.
+static float RecommendedUiScale(void) {
+    int mh = GetMonitorHeight(GetCurrentMonitor());
+    if (mh <= 0) mh = GetScreenHeight();
+    float s = (float)mh / 720.0f;
+    if (s < 1.0f)      s = 1.0f;
+    if (s > ED_UI_MAX) s = ED_UI_MAX;
+    return s;
+}
 
 // ---- proxy build (MapDoc → selectable boxes) -------------------------------
 
@@ -497,6 +514,7 @@ static void EdInit(void) {
     ed.mode = ENG_GIZMO_TRANSLATE;
     ed.placeTool = ED_PLACE_NONE;
     ed.barricadeAutoSpawn = true;
+    ed.uiScale = RecommendedUiScale();
 }
 
 static void EdFrame(float dt, int sw, int sh) {
@@ -524,15 +542,19 @@ static void EdFrame(float dt, int sw, int sh) {
         CommitEdit();
     }
 
-    // Undo / redo.
+    // Undo / redo + UI scale (Ctrl + = / -).
     bool ctrl = IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL);
     if (ctrl && IsKeyPressed(KEY_Z)) EngMapHistory_Undo(&ed.hist, &ed.doc);
     if (ctrl && IsKeyPressed(KEY_Y)) EngMapHistory_Redo(&ed.hist, &ed.doc);
+    if (ctrl && (IsKeyPressed(KEY_EQUAL) || IsKeyPressed(KEY_KP_ADD)))
+        ed.uiScale = fminf(ED_UI_MAX, ed.uiScale + 0.1f);
+    if (ctrl && (IsKeyPressed(KEY_MINUS) || IsKeyPressed(KEY_KP_SUBTRACT)))
+        ed.uiScale = fmaxf(ED_UI_MIN, ed.uiScale - 0.1f);
 
     // The camera is being driven when fly-looking or while orbit/pan buttons are
     // held — suppress selection/placement so those clicks don't double up.
     // Also ignore 3D clicks that land on the toolbar (the panel owns them).
-    bool overPanel = (GetMousePosition().x < ED_PANEL_W);
+    bool overPanel = (GetMousePosition().x < EdPanelW());
     bool camBusy = ed.looking || IsMouseButtonDown(MOUSE_BUTTON_RIGHT) ||
                    IsMouseButtonDown(MOUSE_BUTTON_MIDDLE);
 
@@ -559,40 +581,57 @@ static void EdFrame(float dt, int sw, int sh) {
 }
 
 // ---- toolbar (raygui left panel) -------------------------------------------
+//
+// Everything is laid out in scaled pixels: `s = ed.uiScale` multiplies fonts,
+// row heights, and the panel width, so the toolbar grows/shrinks as one. The
+// raygui font is set via the TEXT_SIZE style; raw DrawText labels take `s`
+// explicitly.
 
 // One stacked, full-width tool button with a gold accent bar when active.
-static bool ToolRow(float x, float y, float w, const char *label, bool active) {
-    if (active) DrawRectangleRec((Rectangle){ x - 5, y, 3, 24 }, (Color){ 230, 180, 60, 255 });
-    return GuiButton((Rectangle){ x, y, w, 24 }, label);
+static bool ToolRow(float x, float y, float w, float s, const char *label, bool active) {
+    if (active) DrawRectangleRec((Rectangle){ x - 5 * s, y, 3 * s, 24 * s }, (Color){ 230, 180, 60, 255 });
+    return GuiButton((Rectangle){ x, y, w, 24 * s }, label);
+}
+// Scaled raw text.
+static void PText(float x, float y, float s, float px, const char *t, Color c) {
+    DrawText(t, (int)x, (int)y, (int)(px * s), c);
 }
 
 static void DrawToolPanel(int sh) {
-    const float X = 10, W = ED_PANEL_W - 20;
-    DrawRectangle(0, 0, ED_PANEL_W, sh, (Color){ 24, 27, 34, 255 });
-    DrawRectangle(ED_PANEL_W - 1, 0, 1, sh, (Color){ 60, 66, 80, 255 });
+    float s = ed.uiScale;
+    int   pw = EdPanelW();
+    float X = 10 * s, W = pw - 20 * s;
+    GuiSetStyle(DEFAULT, TEXT_SIZE, (int)(16 * s));   // scale every raygui control's font
 
-    float y = 10;
-    DrawText("SCENE BUILDER", (int)X, (int)y, 20, (Color){ 230, 200, 120, 255 }); y += 26;
-    const char *base = GetFileName(ed.path);
-    DrawText(TextFormat("%s   (%d ents)", base, ed.proxyCount), (int)X, (int)y, 12,
-             (Color){ 170, 175, 185, 255 }); y += 22;
+    DrawRectangle(0, 0, pw, sh, (Color){ 24, 27, 34, 255 });
+    DrawRectangle(pw - 1, 0, 1, sh, (Color){ 60, 66, 80, 255 });
 
-    // View mode (orbit / top / fly).
-    GuiLabel((Rectangle){ X, y, W, 16 }, "VIEW"); y += 18;
+    float y = 10 * s;
+    PText(X, y, s, 20, "SCENE BUILDER", (Color){ 230, 200, 120, 255 }); y += 26 * s;
+    PText(X, y, s, 12, TextFormat("%s   (%d ents)", GetFileName(ed.path), ed.proxyCount),
+          (Color){ 170, 175, 185, 255 }); y += 20 * s;
+
+    // UI scale (recommended from the display; adjust here or with Ctrl +/-).
+    GuiSlider((Rectangle){ X + 18 * s, y, W - 60 * s, 16 * s }, "UI",
+              TextFormat("%.0f%%", ed.uiScale * 100.0f), &ed.uiScale, ED_UI_MIN, ED_UI_MAX);
+    y += 24 * s;
+
+    // View mode (fly / iso / top).
+    GuiLabel((Rectangle){ X, y, W, 16 * s }, "VIEW"); y += 18 * s;
     int v = (int)ed.view;
-    GuiToggleGroup((Rectangle){ X, y, (W - 8) / 3.0f, 24 }, "Fly;Iso;Top", &v);
+    GuiToggleGroup((Rectangle){ X, y, (W - 8 * s) / 3.0f, 24 * s }, "Fly;Iso;Top", &v);
     if (v != (int)ed.view) SwitchView((EdViewMode)v);
-    y += 34;
+    y += 34 * s;
 
     // Gizmo mode.
-    GuiLabel((Rectangle){ X, y, W, 16 }, "GIZMO (move drag only)"); y += 18;
+    GuiLabel((Rectangle){ X, y, W, 16 * s }, "GIZMO (move drag only)"); y += 18 * s;
     int g = (int)ed.mode;
-    GuiToggleGroup((Rectangle){ X, y, (W - 8) / 3.0f, 24 }, "Move;Rot;Scale", &g);
+    GuiToggleGroup((Rectangle){ X, y, (W - 8 * s) / 3.0f, 24 * s }, "Move;Rot;Scale", &g);
     ed.mode = (EngGizmoMode)g;
-    y += 34;
+    y += 34 * s;
 
     // Placement tool.
-    GuiLabel((Rectangle){ X, y, W, 16 }, "PLACE (click ground)"); y += 18;
+    GuiLabel((Rectangle){ X, y, W, 16 * s }, "PLACE (click ground)"); y += 18 * s;
     struct { const char *label; EdPlaceTool tool; } tools[] = {
         { "Select / move",  ED_PLACE_NONE },
         { "Player spawn",   ED_PLACE_PLAYER },
@@ -600,52 +639,52 @@ static void DrawToolPanel(int sh) {
         { "Barricade",      ED_PLACE_BARRICADE },
     };
     for (int i = 0; i < 4; i++) {
-        if (ToolRow(X, y, W, tools[i].label, ed.placeTool == tools[i].tool))
+        if (ToolRow(X, y, W, s, tools[i].label, ed.placeTool == tools[i].tool))
             ed.placeTool = tools[i].tool;
-        y += 28;
+        y += 28 * s;
     }
-    GuiCheckBox((Rectangle){ X, y, 18, 18 }, " auto-spawn ZOMBIE", &ed.barricadeAutoSpawn);
-    y += 30;
+    GuiCheckBox((Rectangle){ X, y, 18 * s, 18 * s }, " auto-spawn ZOMBIE", &ed.barricadeAutoSpawn);
+    y += 30 * s;
 
     // Edit actions.
-    GuiLabel((Rectangle){ X, y, W, 16 }, "EDIT"); y += 18;
-    float hw = (W - 6) / 2.0f;
+    GuiLabel((Rectangle){ X, y, W, 16 * s }, "EDIT"); y += 18 * s;
+    float hw = (W - 6 * s) / 2.0f;
     if (!EngMapHistory_CanUndo(&ed.hist)) GuiSetState(STATE_DISABLED);
-    if (GuiButton((Rectangle){ X, y, hw, 24 }, "Undo")) EngMapHistory_Undo(&ed.hist, &ed.doc);
+    if (GuiButton((Rectangle){ X, y, hw, 24 * s }, "Undo")) EngMapHistory_Undo(&ed.hist, &ed.doc);
     GuiSetState(STATE_NORMAL);
     if (!EngMapHistory_CanRedo(&ed.hist)) GuiSetState(STATE_DISABLED);
-    if (GuiButton((Rectangle){ X + hw + 6, y, hw, 24 }, "Redo")) EngMapHistory_Redo(&ed.hist, &ed.doc);
+    if (GuiButton((Rectangle){ X + hw + 6 * s, y, hw, 24 * s }, "Redo")) EngMapHistory_Redo(&ed.hist, &ed.doc);
     GuiSetState(STATE_NORMAL);
-    y += 30;
+    y += 30 * s;
     if (ed.selectedId < 0) GuiSetState(STATE_DISABLED);
-    if (GuiButton((Rectangle){ X, y, W, 24 }, "Delete selected") && ed.selectedId >= 0) {
+    if (GuiButton((Rectangle){ X, y, W, 24 * s }, "Delete selected") && ed.selectedId >= 0) {
         EngMapEnt_Delete(&ed.doc, ed.selectedId); ed.selectedId = -1; CommitEdit();
     }
     GuiSetState(STATE_NORMAL);
-    y += 36;
+    y += 36 * s;
 
     // Selection readout.
-    GuiLabel((Rectangle){ X, y, W, 16 }, "SELECTION"); y += 18;
+    GuiLabel((Rectangle){ X, y, W, 16 * s }, "SELECTION"); y += 18 * s;
     if (ed.selectedId >= 0) {
         EngMapEntKind k; EngMapEnt_Ptr(&ed.doc, EngMapEnt_Find(&ed.doc, ed.selectedId), &k);
-        DrawText(TextFormat("#%d  %s", ed.selectedId, KindName(k)), (int)X, (int)y, 16, YELLOW); y += 20;
+        PText(X, y, s, 16, TextFormat("#%d  %s", ed.selectedId, KindName(k)), YELLOW); y += 20 * s;
         if (k == ENGMAPENT_SPAWN) {
             char m[MAPDOC_SPAWN_MOB_LEN]; Eng_GetSpawnMob(&ed.doc, ed.selectedId, m, sizeof m);
-            DrawText(TextFormat("mob: %s", m), (int)X, (int)y, 14, RAYWHITE); y += 18;
-            DrawText("[R] flip PLAYER/ZOMBIE", (int)X, (int)y, 12, (Color){ 150, 155, 165, 255 }); y += 18;
+            PText(X, y, s, 14, TextFormat("mob: %s", m), RAYWHITE); y += 18 * s;
+            PText(X, y, s, 12, "[R] flip PLAYER/ZOMBIE", (Color){ 150, 155, 165, 255 }); y += 18 * s;
         } else if (k == ENGMAPENT_WINDOW) {
             char d[4]; Eng_GetWindowDir(&ed.doc, ed.selectedId, d, sizeof d);
-            DrawText(TextFormat("facing: %s", d), (int)X, (int)y, 14, RAYWHITE); y += 18;
-            DrawText("[R] rotate facing", (int)X, (int)y, 12, (Color){ 150, 155, 165, 255 }); y += 18;
+            PText(X, y, s, 14, TextFormat("facing: %s", d), RAYWHITE); y += 18 * s;
+            PText(X, y, s, 12, "[R] rotate facing", (Color){ 150, 155, 165, 255 }); y += 18 * s;
         }
     } else {
-        DrawText("(nothing selected)", (int)X, (int)y, 14, (Color){ 130, 135, 145, 255 });
+        PText(X, y, s, 14, "(nothing selected)", (Color){ 130, 135, 145, 255 });
     }
 
     // Nav hint pinned to the bottom.
     const char *nav = ed.view == ED_VIEW_FLY
-        ? "RMB+WASDQE fly" : "RMB orbit · MMB pan · wheel zoom";
-    DrawText(nav, (int)X, sh - 22, 12, (Color){ 130, 135, 145, 255 });
+        ? "RMB+WASDQE fly" : "RMB orbit / MMB pan / wheel zoom";
+    PText(X, sh - 22 * s, s, 12, nav, (Color){ 130, 135, 145, 255 });
 }
 
 static void EdDraw(int sw, int sh) {

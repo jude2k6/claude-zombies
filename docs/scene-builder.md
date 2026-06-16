@@ -111,11 +111,17 @@ clicks don't double as edits.
 
 ### Toolbar
 
-A solid **left panel** (220 px) carries the UI so text is readable over the 3D view:
-view-mode and gizmo-mode toggles, the place-tool buttons + the *auto-spawn ZOMBIE*
-checkbox, Undo/Redo/Delete, and a live selection readout. Every hotkey has an
-equivalent button; the two stay in sync. Clicks inside the panel are ignored by the 3D
-viewport (placement/selection only fire for clicks to the right of the panel).
+A solid **left panel** carries the UI so text is readable over the 3D view: a **UI
+scale** slider, view-mode and gizmo-mode toggles, the place-tool buttons + the
+*auto-spawn ZOMBIE* checkbox, Undo/Redo/Delete, and a live selection readout. Every
+hotkey has an equivalent button; the two stay in sync. Clicks inside the panel are
+ignored by the 3D viewport (placement/selection only fire for clicks to the right of
+the panel, whose width tracks the UI scale).
+
+**UI scale.** The toolbar font and layout scale together by a single factor, seeded
+from the display: ~1.0 at 720p, ~1.5 at 1080p, up to 3.0 on a 4K monitor (so the text
+isn't a few pixels tall on a big screen). Adjust it live with the **UI** slider at the
+top of the panel or **Ctrl + `=` / `-`** (range 70 %–300 %).
 
 > The panel is built with **raygui directly** (the engine already owns
 > `RAYGUI_IMPLEMENTATION`), which is the interim before the `Eng_Ui*` facade lands — the

@@ -292,6 +292,27 @@ if (Eng_PickRayGroundY(r, 0.0f, &hit))       … ;                // where on th
 (Hit-testing against *game* world geometry is still game-side — see §3a; these are
 the math/picking primitives that test was missing.)
 
+### collide — `collide.h` (sweep / overlap / penetration math)
+Pure collision primitives — the movement substrate. The engine answers *do these
+volumes touch, when, and how deep*; it does **not** decide the response. The
+character controller (slide, bhop, step-up, friction) is **game-side and pluggable**
+— read these results and apply your own movement, or ignore the module entirely.
+
+```c
+Eng_CollideAABBOverlap(a, b);                              // quick reject
+Vector3 mtv;  Eng_CollideAABBPenetration(a, b, &mtv);      // depenetration (move a by mtv)
+Vector3 push; Eng_CollideSphereAABB(c, r, box, &push);     // sphere/capsule push-out…
+Eng_CollideCapsuleAABB(p0, p1, r, box, &push);
+float t; Vector3 n;
+Eng_CollideSweptAABB(moverBox, vel, box, &t, &n);          // time-of-impact + contact normal
+```
+`Eng_CollideSweptAABB` is the anti-tunnelling workhorse: `vel` is the full-frame
+displacement, `t` is the TOI in [0,1], `n` is the static box's surface normal. A
+mover advances to `t`, kills the into-surface velocity, and re-sweeps the remainder
+— that slide loop is the game's to write. (Returned normals are the static box's
+outward normal; push vectors move the mover out. The engine has no broadphase — you
+iterate your own candidate boxes.)
+
 ### debugdraw — `debugdraw.h` (deferred overlay)
 Toggleable, queued line/box/sphere/3D-text overlay. Submit from anywhere in the
 frame; the queue is drawn once and cleared. Off by default, so calls can live
@@ -332,14 +353,16 @@ and menus are all hand-drawn with these. Load fonts with raylib's `LoadFont*` if
 outgrow the built-in font. The editor draws its property panels / labels the same way.
 
 ### Collision, raycasts & hit detection — game-side geometry
-The engine ships **no raycast, sweep, or collision-query primitive** — *all* spatial
-tests run game-side against the game's own world representation, not an engine
-structure. This covers three things, not just weapons:
+The engine now ships collision *math* — ray tests (§3 `pick.h`) and sweep/overlap/
+penetration (§3 `collide.h`) — but it has **no broadphase, no world, and no
+response/controller**. *What* is solid, *which* candidates to test, and *how* a mover
+or bullet reacts are all game-side. This covers three things, not just weapons:
 
 - **Movement collision:** the game push-resolves the player out of solid colliders
   each tick — `PushOutOfBoxXZ` vs obstacles / interior walls / closed doors
-  (`level.c`, `player.c`), plus `PushOutOfEnemies`. There is no character-controller
-  or capsule-sweep in the engine; you write the resolver.
+  (`level.c`, `player.c`), plus `PushOutOfEnemies`. (This game predates `collide.h`
+  and rolls its own; new movers can lean on `Eng_CollideSweptAABB` /
+  `Eng_CollideCapsuleAABB` instead — but the *controller* is still yours to write.)
 - **Hitscan:** the game derives a fire direction (camera forward + per-pellet
   `Weapon_SpreadDir`) and tests targets with a cheap forward-arc dot + distance
   (`weapons.c`). Bullets-vs-walls use a **Y-aware wall-segment** test (`level.c`);
@@ -375,9 +398,6 @@ one of these, it isn't there yet:
 - **Gizmo manipulation** — there's now picking (§3 `pick.h`) and a debug-draw overlay
   (§3 `debugdraw.h`), but no translate/rotate/scale *handle* widget with drag logic;
   the editor builds that on top of `Eng_PickRay*` + `Eng_Debug*` itself.
-- **Collision / sweep primitive** — no capsule/AABB sweep or cast; movement collision is
-  game-side (§3a). A shared `collide.h` math primitive is planned (the *controller* stays
-  game-side — see the roadmap).
 - **Generic (de)serialization** — `MapDoc` covers the `.map` format only; save-games and
   net payloads are hand-packed.
 - **Async / background asset loading** — `content.h` loaders are main-thread, synchronous.

@@ -45,9 +45,9 @@ multiplayer-movement phase.
   **snapshot delta-compression**, and a **server-tick/broadcast loop** as reusable
   engine services. (Client prediction/reconciliation and the wire *schema* stay
   game-side — that split is correct.)
-- **Collision/sweep primitive** — `collide.h`: capsule/AABB sweep + TOI, so movement
-  tech has a shared substrate. Per the design principle above, this is *math only*;
-  the controller stays game-side.
+- ~~**Collision/sweep primitive** — `collide.h`: capsule/AABB sweep + TOI.~~ **Done**
+  (Phase B) — `Eng_CollideSweptAABB` + overlap/penetration/sphere/capsule push-out.
+  Math only, per the design principle; the controller stays game-side.
 - **Render at scale** — frustum culling + instanced/batched draws + LOD selection in
   `gfx.h`/`eng_render.h`. Many players/projectiles/casings go draw-call-bound fast
   without it.
@@ -72,7 +72,7 @@ multiplayer-movement phase.
 | Phase | Work | Why first |
 |-------|------|-----------|
 | ~~**A**~~ ✅ | `EngConfig` options + `stats.h` profiling | Small, low-risk; unblocks tuning everything after — **shipped** |
-| **B** | `collide.h` sweep/cast primitive | Movement substrate (controller stays game-side/pluggable) |
+| ~~**B**~~ ✅ | `collide.h` sweep/cast primitive | Movement substrate (controller stays game-side/pluggable) — **shipped** |
 | **C** | Editor gizmo + undo/redo command-stack | Completes the in-engine editor |
 | **D** | Netcode depth (raise cap, interpolation, delta-compression, server tick) | The big one; the core of "Krunker-like" |
 | **E** | Render at scale (culling, instancing, LOD) | Revisit once Phase D player counts make it load-bearing |

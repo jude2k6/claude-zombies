@@ -270,6 +270,14 @@ minting new ones with `MapDoc_AllocId` — array indices shift on insert/delete 
 can't serve as identity. The id-addressed editing layer (mutators + undo/redo) lives
 in `mapedit.h` (§3 `mapedit`).
 
+**Generic spawns:** spawn points carry a free-form mob tag the engine never
+interprets — `SPAWN PLAYER x z` for a player start, `SPAWN MOB <tag> x z [LOCKED_BY
+<door>]` for anything else (e.g. `ZOMBIE`). The *game* maps a tag to behaviour, so a
+new mob is a new tag value with no engine/parser change (same "primitives not policy"
+rule as the rest of the engine — see [engine-layers.md](engine-layers.md)). The parser
+guarantees at least one `PLAYER` spawn. This is the data side; how the game spawns and
+gates each tag is game policy (§3a).
+
 ### fx — `fx.h`, `particles.h`, `decals.h`
 Generic camera-shake/trauma, particle emitters, and decals.
 
@@ -360,6 +368,9 @@ into, and what an editor's Ctrl-Z drives.
 int id = EngMapEnt_Add(&doc, ENGMAPENT_PROP);     // mints id, respects MAPDOC_MAX_*; -1 on cap
 Eng_SetPos(&doc, id, x, z);                        // id-addressed mutators (pos: all kinds)
 Eng_SetYaw(&doc, id, deg); Eng_SetScale(&doc, id, s);   // prop; obstacle/sector have size/height setters
+Eng_SetSpawnMob(&doc, id, "ZOMBIE");              // spawn tag: "PLAYER" or any mob name
+Eng_SetWindowDir(&doc, id, "-z");                 // barricade facing (+x/-x/+z/-z)
+Eng_SetSector(&doc, id, sectorIdx);               // owning sector — REQUIRED before save (see below)
 EngMapEnt_Delete(&doc, id);                        // compacts the array; fixes sector index refs
 
 EngMapHistory h; EngMapHistory_Init(&h, ENGMAPHISTORY_DEFAULT_DEPTH);
@@ -374,6 +385,15 @@ hash) and the consecutive same-tag commits overwrite one checkpoint instead of
 stacking — so a whole drag is a single undo step; `tag 0` and any Undo/Redo reset the
 coalesce state. `EngMapEnt_Find` / `EngMapEnt_Ptr` resolve an id to a typed handle for
 custom edits.
+
+Field mutators are per-kind (each returns false for the wrong kind): `Eng_Set/GetPos`
+(all kinds), `Eng_Set/GetYaw` + `Eng_Set/GetScale` (prop), `Eng_Set/GetObstacleSize`,
+`Eng_Set/GetSectorSize` + `Eng_Set/GetSectorHeights`, `Eng_Set/GetSpawnMob` (spawn),
+`Eng_Set/GetWindowDir` (window), and `Eng_Set/GetSector` (every placed kind except
+SECTOR). **Save gotcha:** `MapDoc_Save` only emits entities *inside a SECTOR block* —
+the `.map` grammar has no ungrouped entities — so an entity left at `sectorId == -1`
+(the `EngMapEnt_Add` default) is **silently dropped on save**. Always `Eng_SetSector`
+anything you add to a real sector (e.g. the one under the cursor).
 
 ---
 

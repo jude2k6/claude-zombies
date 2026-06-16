@@ -124,7 +124,7 @@ Eng_RenderBeginPostFX();                // redirect to the screen RT (no-op if p
     … draw the scene via Eng_Gfx* / Anim_Draw …
   Eng_RenderEndWorld();
 Eng_RenderEndPostFX((EngPostFxParams){ .hitFlash=…, .lowHp=…, .time=… });  // composite
-// HUD/UI draw AFTER EndPostFX so they aren't post-processed.
+// HUD/UI draw AFTER EndPostFX so they aren't post-processed (see §3a).
 Eng_RenderClearDepth();                 // e.g. before a first-person viewmodel pass
 Eng_RenderWorldShader() / WorldSkinnedShader()    // handles, e.g. to stamp onto models
 ```
@@ -185,10 +185,17 @@ Eng_InputBind(ACT_FIRE, KEY_NULL, MOUSE_BUTTON_LEFT, ENG_BIND_TRIG_R);
 Eng_InputBind(ACT_RELOAD, KEY_R, -1, GAMEPAD_BUTTON_RIGHT_FACE_UP);
 bool firing  = Eng_InputDown(ACT_FIRE);
 bool reload  = Eng_InputPressed(ACT_RELOAD);          // rising edge
+Vector2 look = Eng_InputLookDelta();                  // {yaw, pitch} this frame — mouse delta or right stick, sensitivity-scaled
 Eng_InputSetLookSensitivity(mouse, pad);
 Eng_InputTickTriggerEdges();                          // once per frame, end of frame
 // Raw readers still available: Pad_Connected/StickX/StickY/Down/Pressed/TriggerL/R.
 ```
+`Eng_InputLookDelta()` is the mouselook primitive: call it in `frame`, add
+`look.x`/`look.y` to your camera yaw/pitch. It already unifies mouse + right-stick
+and applies the sensitivities set above. **Cursor capture is game-side** — the
+engine doesn't grab the mouse for you; toggle raylib's `DisableCursor()` (locked
+mouselook) / `EnableCursor()` (menus) yourself (see `src/game/main.c`).
+
 Re-call `Eng_InputBind` whenever the player rebinds (see `Settings_SyncEngineBindings`
 in the game for the pattern).
 
@@ -222,6 +229,49 @@ Fx_Punch(trauma); Fx_Rumble(lo, hi, secs); Vector3 off = Fx_CameraOffset(&yawJ, 
 Eng_FxEmit((EngEmitterDesc){ … });   Particles_Update(dt); Particles_Draw(cam);
 Eng_FxDecal(ENG_DECAL_SPLAT, pos, normal, size);   Decals_Update(dt); Decals_Draw();
 ```
+
+---
+
+## 3a. What the engine deliberately leaves to the game
+
+Three things a game needs but the engine has **no `Eng_*` API for** — on purpose.
+They're not gaps; they're the game's job. A second module handles them the same way.
+
+### 2D / HUD / text — raw raylib, after post-FX
+There is no `Eng_Gfx2D`/text facade. The `Eng_Gfx*` facade exists only to keep
+**rlgl** out of game code (§1); raylib's own 2D immediate calls are *not* engine-only,
+so the game uses them directly:
+
+```c
+// In draw(), AFTER Eng_RenderEndPostFX() so the HUD isn't post-processed:
+DrawText("AMMO 30", x, y, 20, WHITE);                 // raylib, called from game code
+DrawRectangle(cx - 1, cy - 8, 2, 16, crosshairCol);   // crosshair, bars, panels
+DrawTextureEx(icon, pos, 0, scale, tint);
+```
+
+The game's `hud.c` and `menu.c` are the reference: crosshair, health/ammo, hitmarkers,
+and menus are all hand-drawn with these. Load fonts with raylib's `LoadFont*` if you
+outgrow the built-in font. The editor draws its property panels / labels the same way.
+
+### Weapon hit detection / raycasts — game-side geometry
+The engine ships **no raycast, sweep, or collision-query primitive**. Hitscan, AI
+line-of-sight, and projectile/wall tests are computed by the game against its own
+world representation, not an engine spatial structure:
+
+- The game derives a fire direction (camera forward + per-pellet `Weapon_SpreadDir`)
+  and tests targets with a cheap forward-arc dot product + distance (`weapons.c`).
+- Bullets-vs-walls use the game's own **Y-aware wall-segment** test (`level.c`); door
+  headers/lintels block shots, open doorways don't.
+
+If a second module needs picking (the editor's ray-vs-scene select), it builds the
+ray from the camera and tests against `MapDoc` geometry itself — reuse the shared
+floor-height / region-nav spatial helpers in [multi-floor-maps.md](multi-floor-maps.md) §7.
+
+### Settings persistence — game-side
+Key bindings, sensitivities, and video/audio options are loaded/saved by the game and
+pushed into the engine via `Eng_InputBind` / `Eng_InputSetLookSensitivity` on startup
+and on every rebind (see `Settings_SyncEngineBindings`). The engine holds the live
+action map but never touches disk for you.
 
 ---
 

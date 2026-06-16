@@ -56,6 +56,8 @@ typedef struct {
     MysteryBox  mbox;
     Vector3     mapSpawns[NET_MAX_PLAYERS];
     int         mapSpawnCount;
+    MobSpawn    mapMobSpawns[MAX_MOB_SPAWNS];
+    int         mapMobSpawnCount;
     char        mapName[64];
     MapProp     mapProps[MAX_MAP_PROPS];
     int         mapPropCount;
@@ -113,6 +115,8 @@ extern World g_world;
 #define perkMachineCount      (g_world.perkMachineCount)
 #define mapSpawns             (g_world.mapSpawns)
 #define mapSpawnCount         (g_world.mapSpawnCount)
+// mapMobSpawns / mapMobSpawnCount are accessed explicitly as g_world.X (no
+// alias) — a self-referential alias macro breaks `g_world.mapMobSpawns`.
 #define mapProps              (g_world.mapProps)
 #define mapPropCount          (g_world.mapPropCount)
 #define netMode               (g_world.netMode)

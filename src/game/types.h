@@ -78,6 +78,9 @@
 #define MAX_BOARDS_PER_WIN  5
 #define WINDOW_WIDTH        4.0f
 
+#define MAX_MOB_SPAWNS     32
+#define MOB_TAG_LEN        24
+
 #define SNAPSHOT_HZ        20.0f
 #define INPUT_HZ           30.0f
 
@@ -402,6 +405,18 @@ typedef struct {
     int     repairPlayer;
     int     lockedByDoor;
 } Window3D;
+
+// A runtime mob spawn point (from a `SPAWN MOB <tag>` map line). Generic: the
+// tag drives which system spawns here. `lockedByDoor` gates it (door index, or
+// -1); `climbWindow` is the nearest barricade it should path-to/climb (-1 = none,
+// spawn straight inside) — recovered by proximity at instantiation so the map
+// document stays free of spawn↔window links.
+typedef struct {
+    Vector3 pos;
+    char    mob[MOB_TAG_LEN];
+    int     lockedByDoor;
+    int     climbWindow;
+} MobSpawn;
 
 typedef struct {
     Box  box;

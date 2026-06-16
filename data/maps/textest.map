@@ -61,9 +61,13 @@ SECTOR ground  0 0  80 80  0
 
     # --- Windows --------------------------------------------------------
     WINDOW -18   40   -z
+    SPAWN MOB ZOMBIE -18 45
     WINDOW  40   18   -x
+    SPAWN MOB ZOMBIE 45 18
     WINDOW  18  -40   +z LOCKED_BY central_door
+    SPAWN MOB ZOMBIE 18 -45 LOCKED_BY central_door
     WINDOW -40   -8   +x
+    SPAWN MOB ZOMBIE -45 -8
 
     # --- Perks ----------------------------------------------------------
     PERK  -8  12 JUG

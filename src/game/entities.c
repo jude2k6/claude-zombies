@@ -52,19 +52,24 @@ static ZombieType PickType(int round) {
 }
 
 void Enemies_TrySpawn(int round) {
-    if (g_world.windowCount == 0) return;
-    int accessible[MAX_WINDOWS]; int na = 0;
-    for (int i = 0; i < g_world.windowCount; i++) {
-        int lk = g_world.windows[i].lockedByDoor;
+    // Pick a random accessible ZOMBIE-tagged spawn point (door-gated). Spawning
+    // is now driven by generic mob spawn points, not the window list; a spawn
+    // may be associated with a barricade (climbWindow) to climb on the way in.
+    int accessible[MAX_MOB_SPAWNS]; int na = 0;
+    for (int i = 0; i < g_world.mapMobSpawnCount; i++) {
+        MobSpawn *m = &g_world.mapMobSpawns[i];
+        if (strcmp(m->mob, "ZOMBIE") != 0) continue;
+        int lk = m->lockedByDoor;
         if (lk >= 0 && lk < doorCount && !doors[lk].opened) continue;
         accessible[na++] = i;
     }
     if (na == 0) return;
-    int wi = accessible[rand() % na];
-    Window3D *w = &g_world.windows[wi];
+    MobSpawn *ms = &g_world.mapMobSpawns[accessible[rand() % na]];
+    int climbWin = ms->climbWindow;
 
-    Vector3 spawn = Vector3Subtract(w->pos, Vector3Scale(w->normal, Level_RandRange(4.0f, 6.0f)));
-    spawn = Vector3Add(spawn, Vector3Scale(w->tangent, Level_RandRange(-1.2f, 1.2f)));
+    Vector3 spawn = ms->pos;
+    spawn.x += Level_RandRange(-1.0f, 1.0f);
+    spawn.z += Level_RandRange(-1.0f, 1.0f);
     spawn.y = ENEMY_HEIGHT * 0.5f;
 
     ZombieType t = PickType(round);
@@ -86,10 +91,12 @@ void Enemies_TrySpawn(int round) {
                 .alive = true,
                 .bobPhase = Level_RandRange(0, 6.28f),
                 .speed = spd,
-                .state = ZS_OUTSIDE,
+                // With an associated barricade, walk to it and climb in; without
+                // one, the mob is already inside and heads straight for a player.
+                .state = (climbWin >= 0) ? ZS_OUTSIDE : ZS_INSIDE,
                 .type = t,
-                .targetWindow = wi,
-                .targetPlayer = -1,
+                .targetWindow = climbWin,
+                .targetPlayer = (climbWin >= 0) ? -1 : Player_NearestAlive(spawn),
                 .hasWaypoint = false,
                 // Stagger runner first-lunge so they don't all dash on frame 1
                 .specialTimer = (t == ZT_RUNNER) ? -Level_RandRange(0.5f, 2.5f) : 0.0f,

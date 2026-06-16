@@ -35,9 +35,13 @@ SECTOR bunker  -32 -32  16 16  0
     # All four boarded windows are clustered around the spawn bunker,
     # gated by the door that leads to that side.
     WINDOW -35 -40  +z LOCKED_BY north_door
+    SPAWN MOB ZOMBIE -35 -45 LOCKED_BY north_door
     WINDOW -28 -40  +z LOCKED_BY north_door
+    SPAWN MOB ZOMBIE -28 -45 LOCKED_BY north_door
     WINDOW -40 -35  +x LOCKED_BY east_door
+    SPAWN MOB ZOMBIE -45 -35 LOCKED_BY east_door
     WINDOW -40 -28  +x LOCKED_BY east_door
+    SPAWN MOB ZOMBIE -45 -28 LOCKED_BY east_door
 
     # M1A1-style rifle right next to spawn on the south arena wall
     WALLBUY -32 -39.45  +z  RIFLE

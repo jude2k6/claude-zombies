@@ -30,9 +30,13 @@ SECTOR ground  0 0  80 80  0
     WALLBUY -10   -39.45  +z  RIFLE
 
     WINDOW  -10  40   -z
+    SPAWN MOB ZOMBIE -10 45
     WINDOW   40   -8  -x
+    SPAWN MOB ZOMBIE 45 -8
     WINDOW    8  -40  +z
+    SPAWN MOB ZOMBIE 8 -45
     WINDOW  -40   16  +x LOCKED_BY west_door
+    SPAWN MOB ZOMBIE -45 16 LOCKED_BY west_door
 
     PERK   0  -22 DTAP
     PERK  24  -22 STAMIN

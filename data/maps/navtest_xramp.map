@@ -20,6 +20,7 @@ ARENA 40 20
 SECTOR ground  0 0  80 40  0
     SPAWN PLAYER  0 0
     WINDOW  0 -19.5  +z
+    SPAWN MOB ZOMBIE 0 -24.5
 END
 
 # Sector 1: deckA — west Y4 platform (east of ramp_a)

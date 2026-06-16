@@ -510,6 +510,42 @@ void Level_InstantiateDoc(const MapDoc *doc) {
         };
     }
 
+    // Mob spawns — non-PLAYER spawn points. Resolve LOCKED_BY to a door index
+    // and associate each with the nearest barricade (window) within reach so
+    // the enemy system can have the mob path-to/climb it (the map document
+    // keeps no explicit spawn↔window link; we recover it by proximity here,
+    // after windows are built).
+    g_world.mapMobSpawnCount = 0;
+    for (int i = 0; i < doc->spawnCount; i++) {
+        const MapDocSpawn *s = &doc->spawns[i];
+        if (strcmp(s->mob, "PLAYER") == 0) continue;
+        if (g_world.mapMobSpawnCount >= MAX_MOB_SPAWNS) {
+            fprintf(stderr, "map: warning: too many mob spawns (MAX_MOB_SPAWNS=%d) — ignoring extras\n",
+                    MAX_MOB_SPAWNS);
+            break;
+        }
+        int lockedBy = -1;
+        if (s->lockedBy[0]) {
+            lockedBy = DoorIndexByName(s->lockedBy);
+            if (lockedBy < 0)
+                fprintf(stderr, "map: warning: mob spawn references unknown door '%s'\n", s->lockedBy);
+        }
+        Vector3 pos = { s->x, DocSectorY(doc, s->sectorId, s->x, s->z) + ENEMY_HEIGHT * 0.5f, s->z };
+        int   climb = -1;
+        float best2 = 8.0f * 8.0f;   // associate only if a window is within 8m
+        for (int w = 0; w < g_world.windowCount; w++) {
+            float dx = g_world.windows[w].pos.x - pos.x;
+            float dz = g_world.windows[w].pos.z - pos.z;
+            float d2 = dx * dx + dz * dz;
+            if (d2 < best2) { best2 = d2; climb = w; }
+        }
+        MobSpawn *m = &g_world.mapMobSpawns[g_world.mapMobSpawnCount++];
+        m->pos = pos;
+        snprintf(m->mob, sizeof m->mob, "%s", s->mob);
+        m->lockedByDoor = lockedBy;
+        m->climbWindow  = climb;
+    }
+
     // Obstacles
     for (int i = 0; i < doc->obstacleCount; i++) {
         if (g_world.obstacleCount >= MAX_OBSTACLES) {

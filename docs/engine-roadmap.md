@@ -53,10 +53,10 @@ multiplayer-movement phase.
   without it.
 
 ### Important
-- **Profiling/stats** — `stats.h`: frame time, draw-call count, fixed-steps-per-frame.
-  Load-bearing once netcode/render tuning starts.
-- **`EngConfig` launch options** — vsync / MSAA / FPS-cap / fullscreen are hardcoded
-  in `app.c`; a competitive client needs them configurable.
+- ~~**Profiling/stats** — `stats.h`: frame time, draw-call count, fixed-steps-per-frame.~~
+  **Done** (Phase A) — `stats.h`, `Eng_Stats*`.
+- ~~**`EngConfig` launch options** — vsync / MSAA / FPS-cap / fullscreen.~~ **Done**
+  (Phase A) — `EngConfig{vsync,msaa4x,resizable,fullscreen,fpsCap}`.
 - **Editor: gizmo + undo/redo** — axis-constrained translate/rotate/scale drag handles
   and a command-stack on MapDoc's stable ids. Both engine-agnostic enough to be shared
   utilities (`gizmo.h`), like `pick.h`.
@@ -71,7 +71,7 @@ multiplayer-movement phase.
 
 | Phase | Work | Why first |
 |-------|------|-----------|
-| **A** | `EngConfig` options + `stats.h` profiling | Small, low-risk; unblocks tuning everything after |
+| ~~**A**~~ ✅ | `EngConfig` options + `stats.h` profiling | Small, low-risk; unblocks tuning everything after — **shipped** |
 | **B** | `collide.h` sweep/cast primitive | Movement substrate (controller stays game-side/pluggable) |
 | **C** | Editor gizmo + undo/redo command-stack | Completes the in-engine editor |
 | **D** | Netcode depth (raise cap, interpolation, delta-compression, server tick) | The big one; the core of "Krunker-like" |

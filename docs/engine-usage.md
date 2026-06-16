@@ -93,7 +93,23 @@ historical module prefix (`Audio_*`, `Net_*`, `Pad_*`, `Anim_*`, `Fx_*`,
 `Particles_*`, `Decals_*`, `MapDoc_*`). None take or return a game type.
 
 ### app — `app.h`
-`Eng_Run(cfg, module)`, `EngConfig{w,h,title}`, `GameModule`, `ENG_FIXED_DT`.
+`Eng_Run(cfg, module)`, `GameModule`, `ENG_FIXED_DT`. `EngConfig` is
+`{w, h, title, vsync, msaa4x, resizable, fullscreen, fpsCap}` — the flags map to
+raylib's `SetConfigFlags`/`SetTargetFPS` before window creation (a zero-init config
+is windowed / no-vsync / no-MSAA / fixed-size / uncapped, so set what you want).
+
+### stats — `stats.h` (per-frame instrumentation)
+Frame timing, the fixed-step count drained this frame, and a draw tally — driven by
+the engine each frame; read the getters anywhere (debug HUD, devtools).
+
+```c
+float ft = Eng_StatsFrameTimeMs();   float fps = Eng_StatsFps();
+int   fs = Eng_StatsFixedSteps();    // fixed sim steps last frame (spot sim spikes)
+int   dc = Eng_StatsDrawCalls();     // engine-facade 3D draws last frame
+uint64_t n = Eng_StatsFrameCount();
+```
+The draw tally counts `Eng_Gfx*` 3D draw *submissions* (not raw GL draw calls — rlgl
+batches primitives), so it's the signal for per-entity draw growth, not 2D HUD draws.
 
 ### gfx — `gfx.h` (the GL facade)
 The only place outside `src/engine/` is forbidden from touching rlgl, so all
@@ -359,14 +375,11 @@ one of these, it isn't there yet:
 - **Gizmo manipulation** — there's now picking (§3 `pick.h`) and a debug-draw overlay
   (§3 `debugdraw.h`), but no translate/rotate/scale *handle* widget with drag logic;
   the editor builds that on top of `Eng_PickRay*` + `Eng_Debug*` itself.
-- **Profiling / timing query** — no frame-time / fixed-step-count / draw-call API.
 - **Collision / sweep primitive** — no capsule/AABB sweep or cast; movement collision is
   game-side (§3a). A shared `collide.h` math primitive is planned (the *controller* stays
   game-side — see the roadmap).
 - **Generic (de)serialization** — `MapDoc` covers the `.map` format only; save-games and
   net payloads are hand-packed.
-- **`EngConfig` launch options** — only `{w,h,title}`; vsync / MSAA / resizable /
-  fullscreen-at-launch / FPS cap are hardcoded in `app.c`, not parameterised.
 - **Async / background asset loading** — `content.h` loaders are main-thread, synchronous.
 - **gfx convenience draws** — no billboard or bounding-box helper in the `Eng_Gfx*` facade.
 - **Multiplayer netcode depth** — `net.h` is raw transport (`NET_MAX_PLAYERS == 4`); no

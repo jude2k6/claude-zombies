@@ -1,6 +1,8 @@
 #ifndef SHOOTER_APP_H
 #define SHOOTER_APP_H
 
+#include <stdbool.h>
+
 // ============================================================================
 //  Engine application host (Phase 6 of the engine/game split).
 //
@@ -11,9 +13,20 @@
 //  plain function pointers, so app.c needs no game type.
 // ============================================================================
 
+// Window / presentation config. The bool flags and fpsCap map to raylib's
+// SetConfigFlags / SetTargetFPS applied before window creation, so the host
+// (not the engine) decides them — a competitive client wants uncapped/high
+// refresh, the editor wants a plain resizable tool window. A zero-initialised
+// config is windowed, no-vsync, no-MSAA, fixed-size, uncapped; set the fields
+// you want explicitly.
 typedef struct {
     int         w, h;
     const char *title;
+    bool        vsync;       // cap present rate to the display refresh
+    bool        msaa4x;      // request 4x MSAA
+    bool        resizable;   // resizable window
+    bool        fullscreen;  // start in fullscreen mode
+    int         fpsCap;      // SetTargetFPS value; 0 = uncapped
 } EngConfig;
 
 // The game's callback vtable. The engine wraps each frame's draw step in

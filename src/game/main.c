@@ -522,7 +522,8 @@ int main(int argc, char **argv) {
     int devExitCode = 0;
     if (Devtools_HandleCLI(argc, argv, &devExitCode)) return devExitCode;
 
-    EngConfig cfg = { .w = WINDOW_W_DEFAULT, .h = WINDOW_H_DEFAULT, .title = "Claude Zombies" };
+    EngConfig cfg = { .w = WINDOW_W_DEFAULT, .h = WINDOW_H_DEFAULT, .title = "Claude Zombies",
+                      .vsync = true, .msaa4x = true, .resizable = true, .fpsCap = 60 };
     Eng_Run(&cfg, Game_Module());
     return 0;
 }

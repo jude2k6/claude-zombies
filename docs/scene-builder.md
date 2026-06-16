@@ -86,9 +86,28 @@ build/editor --check [map]         # headless: parse, build proxies, print count
 loads a map and reports entity counts without opening a window, so the editor stays
 buildable-and-loadable in headless environments.
 
-**Controls (skeleton):** hold **RMB** to mouselook, **WASD/Q/E** to fly (Shift = fast);
-**LMB** select or drag a translate handle; **1/2/3** switch gizmo mode (only translate
-drags for now); **Ctrl+Z / Ctrl+Y** undo / redo.
+### View modes
+
+The editor opens in the **isometric** view. Switch with **F1 / F2 / F3**:
+
+| Key | View | Projection | Navigation |
+|-----|------|-----------|------------|
+| **F1** | Fly (no-clip) | perspective | hold **RMB** to mouselook, **WASD/Q/E** to fly (Shift = fast) |
+| **F2** | Isometric orbit | orthographic | **RMB-drag** rotates the viewpoint, **MMB-drag** pans, **wheel** zooms |
+| **F3** | Top-down | orthographic | north-up; **MMB-drag** pans, **wheel** zooms |
+
+All three share one set of look angles (`yaw`/`pitch`) and an orbit `focus`, so
+toggling between them keeps you looking at roughly the same place — the fly cam tracks
+a focus 20 u ahead, and the ortho views pivot around it. Orthographic projection is
+what gives top-down and isometric their flat, distortion-free "blueprint" feel; picking
+and the gizmo work unchanged under it because `Eng_PickRayFromScreen`
+(`GetScreenToWorldRayEx`) builds a correct ray for an ortho camera, and handle sizing
+switches from distance-based (fly) to zoom-based (ortho).
+
+**Editing controls (all views):** **LMB** select or drag a translate handle; **1/2/3**
+switch gizmo mode (only translate drags for now); **Ctrl+Z / Ctrl+Y** undo / redo.
+Selection/drag is suppressed while a camera button (RMB/MMB) is held so navigation
+clicks don't double as edits.
 
 ## 5. Roadmap (this tool)
 

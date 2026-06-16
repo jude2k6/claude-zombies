@@ -51,14 +51,22 @@ typedef struct {
     Color         col;
 } EdProxy;
 
+// View modes. FLY is the free no-clip camera (perspective); ORBIT and TOP are
+// orthographic editor views around a focus point. yaw/pitch are shared by all
+// modes so switching is seamless.
+typedef enum { ED_VIEW_FLY = 0, ED_VIEW_ORBIT, ED_VIEW_TOP } EdViewMode;
+
 static struct {
     char          path[512];
     MapDoc        doc;
     EngMapHistory hist;
 
     Camera3D      cam;
-    float         yaw, pitch;       // fly-cam look angles
-    bool          looking;          // RMB held → mouselook
+    EdViewMode    view;
+    float         yaw, pitch;       // shared look angles (fly + orbit)
+    bool          looking;          // fly: RMB held → mouselook
+    Vector3       focus;            // orbit/top: point the view pivots around
+    float         orthoH;           // orbit/top: orthographic view height (zoom)
 
     int           selectedId;       // -1 = nothing selected
     EngGizmoMode  mode;             // current gizmo mode
@@ -190,9 +198,42 @@ static bool SelectedOrigin(Vector3 *out) {
     return true;
 }
 
-// ---- fly camera ------------------------------------------------------------
+// ---- cameras (fly / orbit / top) -------------------------------------------
 
-static void UpdateFlyCam(float dt) {
+#define ED_ORBIT_DIST 200.0f   // ortho eye distance (apparent size is fovy, not this)
+
+static Vector3 ForwardFrom(float yaw, float pitch) {
+    return (Vector3){ cosf(pitch) * sinf(yaw), sinf(pitch), -cosf(pitch) * cosf(yaw) };
+}
+
+// View basis (right, up) for a forward dir; guards the top-down singularity
+// where forward is parallel to world-up by falling back to -Z as the up ref.
+static void ViewBasis(Vector3 fwd, Vector3 *right, Vector3 *up) {
+    Vector3 worldUp = (fabsf(fwd.y) > 0.999f) ? (Vector3){ 0, 0, -1 } : (Vector3){ 0, 1, 0 };
+    *right = Vector3Normalize(Vector3CrossProduct(fwd, worldUp));
+    *up    = Vector3Normalize(Vector3CrossProduct(*right, fwd));
+}
+
+// Switch view mode, carrying the look angles across so the cut is seamless:
+// entering an ortho view pivots around the current focus; entering fly places
+// the eye back where the ortho camera was looking from.
+static void SwitchView(EdViewMode m) {
+    if (m == ed.view) return;
+    if (m == ED_VIEW_FLY) {
+        // Un-pin a straight-down top view so the fly cam is usable.
+        if (ed.view == ED_VIEW_TOP) ed.pitch = -1.2f;
+        Vector3 fwd = ForwardFrom(ed.yaw, ed.pitch);
+        ed.cam.position = Vector3Subtract(ed.focus, Vector3Scale(fwd, 20.0f));
+        if (ed.looking) { ed.looking = false; EnableCursor(); }
+    } else if (m == ED_VIEW_TOP) {
+        ed.pitch = -PI * 0.5f;               // straight down (north-up)
+    } else if (m == ED_VIEW_ORBIT && ed.view == ED_VIEW_TOP) {
+        ed.pitch = -0.9f;                    // restore an isometric tilt
+    }
+    ed.view = m;
+}
+
+static void UpdateCamFly(float dt) {
     if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)) { ed.looking = true;  DisableCursor(); }
     if (IsMouseButtonReleased(MOUSE_BUTTON_RIGHT)){ ed.looking = false; EnableCursor();  }
 
@@ -204,7 +245,7 @@ static void UpdateFlyCam(float dt) {
         if (ed.pitch < -1.55f) ed.pitch = -1.55f;
     }
 
-    Vector3 fwd   = { cosf(ed.pitch) * sinf(ed.yaw), sinf(ed.pitch), -cosf(ed.pitch) * cosf(ed.yaw) };
+    Vector3 fwd   = ForwardFrom(ed.yaw, ed.pitch);
     Vector3 right = { cosf(ed.yaw), 0, sinf(ed.yaw) };
     Vector3 up    = { 0, 1, 0 };
     Vector3 move  = { 0 };
@@ -219,7 +260,63 @@ static void UpdateFlyCam(float dt) {
     float speed = IsKeyDown(KEY_LEFT_SHIFT) ? 40.0f : 16.0f;
     if (Vector3LengthSqr(move) > 1e-4f)
         ed.cam.position = Vector3Add(ed.cam.position, Vector3Scale(Vector3Normalize(move), speed * dt));
-    ed.cam.target = Vector3Add(ed.cam.position, fwd);
+
+    ed.cam.target     = Vector3Add(ed.cam.position, fwd);
+    ed.cam.up         = up;
+    ed.cam.fovy       = 60.0f;
+    ed.cam.projection = CAMERA_PERSPECTIVE;
+    // Keep the orbit focus tracking what the fly cam looks at, so toggling to
+    // an ortho view pivots around roughly what was on screen.
+    ed.focus = Vector3Add(ed.cam.position, Vector3Scale(fwd, 20.0f));
+}
+
+// Orbit (isometric) + top-down share this: an orthographic view that pivots
+// around `focus`. `allowRotate` is false for the locked top-down view.
+static void UpdateCamOrtho(int sw, int sh, bool allowRotate) {
+    // Rotate the viewpoint by dragging RMB (orbit only).
+    if (allowRotate && IsMouseButtonDown(MOUSE_BUTTON_RIGHT)) {
+        Vector2 md = GetMouseDelta();
+        ed.yaw   += md.x * 0.005f;
+        ed.pitch -= md.y * 0.005f;
+        if (ed.pitch < -1.55f) ed.pitch = -1.55f;
+        if (ed.pitch >  1.55f) ed.pitch =  1.55f;
+    }
+
+    Vector3 fwd = (ed.view == ED_VIEW_TOP) ? (Vector3){ 0, -1, 0 }
+                                           : ForwardFrom(ed.yaw, ed.pitch);
+    Vector3 right, up;
+    ViewBasis(fwd, &right, &up);
+
+    // Pan the focus by dragging MMB (grab-the-canvas).
+    if (IsMouseButtonDown(MOUSE_BUTTON_MIDDLE)) {
+        Vector2 md = GetMouseDelta();
+        float wpp = ed.orthoH / (float)sh;   // world units per screen pixel
+        ed.focus = Vector3Add(ed.focus, Vector3Scale(right, -md.x * wpp));
+        ed.focus = Vector3Add(ed.focus, Vector3Scale(up,     md.y * wpp));
+    }
+
+    // Zoom with the wheel (ortho height).
+    float wheel = GetMouseWheelMove();
+    if (wheel != 0.0f) {
+        ed.orthoH *= (1.0f - wheel * 0.1f);
+        if (ed.orthoH <   2.0f) ed.orthoH =   2.0f;
+        if (ed.orthoH > 400.0f) ed.orthoH = 400.0f;
+    }
+
+    ed.cam.position   = Vector3Subtract(ed.focus, Vector3Scale(fwd, ED_ORBIT_DIST));
+    ed.cam.target     = ed.focus;
+    ed.cam.up         = up;
+    ed.cam.fovy       = ed.orthoH;
+    ed.cam.projection = CAMERA_ORTHOGRAPHIC;
+    (void)sw;
+}
+
+static void EdUpdateCamera(float dt, int sw, int sh) {
+    switch (ed.view) {
+        case ED_VIEW_FLY:   UpdateCamFly(dt);                  break;
+        case ED_VIEW_ORBIT: UpdateCamOrtho(sw, sh, true);      break;
+        case ED_VIEW_TOP:   UpdateCamOrtho(sw, sh, false);     break;
+    }
 }
 
 // ---- pick selection --------------------------------------------------------
@@ -241,11 +338,18 @@ static void PickSelection(int sw, int sh) {
 
 static uint32_t g_nextTag = 1;
 
-static void UpdateGizmo(int sw, int sh) {
+// Apparent handle size: perspective scales with distance; ortho with zoom.
+static float GizmoHandleSize(Vector3 origin) {
+    if (ed.view == ED_VIEW_FLY)
+        return Vector3Distance(ed.cam.position, origin) * 0.12f + 0.5f;
+    return ed.orthoH * 0.06f + 0.5f;
+}
+
+static void UpdateGizmo(int sw, int sh, bool allowGrab) {
     Vector3 origin;
     if (!SelectedOrigin(&origin)) { ed.dragging = false; return; }
 
-    float handleSize = Vector3Distance(ed.cam.position, origin) * 0.12f + 0.5f;
+    float handleSize = GizmoHandleSize(origin);
     Vector2 mouse = GetMousePosition();
 
     if (!ed.dragging) {
@@ -253,7 +357,7 @@ static void UpdateGizmo(int sw, int sh) {
         Eng_GizmoDebugDraw(origin, ed.mode, handleSize, hot);
 
         // Start a drag if the user presses on a handle (translate only for now).
-        if (hot != ENG_GIZMO_AXIS_NONE && IsMouseButtonPressed(MOUSE_BUTTON_LEFT) &&
+        if (allowGrab && hot != ENG_GIZMO_AXIS_NONE && IsMouseButtonPressed(MOUSE_BUTTON_LEFT) &&
             ed.mode == ENG_GIZMO_TRANSLATE) {
             ed.drag = Eng_GizmoBeginDrag(ed.cam, mouse, sw, sh, origin, ed.mode, hot);
             if (ed.drag.axis != ENG_GIZMO_AXIS_NONE) {
@@ -291,14 +395,23 @@ static void EdInit(void) {
 
     ed.cam = (Camera3D){ .position = { 0, 24, 28 }, .target = { 0, 0, 0 },
                          .up = { 0, 1, 0 }, .fovy = 60.0f, .projection = CAMERA_PERSPECTIVE };
-    ed.yaw = 0.0f; ed.pitch = -0.6f;
+    ed.view   = ED_VIEW_ORBIT;     // start in the isometric editor view
+    ed.yaw    = PI * 0.25f;        // 45° azimuth
+    ed.pitch  = -0.6f;             // ~34° down → isometric-ish
+    ed.focus  = (Vector3){ 0, 0, 0 };
+    ed.orthoH = 40.0f;
     ed.selectedId = -1;
     ed.mode = ENG_GIZMO_TRANSLATE;
 }
 
 static void EdFrame(float dt, int sw, int sh) {
     RebuildProxies();
-    UpdateFlyCam(dt);
+
+    // View-mode hotkeys: F1 fly (no-clip), F2 isometric orbit, F3 top-down.
+    if (IsKeyPressed(KEY_F1)) SwitchView(ED_VIEW_FLY);
+    if (IsKeyPressed(KEY_F2)) SwitchView(ED_VIEW_ORBIT);
+    if (IsKeyPressed(KEY_F3)) SwitchView(ED_VIEW_TOP);
+    EdUpdateCamera(dt, sw, sh);
 
     // Gizmo mode hotkeys.
     if (IsKeyPressed(KEY_ONE))   ed.mode = ENG_GIZMO_TRANSLATE;
@@ -310,18 +423,22 @@ static void EdFrame(float dt, int sw, int sh) {
     if (ctrl && IsKeyPressed(KEY_Z)) EngMapHistory_Undo(&ed.hist, &ed.doc);
     if (ctrl && IsKeyPressed(KEY_Y)) EngMapHistory_Redo(&ed.hist, &ed.doc);
 
+    // The camera is being driven when fly-looking or while orbit/pan buttons are
+    // held — suppress selection/gizmo-grab so those clicks don't double up.
+    bool camBusy = ed.looking || IsMouseButtonDown(MOUSE_BUTTON_RIGHT) ||
+                   IsMouseButtonDown(MOUSE_BUTTON_MIDDLE);
+
     // Left-click selects when not interacting with a gizmo handle/drag.
-    if (!ed.looking && !ed.dragging && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-        Vector3 origin; float hs = 0;
+    if (!camBusy && !ed.dragging && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+        Vector3 origin;
         EngGizmoAxis hot = ENG_GIZMO_AXIS_NONE;
-        if (SelectedOrigin(&origin)) {
-            hs = Vector3Distance(ed.cam.position, origin) * 0.12f + 0.5f;
-            hot = Eng_GizmoHitTest(ed.cam, GetMousePosition(), sw, sh, origin, ed.mode, hs);
-        }
+        if (SelectedOrigin(&origin))
+            hot = Eng_GizmoHitTest(ed.cam, GetMousePosition(), sw, sh, origin, ed.mode,
+                                   GizmoHandleSize(origin));
         if (hot == ENG_GIZMO_AXIS_NONE) PickSelection(sw, sh);
     }
 
-    if (!ed.looking) UpdateGizmo(sw, sh);
+    UpdateGizmo(sw, sh, !camBusy);
 }
 
 static void EdDraw(int sw, int sh) {
@@ -347,13 +464,18 @@ static void EdDraw(int sw, int sh) {
     // docs/engine-layers.md Open #1).
     const char *modeName = ed.mode == ENG_GIZMO_TRANSLATE ? "TRANSLATE"
                          : ed.mode == ENG_GIZMO_ROTATE    ? "ROTATE" : "SCALE";
-    DrawText(TextFormat("%s   ents:%d   %s", ed.path, ed.proxyCount, modeName), 10, 10, 18, RAYWHITE);
+    const char *viewName = ed.view == ED_VIEW_FLY ? "FLY(noclip)"
+                         : ed.view == ED_VIEW_ORBIT ? "ISO(orbit)" : "TOP";
+    DrawText(TextFormat("%s   ents:%d   view:%s   gizmo:%s",
+             ed.path, ed.proxyCount, viewName, modeName), 10, 10, 18, RAYWHITE);
     if (ed.selectedId >= 0) {
         EngMapEntKind k; EngMapEnt_Ptr(&ed.doc, EngMapEnt_Find(&ed.doc, ed.selectedId), &k);
         DrawText(TextFormat("selected: #%d (%s)", ed.selectedId, KindName(k)), 10, 32, 18, YELLOW);
     }
-    DrawText("RMB+WASDQE fly  LMB select/drag  1/2/3 mode  Ctrl+Z/Y undo/redo",
-             10, sh - 24, 16, (Color){ 170, 175, 185, 255 });
+    const char *help = ed.view == ED_VIEW_FLY
+        ? "F1/F2/F3 view  RMB+WASDQE fly  LMB select/drag  1/2/3 gizmo  Ctrl+Z/Y undo"
+        : "F1/F2/F3 view  RMB orbit  MMB pan  wheel zoom  LMB select/drag  Ctrl+Z/Y undo";
+    DrawText(help, 10, sh - 24, 16, (Color){ 170, 175, 185, 255 });
     (void)sw;
 }
 

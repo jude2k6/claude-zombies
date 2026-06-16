@@ -57,9 +57,11 @@ multiplayer-movement phase.
   **Done** (Phase A) — `stats.h`, `Eng_Stats*`.
 - ~~**`EngConfig` launch options** — vsync / MSAA / FPS-cap / fullscreen.~~ **Done**
   (Phase A) — `EngConfig{vsync,msaa4x,resizable,fullscreen,fpsCap}`.
-- **Editor: gizmo + undo/redo** — axis-constrained translate/rotate/scale drag handles
-  and a command-stack on MapDoc's stable ids. Both engine-agnostic enough to be shared
-  utilities (`gizmo.h`), like `pick.h`.
+- ~~**Editor: gizmo + undo/redo** — axis-constrained translate/rotate/scale drag handles
+  and a command-stack on MapDoc's stable ids.~~ **Done** (Phase C) — `gizmo.h`
+  (`Eng_GizmoHitTest`/`BeginDrag`/`UpdateDrag`, pure handle math like `pick.h`) +
+  `mapedit.h` (id-addressed mutators + `EngMapHistory` snapshot undo/redo with drag
+  coalescing). Both engine-agnostic, controller/UI policy stays game-side.
 - **Async asset loading** — for streamed community maps/cosmetics without frame hitches.
 
 ### Nice-to-have
@@ -73,7 +75,7 @@ multiplayer-movement phase.
 |-------|------|-----------|
 | ~~**A**~~ ✅ | `EngConfig` options + `stats.h` profiling | Small, low-risk; unblocks tuning everything after — **shipped** |
 | ~~**B**~~ ✅ | `collide.h` sweep/cast primitive | Movement substrate (controller stays game-side/pluggable) — **shipped** |
-| **C** | Editor gizmo + undo/redo command-stack | Completes the in-engine editor |
+| ~~**C**~~ ✅ | Editor gizmo + undo/redo command-stack | Completes the in-engine editor — **shipped** (`gizmo.h` + `mapedit.h`) |
 | **D** | Netcode depth (raise cap, interpolation, delta-compression, server tick) | The big one; the core of "Krunker-like" |
 | **E** | Render at scale (culling, instancing, LOD) | Revisit once Phase D player counts make it load-bearing |
 | **F** | Async loading, audio voice-budget, serialization, gfx helpers | Polish |

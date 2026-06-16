@@ -267,7 +267,8 @@ assigns fresh monotonic ids and sets `doc.nextId`. IDs are **runtime-only** — 
 serialised by `MapDoc_Save` and ignored by `MapDoc_Equal` (so the round-trip stays
 intact). The editor uses them as persistent handles for selection / undo / drag,
 minting new ones with `MapDoc_AllocId` — array indices shift on insert/delete and
-can't serve as identity.
+can't serve as identity. The id-addressed editing layer (mutators + undo/redo) lives
+in `mapedit.h` (§3 `mapedit`).
 
 ### fx — `fx.h`, `particles.h`, `decals.h`
 Generic camera-shake/trauma, particle emitters, and decals.
@@ -328,6 +329,51 @@ Eng_DebugDrawLabels(cam);                               // 2D text, AFTER EndMod
 ```
 Order matters: shapes (`Eng_DebugDraw3D`) inside `Mode3D`, labels
 (`Eng_DebugDrawLabels`) after. Both clear their queues even when disabled.
+
+### gizmo — `gizmo.h` (transform-handle interaction math)
+Pure, stateless manipulation math for a translate/rotate/scale gizmo — the editor
+analogue of `pick.h`. It answers *which handle is under the cursor* and *given mouse
+motion, what constrained delta results*; it owns **no** selection, MapDoc, or camera.
+Modes `ENG_GIZMO_TRANSLATE/ROTATE/SCALE`; handles `ENG_GIZMO_AXIS_X/Y/Z` plus the
+planar `_XY/_YZ/_XZ`.
+
+```c
+EngGizmoAxis hot = Eng_GizmoHitTest(cam, mouse, w, h, origin, mode, handleSize);
+EngGizmoDrag d   = Eng_GizmoBeginDrag(cam, mouse, w, h, origin, mode, hot);  // on mouse-down
+EngGizmoDelta mv = Eng_GizmoUpdateDrag(d, cam, mouse, w, h);                 // each frame
+// mv is accumulated SINCE grab — recompute newTransform = original + mv (drift-free).
+Eng_GizmoDebugDraw(origin, mode, handleSize, hot);   // optional: draw handles via debugdraw
+```
+The delta is **absolute since grab**, not per-frame: the caller rebuilds the
+transform from the entity's pre-drag value each frame, so there's no accumulated
+float drift. Translate returns a signed axis distance / plane offset, rotate a signed
+angle (radians) about the axis, scale a factor. The pure helpers
+`Eng_GizmoClosestPointOnAxis` / `Eng_GizmoAngleInPlane` are camera-free (headless-testable);
+the screen→ray step reuses `Eng_PickRayFromScreen` (§3 `pick.h`).
+
+### mapedit — `mapedit.h` (id-addressed edits + undo/redo)
+Stdlib-only companion to `mapdoc.h`: edit a `MapDoc` by **stable id** (not fragile
+array index) and a **snapshot** undo/redo history. This is what a gizmo drag writes
+into, and what an editor's Ctrl-Z drives.
+
+```c
+int id = EngMapEnt_Add(&doc, ENGMAPENT_PROP);     // mints id, respects MAPDOC_MAX_*; -1 on cap
+Eng_SetPos(&doc, id, x, z);                        // id-addressed mutators (pos: all kinds)
+Eng_SetYaw(&doc, id, deg); Eng_SetScale(&doc, id, s);   // prop; obstacle/sector have size/height setters
+EngMapEnt_Delete(&doc, id);                        // compacts the array; fixes sector index refs
+
+EngMapHistory h; EngMapHistory_Init(&h, ENGMAPHISTORY_DEFAULT_DEPTH);
+EngMapHistory_Commit(&h, &doc, 0);                 // checkpoint (tag 0 = distinct step)
+if (EngMapHistory_Undo(&h, &doc)) …                // writes prior snapshot into doc
+EngMapHistory_Free(&h);
+```
+History stores full `MapDoc` snapshots (type-agnostic, always correct since MapDoc is
+flat POD) at a fixed depth ring. A no-op commit (equal by `MapDoc_Equal`) is dropped.
+**Coalescing:** commit a drag every frame under a non-zero `tag` (e.g. `"drag:42"`'s
+hash) and the consecutive same-tag commits overwrite one checkpoint instead of
+stacking — so a whole drag is a single undo step; `tag 0` and any Undo/Redo reset the
+coalesce state. `EngMapEnt_Find` / `EngMapEnt_Ptr` resolve an id to a typed handle for
+custom edits.
 
 ---
 
@@ -395,9 +441,6 @@ action map but never touches disk for you.
 Genuinely absent — not a deliberate game-side punt, just unbuilt. If you reach for
 one of these, it isn't there yet:
 
-- **Gizmo manipulation** — there's now picking (§3 `pick.h`) and a debug-draw overlay
-  (§3 `debugdraw.h`), but no translate/rotate/scale *handle* widget with drag logic;
-  the editor builds that on top of `Eng_PickRay*` + `Eng_Debug*` itself.
 - **Generic (de)serialization** — `MapDoc` covers the `.map` format only; save-games and
   net payloads are hand-packed.
 - **Async / background asset loading** — `content.h` loaders are main-thread, synchronous.

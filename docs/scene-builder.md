@@ -109,6 +109,19 @@ switch gizmo mode (only translate drags for now); **Ctrl+Z / Ctrl+Y** undo / red
 Selection/drag is suppressed while a camera button (RMB/MMB) is held so navigation
 clicks don't double as edits.
 
+### Toolbar
+
+A solid **left panel** (220 px) carries the UI so text is readable over the 3D view:
+view-mode and gizmo-mode toggles, the place-tool buttons + the *auto-spawn ZOMBIE*
+checkbox, Undo/Redo/Delete, and a live selection readout. Every hotkey has an
+equivalent button; the two stay in sync. Clicks inside the panel are ignored by the 3D
+viewport (placement/selection only fire for clicks to the right of the panel).
+
+> The panel is built with **raygui directly** (the engine already owns
+> `RAYGUI_IMPLEMENTATION`), which is the interim before the `Eng_Ui*` facade lands — the
+> editor is meant to *dogfood* that facade (see [engine-layers.md](engine-layers.md)
+> Open #1 + step 1). When the facade exists, this panel is the first thing to port onto it.
+
 ### Placing spawns & barricades
 
 | Key / action | Effect |

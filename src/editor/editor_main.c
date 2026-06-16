@@ -22,6 +22,7 @@
 
 #include "raylib.h"
 #include "raymath.h"
+#include "raygui.h"   // UI only; RAYGUI_IMPLEMENTATION lives in engine/app.c
 
 #include "app.h"
 #include "mapdoc.h"
@@ -34,6 +35,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
+
+#define ED_PANEL_W 220   // left toolbar width (px); 3D viewport is to its right
 
 // ---- editor state (single instance; the editor is a single document tool) --
 
@@ -528,10 +531,12 @@ static void EdFrame(float dt, int sw, int sh) {
 
     // The camera is being driven when fly-looking or while orbit/pan buttons are
     // held — suppress selection/placement so those clicks don't double up.
+    // Also ignore 3D clicks that land on the toolbar (the panel owns them).
+    bool overPanel = (GetMousePosition().x < ED_PANEL_W);
     bool camBusy = ed.looking || IsMouseButtonDown(MOUSE_BUTTON_RIGHT) ||
                    IsMouseButtonDown(MOUSE_BUTTON_MIDDLE);
 
-    if (!camBusy && !ed.dragging && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+    if (!camBusy && !overPanel && !ed.dragging && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
         if (ed.placeTool != ED_PLACE_NONE) {
             // Placement mode: drop the tool's entity where the cursor ray meets
             // the ground plane.
@@ -549,8 +554,98 @@ static void EdFrame(float dt, int sw, int sh) {
         }
     }
 
-    // The gizmo only grabs in select mode (not while placing).
-    UpdateGizmo(sw, sh, !camBusy && ed.placeTool == ED_PLACE_NONE);
+    // The gizmo only grabs in select mode (not while placing, not over the panel).
+    UpdateGizmo(sw, sh, !camBusy && !overPanel && ed.placeTool == ED_PLACE_NONE);
+}
+
+// ---- toolbar (raygui left panel) -------------------------------------------
+
+// One stacked, full-width tool button with a gold accent bar when active.
+static bool ToolRow(float x, float y, float w, const char *label, bool active) {
+    if (active) DrawRectangleRec((Rectangle){ x - 5, y, 3, 24 }, (Color){ 230, 180, 60, 255 });
+    return GuiButton((Rectangle){ x, y, w, 24 }, label);
+}
+
+static void DrawToolPanel(int sh) {
+    const float X = 10, W = ED_PANEL_W - 20;
+    DrawRectangle(0, 0, ED_PANEL_W, sh, (Color){ 24, 27, 34, 255 });
+    DrawRectangle(ED_PANEL_W - 1, 0, 1, sh, (Color){ 60, 66, 80, 255 });
+
+    float y = 10;
+    DrawText("SCENE BUILDER", (int)X, (int)y, 20, (Color){ 230, 200, 120, 255 }); y += 26;
+    const char *base = GetFileName(ed.path);
+    DrawText(TextFormat("%s   (%d ents)", base, ed.proxyCount), (int)X, (int)y, 12,
+             (Color){ 170, 175, 185, 255 }); y += 22;
+
+    // View mode (orbit / top / fly).
+    GuiLabel((Rectangle){ X, y, W, 16 }, "VIEW"); y += 18;
+    int v = (int)ed.view;
+    GuiToggleGroup((Rectangle){ X, y, (W - 8) / 3.0f, 24 }, "Fly;Iso;Top", &v);
+    if (v != (int)ed.view) SwitchView((EdViewMode)v);
+    y += 34;
+
+    // Gizmo mode.
+    GuiLabel((Rectangle){ X, y, W, 16 }, "GIZMO (move drag only)"); y += 18;
+    int g = (int)ed.mode;
+    GuiToggleGroup((Rectangle){ X, y, (W - 8) / 3.0f, 24 }, "Move;Rot;Scale", &g);
+    ed.mode = (EngGizmoMode)g;
+    y += 34;
+
+    // Placement tool.
+    GuiLabel((Rectangle){ X, y, W, 16 }, "PLACE (click ground)"); y += 18;
+    struct { const char *label; EdPlaceTool tool; } tools[] = {
+        { "Select / move",  ED_PLACE_NONE },
+        { "Player spawn",   ED_PLACE_PLAYER },
+        { "Zombie spawn",   ED_PLACE_ZOMBIE },
+        { "Barricade",      ED_PLACE_BARRICADE },
+    };
+    for (int i = 0; i < 4; i++) {
+        if (ToolRow(X, y, W, tools[i].label, ed.placeTool == tools[i].tool))
+            ed.placeTool = tools[i].tool;
+        y += 28;
+    }
+    GuiCheckBox((Rectangle){ X, y, 18, 18 }, " auto-spawn ZOMBIE", &ed.barricadeAutoSpawn);
+    y += 30;
+
+    // Edit actions.
+    GuiLabel((Rectangle){ X, y, W, 16 }, "EDIT"); y += 18;
+    float hw = (W - 6) / 2.0f;
+    if (!EngMapHistory_CanUndo(&ed.hist)) GuiSetState(STATE_DISABLED);
+    if (GuiButton((Rectangle){ X, y, hw, 24 }, "Undo")) EngMapHistory_Undo(&ed.hist, &ed.doc);
+    GuiSetState(STATE_NORMAL);
+    if (!EngMapHistory_CanRedo(&ed.hist)) GuiSetState(STATE_DISABLED);
+    if (GuiButton((Rectangle){ X + hw + 6, y, hw, 24 }, "Redo")) EngMapHistory_Redo(&ed.hist, &ed.doc);
+    GuiSetState(STATE_NORMAL);
+    y += 30;
+    if (ed.selectedId < 0) GuiSetState(STATE_DISABLED);
+    if (GuiButton((Rectangle){ X, y, W, 24 }, "Delete selected") && ed.selectedId >= 0) {
+        EngMapEnt_Delete(&ed.doc, ed.selectedId); ed.selectedId = -1; CommitEdit();
+    }
+    GuiSetState(STATE_NORMAL);
+    y += 36;
+
+    // Selection readout.
+    GuiLabel((Rectangle){ X, y, W, 16 }, "SELECTION"); y += 18;
+    if (ed.selectedId >= 0) {
+        EngMapEntKind k; EngMapEnt_Ptr(&ed.doc, EngMapEnt_Find(&ed.doc, ed.selectedId), &k);
+        DrawText(TextFormat("#%d  %s", ed.selectedId, KindName(k)), (int)X, (int)y, 16, YELLOW); y += 20;
+        if (k == ENGMAPENT_SPAWN) {
+            char m[MAPDOC_SPAWN_MOB_LEN]; Eng_GetSpawnMob(&ed.doc, ed.selectedId, m, sizeof m);
+            DrawText(TextFormat("mob: %s", m), (int)X, (int)y, 14, RAYWHITE); y += 18;
+            DrawText("[R] flip PLAYER/ZOMBIE", (int)X, (int)y, 12, (Color){ 150, 155, 165, 255 }); y += 18;
+        } else if (k == ENGMAPENT_WINDOW) {
+            char d[4]; Eng_GetWindowDir(&ed.doc, ed.selectedId, d, sizeof d);
+            DrawText(TextFormat("facing: %s", d), (int)X, (int)y, 14, RAYWHITE); y += 18;
+            DrawText("[R] rotate facing", (int)X, (int)y, 12, (Color){ 150, 155, 165, 255 }); y += 18;
+        }
+    } else {
+        DrawText("(nothing selected)", (int)X, (int)y, 14, (Color){ 130, 135, 145, 255 });
+    }
+
+    // Nav hint pinned to the bottom.
+    const char *nav = ed.view == ED_VIEW_FLY
+        ? "RMB+WASDQE fly" : "RMB orbit · MMB pan · wheel zoom";
+    DrawText(nav, (int)X, sh - 22, 12, (Color){ 130, 135, 145, 255 });
 }
 
 static void EdDraw(int sw, int sh) {
@@ -572,41 +667,7 @@ static void EdDraw(int sw, int sh) {
     Eng_GfxEndMode3D();
     Eng_DebugDrawLabels(ed.cam);
 
-    // Minimal text HUD (raw raylib until the Eng_Ui* facade lands — see
-    // docs/engine-layers.md Open #1).
-    const char *modeName = ed.mode == ENG_GIZMO_TRANSLATE ? "TRANSLATE"
-                         : ed.mode == ENG_GIZMO_ROTATE    ? "ROTATE" : "SCALE";
-    const char *viewName = ed.view == ED_VIEW_FLY ? "FLY(noclip)"
-                         : ed.view == ED_VIEW_ORBIT ? "ISO(orbit)" : "TOP";
-    DrawText(TextFormat("%s   ents:%d   view:%s   gizmo:%s",
-             ed.path, ed.proxyCount, viewName, modeName), 10, 10, 18, RAYWHITE);
-
-    // Placement tool line (green when armed).
-    const char *toolName = ed.placeTool == ED_PLACE_PLAYER    ? "PLAYER spawn"
-                         : ed.placeTool == ED_PLACE_ZOMBIE    ? "ZOMBIE spawn"
-                         : ed.placeTool == ED_PLACE_BARRICADE ? "BARRICADE" : "(select)";
-    DrawText(TextFormat("place [P]: %s   barricade auto-spawn [O]: %s",
-             toolName, ed.barricadeAutoSpawn ? "ON" : "off"),
-             10, 32, 18, ed.placeTool == ED_PLACE_NONE ? GRAY : GREEN);
-
-    if (ed.selectedId >= 0) {
-        EngMapEntKind k; EngMapEnt_Ptr(&ed.doc, EngMapEnt_Find(&ed.doc, ed.selectedId), &k);
-        char extra[48] = {0};
-        if (k == ENGMAPENT_SPAWN) {
-            char m[MAPDOC_SPAWN_MOB_LEN]; Eng_GetSpawnMob(&ed.doc, ed.selectedId, m, sizeof m);
-            snprintf(extra, sizeof extra, " mob=%s", m);
-        } else if (k == ENGMAPENT_WINDOW) {
-            char d[4]; Eng_GetWindowDir(&ed.doc, ed.selectedId, d, sizeof d);
-            snprintf(extra, sizeof extra, " facing=%s", d);
-        }
-        DrawText(TextFormat("selected #%d (%s)%s   [R] cycle  [X] delete",
-                 ed.selectedId, KindName(k), extra), 10, 54, 18, YELLOW);
-    }
-
-    const char *help = ed.view == ED_VIEW_FLY
-        ? "F1/F2/F3 view  RMB+WASDQE fly  LMB place/select  P tool  Ctrl+Z/Y undo"
-        : "F1/F2/F3 view  RMB orbit  MMB pan  wheel zoom  LMB place/select  P tool  Ctrl+Z/Y undo";
-    DrawText(help, 10, sh - 24, 16, (Color){ 170, 175, 185, 255 });
+    DrawToolPanel(sh);
     (void)sw;
 }
 

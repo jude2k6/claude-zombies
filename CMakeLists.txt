@@ -61,6 +61,7 @@ add_library(engine STATIC
     src/engine/pick.c
     src/engine/debugdraw.c
     src/engine/stats.c
+    src/engine/collide.c
 )
 target_include_directories(engine PUBLIC
     ${CMAKE_SOURCE_DIR}/src/engine

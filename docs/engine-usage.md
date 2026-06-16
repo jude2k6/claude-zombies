@@ -65,7 +65,8 @@ with your function pointers.
 
 ### Timestep model (important)
 
-Per rendered frame the engine does:
+Per rendered frame the engine runs this loop internally (inside `Eng_Run`) —
+there's no game-facing call here; you just supply the callbacks it invokes:
 
 ```
 frame(realDt)          // sample input, advance local prediction, build camera, visual state

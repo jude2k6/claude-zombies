@@ -184,6 +184,20 @@ engine reusable as an SDK.
    and is easier to test headlessly.
 4. Editor tree location: **`src/editor/`** as a peer of `src/game/` — vs. `src/game/editor/`
    (rejected: that re-couples the tool to this game, the exact thing we're avoiding).
+5. **Do we need a menu *builder* tool?** (open — revisit later) Distinguish a tool to
+   *draw* menus (= the `ui.h` facade, already step 1) from a tool to *build* menus (a
+   visual menu/layout editor, the menu analogue of the scene builder). A builder looks
+   tempting but the trade is poor today: menus are few (~5–10 screens vs. hundreds of
+   maps), behaviour-coupled (a button *is* a callback — a layout tool only captures the
+   visual half, the wiring stays code), and immediate-mode (raygui = UI-as-code, which
+   doesn't serialise to a document — a builder really wants a *retained* UI tree, i.e.
+   Open #2). So: **no dedicated menu builder until menus must be moddable *data*** (custom
+   community HUDs / cosmetic UI) — the same trigger that would flip Open #2 to retained-mode.
+   Cheaper middle ground to reach for first if the itch is reskinning: a **theme/style
+   asset as data** (colors/fonts/spacing the `ui.h` facade reads — raygui already has a
+   style system `app.c` drives), plus letting the editor app **dogfood `ui.h`** as proof
+   the facade is enough for real panels. Revisit a true UI-document + layout tool only at
+   the moddable-UI trigger.
 
 ## 8. One-line summary
 

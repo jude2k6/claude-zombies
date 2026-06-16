@@ -148,6 +148,13 @@ void *def = Eng_LoadContent("weapons/smg/smg.weapon");
 Eng_ContentFlush();                                // release everything (e.g. on map unload)
 ```
 
+**Failure contract:** handles wrap a `uint32_t` where `0 == invalid`. A failed
+load returns an invalid handle (`id==0`) and logs one stderr line — it never
+crashes; `Eng_ModelGet`/`Eng_TextureGet` hand back a safe placeholder for an
+invalid handle, so you can defer the check. `Eng_LoadContent` (and any registered
+parser) returns `NULL` on failure. **Unload is all-or-nothing** — `Eng_ContentFlush`
+only; there is no per-handle unload or hot-reload (see §3b).
+
 ### anim — `anim.h` (skeletal animation, GPU skinning)
 `AnimModel` is the shared rig+clips; `AnimState` is a lightweight per-instance
 clip/time (keep one per entity, render-local). Apply the engine skinned shader.
@@ -253,25 +260,57 @@ The game's `hud.c` and `menu.c` are the reference: crosshair, health/ammo, hitma
 and menus are all hand-drawn with these. Load fonts with raylib's `LoadFont*` if you
 outgrow the built-in font. The editor draws its property panels / labels the same way.
 
-### Weapon hit detection / raycasts — game-side geometry
-The engine ships **no raycast, sweep, or collision-query primitive**. Hitscan, AI
-line-of-sight, and projectile/wall tests are computed by the game against its own
-world representation, not an engine spatial structure:
+### Collision, raycasts & hit detection — game-side geometry
+The engine ships **no raycast, sweep, or collision-query primitive** — *all* spatial
+tests run game-side against the game's own world representation, not an engine
+structure. This covers three things, not just weapons:
 
-- The game derives a fire direction (camera forward + per-pellet `Weapon_SpreadDir`)
-  and tests targets with a cheap forward-arc dot product + distance (`weapons.c`).
-- Bullets-vs-walls use the game's own **Y-aware wall-segment** test (`level.c`); door
-  headers/lintels block shots, open doorways don't.
+- **Movement collision:** the game push-resolves the player out of solid colliders
+  each tick — `PushOutOfBoxXZ` vs obstacles / interior walls / closed doors
+  (`level.c`, `player.c`), plus `PushOutOfEnemies`. There is no character-controller
+  or capsule-sweep in the engine; you write the resolver.
+- **Hitscan:** the game derives a fire direction (camera forward + per-pellet
+  `Weapon_SpreadDir`) and tests targets with a cheap forward-arc dot + distance
+  (`weapons.c`). Bullets-vs-walls use a **Y-aware wall-segment** test (`level.c`);
+  door headers/lintels block shots, open doorways don't.
+- **AI / line-of-sight & nav:** also game-side, against the same colliders.
 
 If a second module needs picking (the editor's ray-vs-scene select), it builds the
 ray from the camera and tests against `MapDoc` geometry itself — reuse the shared
 floor-height / region-nav spatial helpers in [multi-floor-maps.md](multi-floor-maps.md) §7.
+
+### Screenshots & runtime window control — raylib direct
+Like the HUD, these aren't wrapped: the window opens **resizable + vsync + MSAA-4x**
+(set in `app.c`), and the game calls raylib directly for the rest — `TakeScreenshot(path)`
+(see the `--screenshot-*` dev modes in `devtools.c`), `ToggleFullscreen()`,
+`GetScreenWidth/Height()`. The engine owns `main()` and window creation, but the live
+window is raylib's and game code may drive it.
 
 ### Settings persistence — game-side
 Key bindings, sensitivities, and video/audio options are loaded/saved by the game and
 pushed into the engine via `Eng_InputBind` / `Eng_InputSetLookSensitivity` on startup
 and on every rebind (see `Settings_SyncEngineBindings`). The engine holds the live
 action map but never touches disk for you.
+
+---
+
+## 3b. Not yet in the engine
+
+Genuinely absent — not a deliberate game-side punt, just unbuilt. Know these before
+you start the map editor; some are on its critical path.
+
+- **Per-handle content unload / hot-reload** — only `Eng_ContentFlush` (all-or-nothing).
+  An editor's load→edit→reload loop currently means re-flush + re-load everything.
+  The most likely first thing the editor will need from the engine.
+- **Debug-draw channel** — no toggleable, draw-after-the-fact line/box/3D-text overlay.
+  `Eng_GfxCubeWires`/`Line3D`/`Grid` work for ad-hoc viz, but there's no persistent
+  debug layer for collision volumes, nav, or gizmo state. (§4 names "gizmos" — the
+  editor draws them itself with `Eng_Gfx*`; the engine provides no gizmo API.)
+- **Profiling / timing query** — no frame-time / fixed-step-count / draw-call API.
+- **Generic (de)serialization** — `MapDoc` covers the `.map` format only; save-games and
+  net payloads are hand-packed.
+
+If you build any of these into `src/engine/`, add it to §3 and delete it here.
 
 ---
 

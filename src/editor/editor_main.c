@@ -56,6 +56,10 @@ typedef struct {
 // modes so switching is seamless.
 typedef enum { ED_VIEW_FLY = 0, ED_VIEW_ORBIT, ED_VIEW_TOP } EdViewMode;
 
+// Placement tool: what a ground-click drops. NONE = click selects instead.
+typedef enum { ED_PLACE_NONE = 0, ED_PLACE_PLAYER, ED_PLACE_ZOMBIE,
+               ED_PLACE_BARRICADE, ED_PLACE_COUNT } EdPlaceTool;
+
 static struct {
     char          path[512];
     MapDoc        doc;
@@ -70,6 +74,9 @@ static struct {
 
     int           selectedId;       // -1 = nothing selected
     EngGizmoMode  mode;             // current gizmo mode
+
+    EdPlaceTool   placeTool;        // active placement tool (NONE = select mode)
+    bool          barricadeAutoSpawn; // place a paired ZOMBIE spawn with a barricade
 
     bool          dragging;
     EngGizmoDrag  drag;
@@ -138,9 +145,11 @@ static void RebuildProxies(void) {
     for (int i = 0; i < d->spawnCount; i++) {
         const MapDocSpawn *s = &d->spawns[i];
         float y = SectorFloorY(s->sectorId);
+        bool player = (strcmp(s->mob, "PLAYER") == 0);
         AddProxy(s->id, ENGMAPENT_SPAWN,
                  BoxAround(s->x, y + ED_MARKER, s->z, ED_MARKER, ED_MARKER, ED_MARKER),
-                 (Color){ 90, 130, 200, 255 });
+                 player ? (Color){ 90, 130, 200, 255 }    // PLAYER = blue
+                        : (Color){ 200, 80, 80, 255 });   // mob = red
     }
     for (int i = 0; i < d->windowCount; i++) {
         const MapDocWindow *w = &d->windows[i];
@@ -334,6 +343,87 @@ static void PickSelection(int sw, int sh) {
     ed.selectedId = best;
 }
 
+// ---- placement (mapedit add + retag) ---------------------------------------
+
+static void CommitEdit(void) { EngMapHistory_Commit(&ed.hist, &ed.doc, 0); }
+
+// A barricade faces the arena interior (origin): its normal points to centre,
+// so the facing dir is the opposite of the point's dominant axis.
+static const char *FacingToward(Vector3 p) {
+    if (fabsf(p.x) >= fabsf(p.z)) return p.x > 0 ? "-x" : "+x";
+    return p.z > 0 ? "-z" : "+z";
+}
+static Vector3 DirNormal(const char *d) {
+    if (!strcmp(d, "+x")) return (Vector3){  1, 0,  0 };
+    if (!strcmp(d, "-x")) return (Vector3){ -1, 0,  0 };
+    if (!strcmp(d, "+z")) return (Vector3){  0, 0,  1 };
+    return (Vector3){ 0, 0, -1 };  // -z
+}
+
+// The sector whose footprint contains (x,z) — placed entities must belong to a
+// real sector to be saved (the grammar has no ungrouped entities). Falls back
+// to sector 0, or -1 if the doc has no sectors at all.
+static int SectorAt(float x, float z) {
+    for (int i = 0; i < ed.doc.sectorCount; i++) {
+        const MapDocSector *s = &ed.doc.sectors[i];
+        if (fabsf(x - s->x) <= s->sx * 0.5f && fabsf(z - s->z) <= s->sz * 0.5f) return i;
+    }
+    return ed.doc.sectorCount > 0 ? 0 : -1;
+}
+
+static int AddSpawn(const char *mob, float x, float z) {
+    int id = EngMapEnt_Add(&ed.doc, ENGMAPENT_SPAWN);
+    if (id < 0) return -1;
+    Eng_SetSpawnMob(&ed.doc, id, mob);
+    Eng_SetSector(&ed.doc, id, SectorAt(x, z));
+    Eng_SetPos(&ed.doc, id, x, z);
+    return id;
+}
+
+// Drop the active tool's entity at world point p; selects the result and
+// commits one undo step.
+static void PlaceAt(Vector3 p) {
+    switch (ed.placeTool) {
+        case ED_PLACE_PLAYER: ed.selectedId = AddSpawn("PLAYER", p.x, p.z); CommitEdit(); break;
+        case ED_PLACE_ZOMBIE: ed.selectedId = AddSpawn("ZOMBIE", p.x, p.z); CommitEdit(); break;
+        case ED_PLACE_BARRICADE: {
+            int wid = EngMapEnt_Add(&ed.doc, ENGMAPENT_WINDOW);
+            if (wid < 0) return;
+            const char *dir = FacingToward(p);
+            Eng_SetWindowDir(&ed.doc, wid, dir);
+            Eng_SetSector(&ed.doc, wid, SectorAt(p.x, p.z));
+            Eng_SetPos(&ed.doc, wid, p.x, p.z);
+            ed.selectedId = wid;
+            // Opt-in paired mob spawn just outside the barricade (pos - normal*5).
+            if (ed.barricadeAutoSpawn) {
+                Vector3 n = DirNormal(dir);
+                AddSpawn("ZOMBIE", p.x - n.x * 5.0f, p.z - n.z * 5.0f);
+            }
+            CommitEdit();
+            break;
+        }
+        default: break;
+    }
+}
+
+// Edit the selected entity in place (R key): cycle a window's facing, or flip a
+// spawn between PLAYER and ZOMBIE.
+static void CycleSelected(void) {
+    if (ed.selectedId < 0) return;
+    EngMapEntKind k; EngMapEnt_Ptr(&ed.doc, EngMapEnt_Find(&ed.doc, ed.selectedId), &k);
+    if (k == ENGMAPENT_WINDOW) {
+        char d[4]; Eng_GetWindowDir(&ed.doc, ed.selectedId, d, sizeof d);
+        const char *order[4] = { "+x", "+z", "-x", "-z" };
+        int cur = 0; for (int i = 0; i < 4; i++) if (!strcmp(d, order[i])) cur = i;
+        Eng_SetWindowDir(&ed.doc, ed.selectedId, order[(cur + 1) % 4]);
+        CommitEdit();
+    } else if (k == ENGMAPENT_SPAWN) {
+        char m[MAPDOC_SPAWN_MOB_LEN]; Eng_GetSpawnMob(&ed.doc, ed.selectedId, m, sizeof m);
+        Eng_SetSpawnMob(&ed.doc, ed.selectedId, strcmp(m, "PLAYER") == 0 ? "ZOMBIE" : "PLAYER");
+        CommitEdit();
+    }
+}
+
 // ---- gizmo drag (translate) → mapedit → history ----------------------------
 
 static uint32_t g_nextTag = 1;
@@ -402,6 +492,8 @@ static void EdInit(void) {
     ed.orthoH = 40.0f;
     ed.selectedId = -1;
     ed.mode = ENG_GIZMO_TRANSLATE;
+    ed.placeTool = ED_PLACE_NONE;
+    ed.barricadeAutoSpawn = true;
 }
 
 static void EdFrame(float dt, int sw, int sh) {
@@ -418,27 +510,47 @@ static void EdFrame(float dt, int sw, int sh) {
     if (IsKeyPressed(KEY_TWO))   ed.mode = ENG_GIZMO_ROTATE;
     if (IsKeyPressed(KEY_THREE)) ed.mode = ENG_GIZMO_SCALE;
 
+    // Placement: P cycles the place tool, O toggles the barricade auto-spawn,
+    // R edits the selection in place, X deletes it.
+    if (IsKeyPressed(KEY_P)) ed.placeTool = (ed.placeTool + 1) % ED_PLACE_COUNT;
+    if (IsKeyPressed(KEY_O)) ed.barricadeAutoSpawn = !ed.barricadeAutoSpawn;
+    if (IsKeyPressed(KEY_R)) CycleSelected();
+    if (IsKeyPressed(KEY_X) && ed.selectedId >= 0) {
+        EngMapEnt_Delete(&ed.doc, ed.selectedId);
+        ed.selectedId = -1;
+        CommitEdit();
+    }
+
     // Undo / redo.
     bool ctrl = IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL);
     if (ctrl && IsKeyPressed(KEY_Z)) EngMapHistory_Undo(&ed.hist, &ed.doc);
     if (ctrl && IsKeyPressed(KEY_Y)) EngMapHistory_Redo(&ed.hist, &ed.doc);
 
     // The camera is being driven when fly-looking or while orbit/pan buttons are
-    // held — suppress selection/gizmo-grab so those clicks don't double up.
+    // held — suppress selection/placement so those clicks don't double up.
     bool camBusy = ed.looking || IsMouseButtonDown(MOUSE_BUTTON_RIGHT) ||
                    IsMouseButtonDown(MOUSE_BUTTON_MIDDLE);
 
-    // Left-click selects when not interacting with a gizmo handle/drag.
     if (!camBusy && !ed.dragging && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-        Vector3 origin;
-        EngGizmoAxis hot = ENG_GIZMO_AXIS_NONE;
-        if (SelectedOrigin(&origin))
-            hot = Eng_GizmoHitTest(ed.cam, GetMousePosition(), sw, sh, origin, ed.mode,
-                                   GizmoHandleSize(origin));
-        if (hot == ENG_GIZMO_AXIS_NONE) PickSelection(sw, sh);
+        if (ed.placeTool != ED_PLACE_NONE) {
+            // Placement mode: drop the tool's entity where the cursor ray meets
+            // the ground plane.
+            Vector3 hit;
+            Ray ray = Eng_PickRayFromScreen(ed.cam, GetMousePosition(), sw, sh);
+            if (Eng_PickRayGroundY(ray, 0.0f, &hit)) PlaceAt(hit);
+        } else {
+            // Select — unless the click landed on a gizmo handle (handled below).
+            Vector3 origin;
+            EngGizmoAxis hot = ENG_GIZMO_AXIS_NONE;
+            if (SelectedOrigin(&origin))
+                hot = Eng_GizmoHitTest(ed.cam, GetMousePosition(), sw, sh, origin, ed.mode,
+                                       GizmoHandleSize(origin));
+            if (hot == ENG_GIZMO_AXIS_NONE) PickSelection(sw, sh);
+        }
     }
 
-    UpdateGizmo(sw, sh, !camBusy);
+    // The gizmo only grabs in select mode (not while placing).
+    UpdateGizmo(sw, sh, !camBusy && ed.placeTool == ED_PLACE_NONE);
 }
 
 static void EdDraw(int sw, int sh) {
@@ -468,13 +580,32 @@ static void EdDraw(int sw, int sh) {
                          : ed.view == ED_VIEW_ORBIT ? "ISO(orbit)" : "TOP";
     DrawText(TextFormat("%s   ents:%d   view:%s   gizmo:%s",
              ed.path, ed.proxyCount, viewName, modeName), 10, 10, 18, RAYWHITE);
+
+    // Placement tool line (green when armed).
+    const char *toolName = ed.placeTool == ED_PLACE_PLAYER    ? "PLAYER spawn"
+                         : ed.placeTool == ED_PLACE_ZOMBIE    ? "ZOMBIE spawn"
+                         : ed.placeTool == ED_PLACE_BARRICADE ? "BARRICADE" : "(select)";
+    DrawText(TextFormat("place [P]: %s   barricade auto-spawn [O]: %s",
+             toolName, ed.barricadeAutoSpawn ? "ON" : "off"),
+             10, 32, 18, ed.placeTool == ED_PLACE_NONE ? GRAY : GREEN);
+
     if (ed.selectedId >= 0) {
         EngMapEntKind k; EngMapEnt_Ptr(&ed.doc, EngMapEnt_Find(&ed.doc, ed.selectedId), &k);
-        DrawText(TextFormat("selected: #%d (%s)", ed.selectedId, KindName(k)), 10, 32, 18, YELLOW);
+        char extra[48] = {0};
+        if (k == ENGMAPENT_SPAWN) {
+            char m[MAPDOC_SPAWN_MOB_LEN]; Eng_GetSpawnMob(&ed.doc, ed.selectedId, m, sizeof m);
+            snprintf(extra, sizeof extra, " mob=%s", m);
+        } else if (k == ENGMAPENT_WINDOW) {
+            char d[4]; Eng_GetWindowDir(&ed.doc, ed.selectedId, d, sizeof d);
+            snprintf(extra, sizeof extra, " facing=%s", d);
+        }
+        DrawText(TextFormat("selected #%d (%s)%s   [R] cycle  [X] delete",
+                 ed.selectedId, KindName(k), extra), 10, 54, 18, YELLOW);
     }
+
     const char *help = ed.view == ED_VIEW_FLY
-        ? "F1/F2/F3 view  RMB+WASDQE fly  LMB select/drag  1/2/3 gizmo  Ctrl+Z/Y undo"
-        : "F1/F2/F3 view  RMB orbit  MMB pan  wheel zoom  LMB select/drag  Ctrl+Z/Y undo";
+        ? "F1/F2/F3 view  RMB+WASDQE fly  LMB place/select  P tool  Ctrl+Z/Y undo"
+        : "F1/F2/F3 view  RMB orbit  MMB pan  wheel zoom  LMB place/select  P tool  Ctrl+Z/Y undo";
     DrawText(help, 10, sh - 24, 16, (Color){ 170, 175, 185, 255 });
     (void)sw;
 }

@@ -10,6 +10,7 @@
 #include "mapedit.h"
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 
 /* ---- find ---- */
 
@@ -221,6 +222,71 @@ bool Eng_SetSectorHeights(MapDoc *doc, int id, float yLow, float yHigh) {
     if (!p || kind != ENGMAPENT_SECTOR) return false;
     MapDocSector *e = p;
     e->yLow = yLow; e->yHigh = yHigh;
+    return true;
+}
+
+bool Eng_GetSpawnMob(const MapDoc *doc, int id, char *outMob, int cap) {
+    EngMapEntKind kind;
+    const void *p = EngMapEnt_PtrConst(doc, EngMapEnt_Find(doc, id), &kind);
+    if (!p || kind != ENGMAPENT_SPAWN || !outMob || cap <= 0) return false;
+    snprintf(outMob, (size_t)cap, "%s", ((const MapDocSpawn *)p)->mob);
+    return true;
+}
+bool Eng_SetSpawnMob(MapDoc *doc, int id, const char *mob) {
+    EngMapEntKind kind;
+    void *p = EngMapEnt_Ptr(doc, EngMapEnt_Find(doc, id), &kind);
+    if (!p || kind != ENGMAPENT_SPAWN || !mob || !mob[0]) return false;
+    MapDocSpawn *e = p;
+    snprintf(e->mob, sizeof e->mob, "%s", mob);
+    if (strcmp(e->mob, "PLAYER") == 0) e->lockedBy[0] = '\0';  /* players never gate */
+    return true;
+}
+
+bool Eng_GetWindowDir(const MapDoc *doc, int id, char *outDir, int cap) {
+    EngMapEntKind kind;
+    const void *p = EngMapEnt_PtrConst(doc, EngMapEnt_Find(doc, id), &kind);
+    if (!p || kind != ENGMAPENT_WINDOW || !outDir || cap <= 0) return false;
+    snprintf(outDir, (size_t)cap, "%s", ((const MapDocWindow *)p)->dir);
+    return true;
+}
+bool Eng_SetWindowDir(MapDoc *doc, int id, const char *dir) {
+    if (!dir) return false;
+    if (strcmp(dir, "+x") && strcmp(dir, "-x") &&
+        strcmp(dir, "+z") && strcmp(dir, "-z")) return false;
+    EngMapEntKind kind;
+    void *p = EngMapEnt_Ptr(doc, EngMapEnt_Find(doc, id), &kind);
+    if (!p || kind != ENGMAPENT_WINDOW) return false;
+    memcpy(((MapDocWindow *)p)->dir, dir, 3);   /* "+x" + NUL, fits dir[4] */
+    return true;
+}
+
+/* Address-of the sectorId field for any kind that has one (NULL for SECTOR). */
+static int *SectorIdPtr(void *p, EngMapEntKind kind) {
+    switch (kind) {
+        case ENGMAPENT_SPAWN:    return &((MapDocSpawn    *)p)->sectorId;
+        case ENGMAPENT_WALL:     return &((MapDocWall     *)p)->sectorId;
+        case ENGMAPENT_WINDOW:   return &((MapDocWindow   *)p)->sectorId;
+        case ENGMAPENT_OBSTACLE: return &((MapDocObstacle *)p)->sectorId;
+        case ENGMAPENT_PROP:     return &((MapDocProp     *)p)->sectorId;
+        case ENGMAPENT_WALLBUY:  return &((MapDocWallbuy  *)p)->sectorId;
+        case ENGMAPENT_PERK:     return &((MapDocPerk     *)p)->sectorId;
+        default:                 return NULL;   /* SECTOR has no parent */
+    }
+}
+bool Eng_GetSector(const MapDoc *doc, int id, int *outSector) {
+    EngMapEntKind kind;
+    void *p = EngMapEnt_Ptr((MapDoc *)doc, EngMapEnt_Find(doc, id), &kind);
+    int *sp = p ? SectorIdPtr(p, kind) : NULL;
+    if (!sp || !outSector) return false;
+    *outSector = *sp;
+    return true;
+}
+bool Eng_SetSector(MapDoc *doc, int id, int sectorIndex) {
+    EngMapEntKind kind;
+    void *p = EngMapEnt_Ptr(doc, EngMapEnt_Find(doc, id), &kind);
+    int *sp = p ? SectorIdPtr(p, kind) : NULL;
+    if (!sp) return false;
+    *sp = sectorIndex;
     return true;
 }
 

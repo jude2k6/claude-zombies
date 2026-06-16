@@ -165,6 +165,24 @@ bool Eng_SetSectorSize(MapDoc *doc, int id, float sx, float sz);
 bool Eng_GetSectorHeights(const MapDoc *doc, int id, float *outYLow, float *outYHigh);
 bool Eng_SetSectorHeights(MapDoc *doc, int id, float yLow, float yHigh);
 
+/* Spawn mob tag. SPAWN only. "PLAYER" = a player start; any other string is a
+ * mob spawn (e.g. "ZOMBIE"). Set truncates to MAPDOC_SPAWN_MOB_LEN. */
+bool Eng_GetSpawnMob(const MapDoc *doc, int id, char *outMob, int cap);
+bool Eng_SetSpawnMob(MapDoc *doc, int id, const char *mob);
+
+/* Facing direction, one of "+x" "-x" "+z" "-z". WINDOW only. Set rejects any
+ * other string (returns false). */
+bool Eng_GetWindowDir(const MapDoc *doc, int id, char *outDir, int cap);
+bool Eng_SetWindowDir(MapDoc *doc, int id, const char *dir);
+
+/* Owning sector index (-1 = ungrouped). Supported by every placed kind EXCEPT
+ * SECTOR itself. NOTE: an entity must belong to a real sector to be saved —
+ * MapDoc_Save only emits entities inside a SECTOR/RAMP block, and the grammar
+ * forbids ungrouped placed entities. An editor must assign a valid sector
+ * (e.g. the one under the cursor) to anything it adds. */
+bool Eng_GetSector(const MapDoc *doc, int id, int *outSector);
+bool Eng_SetSector(MapDoc *doc, int id, int sectorIndex);
+
 /* ---- add / delete ---- */
 
 /*

@@ -109,17 +109,45 @@ switch gizmo mode (only translate drags for now); **Ctrl+Z / Ctrl+Y** undo / red
 Selection/drag is suppressed while a camera button (RMB/MMB) is held so navigation
 clicks don't double as edits.
 
+### Placing spawns & barricades
+
+| Key / action | Effect |
+|---|---|
+| **P** | Cycle the place tool: *(select)* → **PLAYER spawn** → **ZOMBIE spawn** → **BARRICADE** → … |
+| **LMB** (tool armed) | Drop the tool's entity where the cursor ray meets the ground (`Eng_PickRayGroundY`) |
+| **O** | Toggle *barricade auto-spawn* — when ON, placing a barricade also drops a paired `ZOMBIE` spawn just outside it (at `pos − facing·5`) |
+| **R** | Edit the selection in place: cycle a barricade's facing (`+x→+z→-x→-z`), or flip a spawn between PLAYER and ZOMBIE |
+| **X** | Delete the selected entity |
+
+Spawns are colour-coded: **PLAYER = blue**, **mob = red**; barricades (windows) are
+gold. A placed barricade auto-faces the arena interior (its normal points to the
+origin). All placement/retag/delete actions push one undo step.
+
+This is the generic spawn model in action: spawns carry a free-form mob tag
+(`SPAWN MOB <tag>`), so a *new mob is a new tag* — the editor's ZOMBIE tool is just
+the common case, not a hardcoded type. See [engine-layers.md](engine-layers.md) and
+the engine roadmap for the "primitives not policy" rationale.
+
+> **Saving caveat (important):** the `.map` grammar has **no ungrouped entities** —
+> every placed entity must belong to a SECTOR to be written by `MapDoc_Save`. The
+> editor therefore assigns each placed entity to the sector under the cursor (falling
+> back to sector 0). `mapedit.h`'s `Eng_SetSector` is what does this; anything added
+> with `sectorId == -1` would be silently dropped on save.
+
 ## 5. Roadmap (this tool)
 
 Small, independently shippable steps; none blocks the game.
 
 1. **`ui.h` facade**, then an **entity inspector** panel (edit the selected entity's
    fields: position, yaw/scale, sizes) and a **tool palette**.
-2. **Add / delete** entities (`EngMapEnt_Add/Delete`) with a placement ray
-   (`Eng_PickRayGroundY`) and a kind picker.
+2. ~~**Add / delete** entities (`EngMapEnt_Add/Delete`) with a placement ray
+   (`Eng_PickRayGroundY`) and a kind picker.~~ **Done for spawns + barricades** (P/LMB/X,
+   the barricade auto-spawn, retag/aim via R); generalise the picker to the other kinds.
 3. **Rotate / scale** drag (gizmo already returns `rotateRadians` / `scale`; wire them
    to `Eng_SetYaw` / `Eng_SetScale` / size setters).
-4. **Save** (`MapDoc_Save`) + new-map / open-map flow; dirty-state tracking.
+4. **Save** (`MapDoc_Save`) + new-map / open-map flow; dirty-state tracking. *(Placement
+   already assigns a valid sector via `Eng_SetSector` so saves don't drop entities —
+   see the saving caveat above.)*
 5. **Real scene rendering** — draw actual sector/wall/prop geometry (optionally share
    the game's look via the content registry) instead of proxy boxes.
 6. **Packaging** — keep the standalone `editor` binary; later, optionally embed the same

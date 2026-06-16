@@ -67,10 +67,56 @@ Shader    *Eng_ShaderGet   (EngShader h);
 Model     *Eng_ClipSetModel(EngClipSet h);
 
 // ---- Flush / lifecycle ------------------------------------------------------
+//
+// Per-handle unload, dedup/refcount rule:
+//
+// Loads dedup by resolved path, so two Eng_Load*() calls for the same file
+// return the *same* handle/slot.  To make per-handle unload coherent with
+// that sharing, every slot carries a refcount: a dedup-hit during load
+// increments it instead of allocating a new slot, and Eng_Unload*() decrements
+// it.  The underlying raylib resource is actually freed (UnloadModel /
+// UnloadTexture / UnloadShader) only when the count reaches zero, at which
+// point the slot is marked free (reusable by a future load of a *different*
+// path) and its handle becomes invalid.  Until the count reaches zero, every
+// outstanding handle to that path remains valid and Eng_*Get keeps returning
+// the live resource.
+//
+// Unloading an invalid handle (id==0) or a handle whose slot is already free
+// is a silent no-op.  After a slot's refcount hits zero, Eng_*Get on any
+// (now-stale) handle that pointed at it returns NULL — the same safe
+// "invalid handle" placeholder used for id==0 — it never crashes.
+//
+// Freed slots are recycled by future Eng_Load*() calls (first-fit over the
+// table), so handle values are *not* stable identities across an unload+load
+// pair the way path-dedup makes them stable across repeated loads of the same
+// path.
+
+// Unload one model.  Decrements the slot's refcount; frees the underlying
+// raylib Model and frees the slot for reuse only when it reaches zero.
+void Eng_UnloadModel(EngModel h);
+
+// Unload one texture.  Same refcount/free-at-zero rule as Eng_UnloadModel.
+void Eng_UnloadTexture(EngTexture h);
+
+// Unload one shader.  Same refcount/free-at-zero rule as Eng_UnloadModel.
+void Eng_UnloadShader(EngShader h);
+
+// Unload one clip set.  Same refcount/free-at-zero rule as Eng_UnloadModel.
+void Eng_UnloadClipSet(EngClipSet h);
+
+// Hot-reload: re-read the same resolved path from disk into the *same* slot,
+// so every outstanding handle to it (refcount may be > 1) immediately sees
+// the new data.  The old raylib resource is unloaded first.  Returns false
+// (leaving the old resource in place) if the handle is invalid/freed or the
+// reload fails to produce a usable resource; returns true on success.
+bool Eng_ReloadModel(EngModel h);
+bool Eng_ReloadTexture(EngTexture h);
 
 // Unload all models, textures, shaders, and clip sets and reset every registry
 // table.  Must be called from the main thread before CloseWindow.  After this
-// call all previously issued handles are invalid.
+// call all previously issued handles are invalid.  This is unconditional —
+// it ignores refcounts and frees everything regardless of how many handles
+// were outstanding.
 void Eng_ContentFlush(void);
 
 // ---- Name-keyed texture convenience -----------------------------------------

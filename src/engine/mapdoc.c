@@ -58,6 +58,11 @@ static bool ParseDir(const char *s, char dir[4]) {
 
 static float Fabsf(float x) { return x < 0.0f ? -x : x; }
 
+/* Assign the next monotonic runtime id during parsing. */
+static int NextParseId(MapDoc *doc) {
+    return doc->nextId++;
+}
+
 /* Add a new sector; returns its index, -1 on cap overflow. */
 static int AddSector(MapDoc *doc, const char *name, FILE *errs, int lineNo) {
     if (doc->sectorCount >= MAPDOC_MAX_SECTORS) {
@@ -69,6 +74,7 @@ static int AddSector(MapDoc *doc, const char *name, FILE *errs, int lineNo) {
     strncpy(s->name, name, MAPDOC_NAME_LEN - 1);
     s->name[MAPDOC_NAME_LEN - 1] = '\0';
     s->linkA = s->linkB = -1;
+    s->id = NextParseId(doc);
     return doc->sectorCount++;
 }
 
@@ -92,6 +98,7 @@ int MapDoc_Parse(const char *path, MapDoc *out, FILE *errs) {
     strncpy(out->name, "Unnamed", MAPDOC_NAME_LEN - 1);
     out->arenaHalfX = 40.0f;
     out->arenaHalfZ = 40.0f;
+    out->nextId = 1;  /* ids are 1-based; monotonic counter for this parse */
 
     int errors = 0;
     enum { BLK_NONE, BLK_ATMOS, BLK_SECTOR, BLK_TEX } block = BLK_NONE;
@@ -297,7 +304,7 @@ int MapDoc_Parse(const char *path, MapDoc *out, FILE *errs) {
                         lineNo, MAPDOC_MAX_SPAWNS);
                 errors++; continue;
             }
-            out->spawns[out->spawnCount++] = (MapDocSpawn){ x, z, curSectorIdx };
+            out->spawns[out->spawnCount++] = (MapDocSpawn){ x, z, curSectorIdx, NextParseId(out) };
             continue;
         }
 
@@ -332,6 +339,7 @@ int MapDoc_Parse(const char *path, MapDoc *out, FILE *errs) {
             memset(&w, 0, sizeof w);
             w.x1 = x1; w.z1 = z1; w.x2 = x2; w.z2 = z2;
             w.sectorId = curSectorIdx;
+            w.id = NextParseId(out);
 
             /* optional DOOR clause */
             int ti = 5;
@@ -408,6 +416,7 @@ int MapDoc_Parse(const char *path, MapDoc *out, FILE *errs) {
             memset(&ob, 0, sizeof ob);
             ob.x = x; ob.z = z; ob.sx = sx; ob.sz = sz; ob.h = h;
             ob.sectorId = curSectorIdx;
+            ob.id = NextParseId(out);
             /* optional TEX clause */
             if (oi + 1 < n && strcmp(toks[oi], "TEX") == 0) {
                 strncpy(ob.texName, toks[oi+1], MAPDOC_TEX_NAME_LEN - 1);
@@ -451,6 +460,7 @@ int MapDoc_Parse(const char *path, MapDoc *out, FILE *errs) {
             memcpy(wb.dir, dir, 4);
             strncpy(wb.weapon, wn, sizeof wb.weapon - 1);
             wb.sectorId = curSectorIdx;
+            wb.id = NextParseId(out);
             out->wallbuys[out->wallbuyCount++] = wb;
             continue;
         }
@@ -481,6 +491,7 @@ int MapDoc_Parse(const char *path, MapDoc *out, FILE *errs) {
             pk.x = x; pk.z = z;
             strncpy(pk.perk, pn, sizeof pk.perk - 1);
             pk.sectorId = curSectorIdx;
+            pk.id = NextParseId(out);
             out->perks[out->perkCount++] = pk;
             continue;
         }
@@ -546,6 +557,7 @@ int MapDoc_Parse(const char *path, MapDoc *out, FILE *errs) {
             memcpy(win.dir, dir, 4);
             strncpy(win.lockedBy, lockedBy, MAPDOC_DOOR_NAME_LEN - 1);
             win.sectorId = curSectorIdx;
+            win.id = NextParseId(out);
             int widx = out->windowCount++;
             out->windows[widx] = win;
 
@@ -600,6 +612,7 @@ int MapDoc_Parse(const char *path, MapDoc *out, FILE *errs) {
             pr.x = x; pr.z = z;
             pr.yawDeg = yaw; pr.scale = scale;
             pr.sectorId = curSectorIdx;
+            pr.id = NextParseId(out);
             out->props[out->propCount++] = pr;
             continue;
         }
@@ -632,7 +645,7 @@ int MapDoc_Parse(const char *path, MapDoc *out, FILE *errs) {
 
     /* Ensure at least one spawn exists (sector -1 => ground at Y0) */
     if (out->spawnCount == 0)
-        out->spawns[out->spawnCount++] = (MapDocSpawn){ 0.0f, 0.0f, -1 };
+        out->spawns[out->spawnCount++] = (MapDocSpawn){ 0.0f, 0.0f, -1, NextParseId(out) };
 
     return errors;
 }
@@ -944,5 +957,14 @@ bool MapDoc_Equal(const MapDoc *a, const MapDoc *b) {
     for (int i = 0; i < a->sectorCount; i++)
         if (!SectorEq(&a->sectors[i], &b->sectors[i])) return false;
 
+    /* NOTE: `id` fields and `nextId` are intentionally never compared above —
+       they are runtime-only and not part of document content (see mapdoc.h). */
+
     return true;
+}
+
+/* ---- runtime id allocation ---- */
+
+int MapDoc_AllocId(MapDoc *doc) {
+    return doc->nextId++;
 }

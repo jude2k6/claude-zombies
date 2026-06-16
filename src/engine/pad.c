@@ -183,3 +183,18 @@ void Eng_InputSetLookSensitivity(float mouse, float pad) {
     s_mouseSens = mouse;
     s_padSens   = pad;
 }
+
+Vector2 Eng_InputMousePos(void) {
+    return GetMousePosition();
+}
+
+Vector2 Eng_InputMouseDelta(void) {
+    // Bare pixel delta — no sensitivity scaling, no gamepad fallback. Keep
+    // this distinct from Eng_InputLookDelta (which is sensitivity-scaled and
+    // may source from the right stick); this one is for editor/UI dragging.
+    return GetMouseDelta();
+}
+
+float Eng_InputMouseWheel(void) {
+    return GetMouseWheelMove();
+}

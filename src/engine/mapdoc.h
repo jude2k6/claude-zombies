@@ -11,6 +11,26 @@
  * The document model mirrors the .map grammar exactly.  mapdoc.c owns the
  * parser and serialiser; level.c owns the instantiation step that copies
  * a parsed MapDoc into the live game globals.
+ *
+ * Stable entity ids (runtime-only): every placed entity (spawn, wall, window,
+ * obstacle, prop, wallbuy, perk, sector) carries an `id` field that uniquely
+ * and stably identifies it for the lifetime of an in-memory MapDoc, even as
+ * other entities are inserted/deleted and array indices shift around it.
+ * This is what the planned map editor uses for selection, undo/redo, and
+ * drag-to-move handles.
+ *   - Ids are NOT part of the .map file grammar: MapDoc_Save never writes
+ *     them and MapDoc_Parse never reads them from the file.
+ *   - MapDoc_Parse assigns every parsed entity a fresh id from a monotonic
+ *     counter starting at 1 (in file order), and leaves `MapDoc.nextId` one
+ *     past the highest id assigned, ready for the editor to mint more.
+ *   - MapDoc_Equal ignores ids (and nextId) entirely — two docs with
+ *     identical content but different id assignments still compare equal.
+ *     This is required for the MapDoc_Parse -> MapDoc_Save -> re-parse
+ *     round-trip test to keep passing, since a re-parsed doc gets ids
+ *     reassigned from scratch.
+ *   - The PaP/Mbox singletons and sub-structs (MapDocDoorSpec, MapDocTextures,
+ *     MapDocAtmosphere) do NOT get ids: they are not multiply-placed entities
+ *     and have no plural array for an index to go stale in.
  */
 
 #include <stdio.h>
@@ -47,6 +67,7 @@ typedef struct {
 typedef struct {
     float x, z;
     int   sectorId;  /* -1 = ungrouped */
+    int   id;        /* runtime-only stable handle; see header comment */
 } MapDocSpawn;
 
 /* Optional door embedded in a WALL line. */
@@ -64,6 +85,7 @@ typedef struct {
     int          sectorId;  /* -1 = not inside any ROOM block */
     /* optional TEX override; "" = unset */
     char         texName[MAPDOC_TEX_NAME_LEN];
+    int          id;        /* runtime-only stable handle; see header comment */
 } MapDocWall;
 
 typedef struct {
@@ -73,6 +95,7 @@ typedef struct {
     /* optional LOCKED_BY door name; "" if none */
     char  lockedBy[MAPDOC_DOOR_NAME_LEN];
     int   sectorId;
+    int   id;  /* runtime-only stable handle; see header comment */
 } MapDocWindow;
 
 typedef struct {
@@ -80,6 +103,7 @@ typedef struct {
     int   sectorId;
     /* optional TEX override; "" = unset */
     char  texName[MAPDOC_TEX_NAME_LEN];
+    int   id;  /* runtime-only stable handle; see header comment */
 } MapDocObstacle;
 
 /* A sector: a named, axis-aligned floor area at a height. It is the unit of
@@ -97,6 +121,7 @@ typedef struct {
     float yLow, yHigh;     /* FLAT: equal; RAMP: low/high edge */
     int   rampAxis;        /* RAMP only: 1 = +X, 2 = +Z */
     int   linkA, linkB;    /* RAMP only: connected sector indices (-1 = none) */
+    int   id;              /* runtime-only stable handle; see header comment */
 } MapDocSector;
 
 typedef struct {
@@ -105,6 +130,7 @@ typedef struct {
     float yawDeg;
     float scale;
     int   sectorId;
+    int   id;  /* runtime-only stable handle; see header comment */
 } MapDocProp;
 
 typedef struct {
@@ -114,6 +140,7 @@ typedef struct {
     /* weapon name: "PISTOL" "SMG" "SHOTGUN" "RIFLE" "RAYGUN" */
     char  weapon[16];
     int   sectorId;
+    int   id;  /* runtime-only stable handle; see header comment */
 } MapDocWallbuy;
 
 typedef struct {
@@ -121,6 +148,7 @@ typedef struct {
     /* perk name: "JUG" "SPEED" "DTAP" "STAMIN" */
     char  perk[16];
     int   sectorId;
+    int   id;  /* runtime-only stable handle; see header comment */
 } MapDocPerk;
 
 typedef struct {
@@ -189,6 +217,12 @@ typedef struct {
     MapDocPap    pap;
 
     MapDocMbox   mbox;
+
+    /* Runtime-only monotonic id allocator. MapDoc_Parse seeds this to one
+     * past the highest id it assigned; the editor calls MapDoc_AllocId to
+     * mint a fresh id for each newly added entity. Not serialized, not
+     * compared by MapDoc_Equal. */
+    int          nextId;
 } MapDoc;
 
 /* ---- API ---- */
@@ -215,5 +249,12 @@ int  MapDoc_Save(const char *path, const MapDoc *doc);
  * Used by the --map-roundtrip dev tool.
  */
 bool MapDoc_Equal(const MapDoc *a, const MapDoc *b);
+
+/*
+ * MapDoc_AllocId — mint a fresh, doc-unique runtime id.
+ * Returns doc->nextId++. Used by the editor when adding a new entity to an
+ * already-parsed doc; stamp the result into the new entity's `id` field.
+ */
+int  MapDoc_AllocId(MapDoc *doc);
 
 #endif /* SHOOTER_MAPDOC_H */

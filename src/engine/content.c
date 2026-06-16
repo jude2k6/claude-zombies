@@ -52,17 +52,23 @@ const char *Eng_ResolveAssetPath(const char *rel, char *buf, int bufsz) {
 #define MAX_SHADERS    32
 #define MAX_CLIPSETS   32
 
-// Each entry stores a copy of the resolved path for dedup.
+// Each entry stores a copy of the resolved path for dedup, plus a refcount:
+// a dedup-hit during load increments it instead of allocating a new slot;
+// Eng_Unload*() decrements it and only frees the raylib resource (and frees
+// the slot for reuse) when it reaches zero.  See content.h "Flush /
+// lifecycle" for the full rule.
 typedef struct {
     char  path[512];
     Model model;
     bool  used;
+    int   refcount;
 } ModelEntry;
 
 typedef struct {
     char      path[512];
     Texture2D tex;
     bool      used;
+    int       refcount;
 } TexEntry;
 
 typedef struct {
@@ -70,12 +76,14 @@ typedef struct {
     char   fsPath[512];
     Shader shader;
     bool   used;
+    int    refcount;
 } ShaderEntry;
 
 typedef struct {
     char  path[512];
     Model model;   // glTF/GLB — Model contains bones + animations
     bool  used;
+    int   refcount;
 } ClipSetEntry;
 
 static ModelEntry   s_models  [MAX_MODELS];
@@ -117,25 +125,34 @@ EngModel Eng_LoadModel(const char *path) {
     // Dedup by resolved path.
     for (int i = 0; i < s_modelCount; i++) {
         if (s_models[i].used && strcmp(s_models[i].path, resolved) == 0) {
+            s_models[i].refcount++;
             return (EngModel){ (uint32_t)(i + 1) };
         }
     }
 
-    // Capacity check.
-    if (s_modelCount >= MAX_MODELS) {
-        fprintf(stderr, "content: model registry full (cap=%d)\n", MAX_MODELS);
-        return (EngModel){0};
+    // Look for a freed slot to recycle before growing the table.
+    int slot = -1;
+    for (int i = 0; i < s_modelCount; i++) {
+        if (!s_models[i].used) { slot = i; break; }
+    }
+    if (slot < 0) {
+        // Capacity check.
+        if (s_modelCount >= MAX_MODELS) {
+            fprintf(stderr, "content: model registry full (cap=%d)\n", MAX_MODELS);
+            return (EngModel){0};
+        }
+        slot = s_modelCount++;
     }
 
-    int slot = s_modelCount++;
     s_models[slot].model = LoadModel(resolved);
     if (s_models[slot].model.meshCount == 0) {
         fprintf(stderr, "content: model '%s' loaded but has no meshes\n", resolved);
-        s_modelCount--;  // don't keep the empty slot
+        if (slot == s_modelCount - 1) s_modelCount--;  // don't keep the empty slot
         return (EngModel){0};
     }
     snprintf(s_models[slot].path, sizeof s_models[slot].path, "%s", resolved);
     s_models[slot].used = true;
+    s_models[slot].refcount = 1;
     fprintf(stderr, "model: loaded %s (meshes=%d)\n", resolved,
             s_models[slot].model.meshCount);
     return (EngModel){ (uint32_t)(slot + 1) };
@@ -148,6 +165,35 @@ Model *Eng_ModelGet(EngModel h) {
     return &s_models[idx].model;
 }
 
+void Eng_UnloadModel(EngModel h) {
+    if (h.id == 0 || h.id > (uint32_t)s_modelCount) return;
+    int idx = (int)h.id - 1;
+    if (!s_models[idx].used) return;  // already freed: silent no-op
+    if (--s_models[idx].refcount > 0) return;
+    UnloadModel(s_models[idx].model);
+    s_models[idx].used = false;
+    s_models[idx].path[0] = '\0';
+    s_models[idx].refcount = 0;
+}
+
+bool Eng_ReloadModel(EngModel h) {
+    if (h.id == 0 || h.id > (uint32_t)s_modelCount) return false;
+    int idx = (int)h.id - 1;
+    if (!s_models[idx].used) return false;
+    Model fresh = LoadModel(s_models[idx].path);
+    if (fresh.meshCount == 0) {
+        fprintf(stderr, "content: reload model '%s' failed, keeping old data\n",
+                s_models[idx].path);
+        UnloadModel(fresh);
+        return false;
+    }
+    UnloadModel(s_models[idx].model);
+    s_models[idx].model = fresh;
+    fprintf(stderr, "model: reloaded %s (meshes=%d)\n", s_models[idx].path,
+            fresh.meshCount);
+    return true;
+}
+
 // ============================================================================
 //  Eng_LoadTexture  (also used by Eng_LoadTextureByName)
 // ============================================================================
@@ -156,18 +202,27 @@ Model *Eng_ModelGet(EngModel h) {
 static EngTexture LoadTextureFromResolved(const char *resolved) {
     // Dedup.
     for (int i = 0; i < s_texCount; i++) {
-        if (s_textures[i].used && strcmp(s_textures[i].path, resolved) == 0)
+        if (s_textures[i].used && strcmp(s_textures[i].path, resolved) == 0) {
+            s_textures[i].refcount++;
             return (EngTexture){ (uint32_t)(i + 1) };
+        }
     }
-    if (s_texCount >= MAX_TEXTURES) {
-        fprintf(stderr, "content: texture registry full (cap=%d)\n", MAX_TEXTURES);
-        return (EngTexture){0};
+    // Look for a freed slot to recycle before growing the table.
+    int slot = -1;
+    for (int i = 0; i < s_texCount; i++) {
+        if (!s_textures[i].used) { slot = i; break; }
     }
-    int slot = s_texCount++;
+    if (slot < 0) {
+        if (s_texCount >= MAX_TEXTURES) {
+            fprintf(stderr, "content: texture registry full (cap=%d)\n", MAX_TEXTURES);
+            return (EngTexture){0};
+        }
+        slot = s_texCount++;
+    }
     s_textures[slot].tex = LoadTexture(resolved);
     if (s_textures[slot].tex.id == 0) {
         fprintf(stderr, "content: texture '%s' loaded but id==0\n", resolved);
-        s_texCount--;
+        if (slot == s_texCount - 1) s_texCount--;
         return (EngTexture){0};
     }
     SetTextureWrap(s_textures[slot].tex, TEXTURE_WRAP_REPEAT);
@@ -175,6 +230,7 @@ static EngTexture LoadTextureFromResolved(const char *resolved) {
     SetTextureFilter(s_textures[slot].tex, TEXTURE_FILTER_TRILINEAR);
     snprintf(s_textures[slot].path, sizeof s_textures[slot].path, "%s", resolved);
     s_textures[slot].used = true;
+    s_textures[slot].refcount = 1;
     fprintf(stderr, "texture: loaded %s (%dx%d)\n", resolved,
             s_textures[slot].tex.width, s_textures[slot].tex.height);
     return (EngTexture){ (uint32_t)(slot + 1) };
@@ -210,6 +266,37 @@ Texture2D *Eng_TextureGet(EngTexture h) {
     int idx = (int)h.id - 1;
     if (!s_textures[idx].used) return NULL;
     return &s_textures[idx].tex;
+}
+
+void Eng_UnloadTexture(EngTexture h) {
+    if (h.id == 0 || h.id > (uint32_t)s_texCount) return;
+    int idx = (int)h.id - 1;
+    if (!s_textures[idx].used) return;  // already freed: silent no-op
+    if (--s_textures[idx].refcount > 0) return;
+    UnloadTexture(s_textures[idx].tex);
+    s_textures[idx].used = false;
+    s_textures[idx].path[0] = '\0';
+    s_textures[idx].refcount = 0;
+}
+
+bool Eng_ReloadTexture(EngTexture h) {
+    if (h.id == 0 || h.id > (uint32_t)s_texCount) return false;
+    int idx = (int)h.id - 1;
+    if (!s_textures[idx].used) return false;
+    Texture2D fresh = LoadTexture(s_textures[idx].path);
+    if (fresh.id == 0) {
+        fprintf(stderr, "content: reload texture '%s' failed, keeping old data\n",
+                s_textures[idx].path);
+        return false;
+    }
+    SetTextureWrap(fresh, TEXTURE_WRAP_REPEAT);
+    GenTextureMipmaps(&fresh);
+    SetTextureFilter(fresh, TEXTURE_FILTER_TRILINEAR);
+    UnloadTexture(s_textures[idx].tex);
+    s_textures[idx].tex = fresh;
+    fprintf(stderr, "texture: reloaded %s (%dx%d)\n", s_textures[idx].path,
+            fresh.width, fresh.height);
+    return true;
 }
 
 // ============================================================================
@@ -258,21 +345,30 @@ EngShader Eng_LoadShader(const char *vsPath, const char *fsPath) {
     for (int i = 0; i < s_shaderCount; i++) {
         if (!s_shaders[i].used) continue;
         if (strcmp(s_shaders[i].fsPath, fsResolved) == 0 &&
-            strcmp(s_shaders[i].vsPath, vsPath ? vsResolved : "") == 0)
+            strcmp(s_shaders[i].vsPath, vsPath ? vsResolved : "") == 0) {
+            s_shaders[i].refcount++;
             return (EngShader){ (uint32_t)(i + 1) };
+        }
     }
 
-    if (s_shaderCount >= MAX_SHADERS) {
-        fprintf(stderr, "content: shader registry full (cap=%d)\n", MAX_SHADERS);
-        return (EngShader){0};
+    // Look for a freed slot to recycle before growing the table.
+    int slot = -1;
+    for (int i = 0; i < s_shaderCount; i++) {
+        if (!s_shaders[i].used) { slot = i; break; }
+    }
+    if (slot < 0) {
+        if (s_shaderCount >= MAX_SHADERS) {
+            fprintf(stderr, "content: shader registry full (cap=%d)\n", MAX_SHADERS);
+            return (EngShader){0};
+        }
+        slot = s_shaderCount++;
     }
 
-    int slot = s_shaderCount++;
     s_shaders[slot].shader = LoadShader(vsPath ? vsResolved : NULL, fsResolved);
     if (s_shaders[slot].shader.id == 0 ||
         s_shaders[slot].shader.id == Eng_GfxDefaultShaderId()) {
         fprintf(stderr, "content: shader load failed for '%s'\n", fsResolved);
-        s_shaderCount--;
+        if (slot == s_shaderCount - 1) s_shaderCount--;
         return (EngShader){0};
     }
     snprintf(s_shaders[slot].vsPath, sizeof s_shaders[slot].vsPath,
@@ -280,6 +376,7 @@ EngShader Eng_LoadShader(const char *vsPath, const char *fsPath) {
     snprintf(s_shaders[slot].fsPath, sizeof s_shaders[slot].fsPath,
              "%s", fsResolved);
     s_shaders[slot].used = true;
+    s_shaders[slot].refcount = 1;
     fprintf(stderr, "shader: loaded vs=%s fs=%s\n",
             vsPath ? vsResolved : "(builtin-vs)", fsResolved);
     return (EngShader){ (uint32_t)(slot + 1) };
@@ -290,6 +387,18 @@ Shader *Eng_ShaderGet(EngShader h) {
     int idx = (int)h.id - 1;
     if (!s_shaders[idx].used) return NULL;
     return &s_shaders[idx].shader;
+}
+
+void Eng_UnloadShader(EngShader h) {
+    if (h.id == 0 || h.id > (uint32_t)s_shaderCount) return;
+    int idx = (int)h.id - 1;
+    if (!s_shaders[idx].used) return;  // already freed: silent no-op
+    if (--s_shaders[idx].refcount > 0) return;
+    UnloadShader(s_shaders[idx].shader);
+    s_shaders[idx].used = false;
+    s_shaders[idx].vsPath[0] = '\0';
+    s_shaders[idx].fsPath[0] = '\0';
+    s_shaders[idx].refcount = 0;
 }
 
 // ============================================================================
@@ -317,24 +426,34 @@ EngClipSet Eng_LoadAnimModel(const char *path) {
 
     // Dedup.
     for (int i = 0; i < s_clipCount; i++) {
-        if (s_clipsets[i].used && strcmp(s_clipsets[i].path, resolved) == 0)
+        if (s_clipsets[i].used && strcmp(s_clipsets[i].path, resolved) == 0) {
+            s_clipsets[i].refcount++;
             return (EngClipSet){ (uint32_t)(i + 1) };
+        }
     }
 
-    if (s_clipCount >= MAX_CLIPSETS) {
-        fprintf(stderr, "content: clip set registry full (cap=%d)\n", MAX_CLIPSETS);
-        return (EngClipSet){0};
+    // Look for a freed slot to recycle before growing the table.
+    int slot = -1;
+    for (int i = 0; i < s_clipCount; i++) {
+        if (!s_clipsets[i].used) { slot = i; break; }
+    }
+    if (slot < 0) {
+        if (s_clipCount >= MAX_CLIPSETS) {
+            fprintf(stderr, "content: clip set registry full (cap=%d)\n", MAX_CLIPSETS);
+            return (EngClipSet){0};
+        }
+        slot = s_clipCount++;
     }
 
-    int slot = s_clipCount++;
     s_clipsets[slot].model = LoadModel(resolved);
     if (s_clipsets[slot].model.meshCount == 0) {
         fprintf(stderr, "content: anim model '%s' has no meshes\n", resolved);
-        s_clipCount--;
+        if (slot == s_clipCount - 1) s_clipCount--;
         return (EngClipSet){0};
     }
     snprintf(s_clipsets[slot].path, sizeof s_clipsets[slot].path, "%s", resolved);
     s_clipsets[slot].used = true;
+    s_clipsets[slot].refcount = 1;
     fprintf(stderr, "model: anim loaded %s (meshes=%d)\n", resolved,
             s_clipsets[slot].model.meshCount);
     return (EngClipSet){ (uint32_t)(slot + 1) };
@@ -345,6 +464,17 @@ Model *Eng_ClipSetModel(EngClipSet h) {
     int idx = (int)h.id - 1;
     if (!s_clipsets[idx].used) return NULL;
     return &s_clipsets[idx].model;
+}
+
+void Eng_UnloadClipSet(EngClipSet h) {
+    if (h.id == 0 || h.id > (uint32_t)s_clipCount) return;
+    int idx = (int)h.id - 1;
+    if (!s_clipsets[idx].used) return;  // already freed: silent no-op
+    if (--s_clipsets[idx].refcount > 0) return;
+    UnloadModel(s_clipsets[idx].model);
+    s_clipsets[idx].used = false;
+    s_clipsets[idx].path[0] = '\0';
+    s_clipsets[idx].refcount = 0;
 }
 
 // ============================================================================

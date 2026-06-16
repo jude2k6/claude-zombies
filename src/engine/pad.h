@@ -83,6 +83,26 @@ Vector2 Eng_InputMoveAxis(void);
 // pad sensitivity), whichever source has non-zero input.
 Vector2 Eng_InputLookDelta(void);
 
+// Absolute cursor position in screen pixels (origin top-left).
+// For UI/editor work — drag-select rectangles, gizmo-handle hit testing,
+// cursor-relative menus — anything that needs "where is the pointer", not
+// "how is the player looking".
+Vector2 Eng_InputMousePos(void);
+
+// Raw mouse movement this frame, in pixels, UNSCALED.
+// Distinct from Eng_InputLookDelta: this is mouse-only (no gamepad-stick
+// fallback) and carries no sensitivity scaling — it is the bare pixel delta,
+// suitable for editor dragging (e.g. "move this gizmo by the pixels the
+// mouse moved"). Eng_InputLookDelta, by contrast, may source from either the
+// mouse or the right stick and is pre-scaled by the look-sensitivity
+// settings for camera turning. Use this one for editor/UI dragging; use
+// Eng_InputLookDelta for first-person look.
+Vector2 Eng_InputMouseDelta(void);
+
+// Scroll-wheel movement this frame (positive = scrolled up/away from user).
+// For zoom, list scrolling, etc.
+float   Eng_InputMouseWheel(void);
+
 // Override the default look sensitivities.
 void    Eng_InputSetLookSensitivity(float mouse, float pad);
 

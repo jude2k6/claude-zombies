@@ -177,6 +177,11 @@ Deferred because it is **low value for the current goals**: the map editor needs
 the same raygui anyway, and there is no second UI backend in view. Tracked but not
 a blocker.
 
+**Update:** the editor becoming real is the trigger that flips this from low-value to
+worth doing — two consumers (game menus + editor panels) would share the widgets. The
+layering rationale (engine/toolkit/game/editor and where UI sits) is scaffolded in
+[engine-layers.md](engine-layers.md); resolving this facade is step 1 there.
+
 ### Open #2 — `types.h` split (§13) — assessed 2026-06-15, NOT worth doing
 No engine file includes `types.h` (verified: `grep '#include.*types.h' src/engine/`
 is empty — the only hits are comment mentions). Since the engine is already fully

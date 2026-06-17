@@ -9,6 +9,7 @@
 #include "pick.h"
 #include "debugdraw.h"
 #include "gfx.h"
+#include "deffile.h"   // shared .mob reader (engine-side, game-clean)
 
 #include <stdio.h>
 #include <string.h>
@@ -364,7 +365,10 @@ static int AddSpawn(EdScene *s, const char *mob, float x, float z) {
 static void PlaceAt(EdScene *s, Vector3 p) {
     switch (s->placeTool) {
         case ED_PLACE_PLAYER: s->selectedId = AddSpawn(s, "PLAYER", p.x, p.z); EdScene_Commit(s); break;
-        case ED_PLACE_ZOMBIE: s->selectedId = AddSpawn(s, "ZOMBIE", p.x, p.z); EdScene_Commit(s); break;
+        case ED_PLACE_MOB: {
+            const char *mob = s->placeMobId[0] ? s->placeMobId : "ZOMBIE";
+            s->selectedId = AddSpawn(s, mob, p.x, p.z); EdScene_Commit(s); break;
+        }
         case ED_PLACE_BARRICADE: {
             int wid = EngMapEnt_Add(&s->doc, ENGMAPENT_WINDOW);
             if (wid < 0) return;
@@ -488,6 +492,58 @@ static void UpdateGizmo(EdScene *s, bool allowGrab) {
     if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) s->dragging = false;
 }
 
+// ---- mob catalog scan (data/mobs/*/*.mob via the shared deffile reader) -----
+
+// Accumulator for one .mob file: we read only the editor-relevant fields.
+typedef struct { EdMobDef def; bool sawId; } EdMobParse;
+
+static void EdMobLineCb(int lineNo, int n, char **toks, void *user) {
+    (void)lineNo;
+    EdMobParse *mp = (EdMobParse *)user;
+    const char *k = toks[0];
+    if (strcmp(k, "id") == 0 && n >= 2) {
+        snprintf(mp->def.id, sizeof mp->def.id, "%s", toks[1]);
+        mp->sawId = true;
+    } else if (strcmp(k, "name") == 0 && n >= 2) {
+        snprintf(mp->def.name, sizeof mp->def.name, "%s", toks[1]);
+    } else if (strcmp(k, "tint") == 0 && n >= 4) {
+        unsigned char rgba[4];
+        Eng_DefParseColor(toks, n, 1, rgba);
+        mp->def.tint = (Color){ rgba[0], rgba[1], rgba[2], rgba[3] };
+    }
+    // behaviour / stats are game-only — the editor never reads them.
+}
+
+void EdScene_ScanMobs(EdScene *s) {
+    s->mobDefCount = 0;
+    static const char *prefixes[] = { "data/mobs", "../data/mobs", "./data/mobs" };
+    for (size_t p = 0; p < sizeof prefixes / sizeof prefixes[0]; p++) {
+        if (!DirectoryExists(prefixes[p])) continue;
+        FilePathList files = LoadDirectoryFilesEx(prefixes[p], ".mob", true);
+        for (unsigned i = 0; i < files.count && s->mobDefCount < ED_MAX_MOBDEFS; i++) {
+            char *text = LoadFileText(files.paths[i]);
+            if (!text) continue;
+            EdMobParse mp = { .def = { .name = "", .tint = { 200, 80, 80, 255 } }, .sawId = false };
+            Eng_DefForEachLine(text, EdMobLineCb, &mp);
+            UnloadFileText(text);
+            if (mp.sawId) {
+                if (!mp.def.name[0]) snprintf(mp.def.name, sizeof mp.def.name, "%s", mp.def.id);
+                s->mobDefs[s->mobDefCount++] = mp.def;
+            }
+        }
+        UnloadDirectoryFiles(files);
+        if (s->mobDefCount > 0) break;   // first existing root wins
+    }
+    // Always offer at least the zombie so the palette has a mob tool even when
+    // run from a directory without a data/mobs catalog.
+    if (s->mobDefCount == 0) {
+        EdMobDef z = { .id = "ZOMBIE", .name = "Zombie spawn", .tint = { 200, 80, 80, 255 } };
+        s->mobDefs[s->mobDefCount++] = z;
+    }
+    // Default the active mob tool to the first scanned mob.
+    snprintf(s->placeMobId, sizeof s->placeMobId, "%s", s->mobDefs[0].id);
+}
+
 // ---- lifecycle -------------------------------------------------------------
 
 void EdScene_Init(EdScene *s) {
@@ -507,6 +563,7 @@ void EdScene_Init(EdScene *s) {
     s->selectedId = -1;
     s->mode = ENG_GIZMO_TRANSLATE;
     s->placeTool = ED_PLACE_NONE;
+    EdScene_ScanMobs(s);
     s->dirty = false;
 }
 

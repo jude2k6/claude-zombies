@@ -415,15 +415,27 @@ static void PanelTools(EdHost *h, Rectangle c, void *u) {
     y += 30 * sc;
 
     GuiLabel((Rectangle){ X, y, W, 14 * sc }, "PLACE (click ground)"); y += 16 * sc;
-    struct { const char *label; EdPlaceTool tool; } tools[] = {
-        { "Select / move", ED_PLACE_NONE }, { "Player spawn", ED_PLACE_PLAYER },
-        { "Zombie spawn",  ED_PLACE_ZOMBIE }, { "Barricade", ED_PLACE_BARRICADE },
-    };
-    for (int i = 0; i < 4; i++) {
-        if (Eng_UiToolButton((Rectangle){ X, y, W, 22 * sc }, tools[i].label, s->placeTool == tools[i].tool))
-            s->placeTool = tools[i].tool;
+    // Static tools first.
+    if (Eng_UiToolButton((Rectangle){ X, y, W, 22 * sc }, "Select / move", s->placeTool == ED_PLACE_NONE))
+        s->placeTool = ED_PLACE_NONE;
+    y += 25 * sc;
+    if (Eng_UiToolButton((Rectangle){ X, y, W, 22 * sc }, "Player spawn", s->placeTool == ED_PLACE_PLAYER))
+        s->placeTool = ED_PLACE_PLAYER;
+    y += 25 * sc;
+    // One button per mob from the data/mobs catalog (data-driven; see
+    // EdScene_ScanMobs). Clicking arms ED_PLACE_MOB with that mob's tag.
+    for (int i = 0; i < s->mobDefCount; i++) {
+        const EdMobDef *m = &s->mobDefs[i];
+        bool active = (s->placeTool == ED_PLACE_MOB && strcmp(s->placeMobId, m->id) == 0);
+        if (Eng_UiToolButton((Rectangle){ X, y, W, 22 * sc }, m->name, active)) {
+            s->placeTool = ED_PLACE_MOB;
+            snprintf(s->placeMobId, sizeof s->placeMobId, "%s", m->id);
+        }
         y += 25 * sc;
     }
+    if (Eng_UiToolButton((Rectangle){ X, y, W, 22 * sc }, "Barricade", s->placeTool == ED_PLACE_BARRICADE))
+        s->placeTool = ED_PLACE_BARRICADE;
+    y += 25 * sc;
     GuiCheckBox((Rectangle){ X, y, 16 * sc, 16 * sc }, " auto-spawn ZOMBIE", &s->barricadeAutoSpawn);
 }
 

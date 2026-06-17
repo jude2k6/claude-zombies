@@ -32,8 +32,22 @@
 typedef enum { ED_VIEW_FLY = 0, ED_VIEW_ORBIT, ED_VIEW_TOP } EdViewMode;
 
 // Placement tool: what a ground-click drops. NONE = click selects instead.
-typedef enum { ED_PLACE_NONE = 0, ED_PLACE_PLAYER, ED_PLACE_ZOMBIE,
+// ED_PLACE_MOB drops a SPAWN whose mob tag is `placeMobId` — the data-driven
+// path fed by the data/mobs/ catalog scan (replaces a hardcoded ZOMBIE tool).
+typedef enum { ED_PLACE_NONE = 0, ED_PLACE_PLAYER, ED_PLACE_MOB,
                ED_PLACE_BARRICADE, ED_PLACE_COUNT } EdPlaceTool;
+
+// A mob the editor can place, scanned from data/mobs/*/*.mob via the engine's
+// shared deffile reader. The editor only needs the placeable identity (id +
+// label + marker colour); it never reads `behaviour` (game-only) — same seam
+// as docs/editor-content-extensibility.md §3.
+#define ED_MAX_MOBDEFS 24
+#define ED_MOBID_LEN   24
+typedef struct {
+    char  id[ED_MOBID_LEN];   // SPAWN MOB <id> written on placement
+    char  name[48];           // palette label
+    Color tint;               // marker colour
+} EdMobDef;
 
 // A draw/pick proxy: one selectable box per MapDoc entity, tagged by stable id.
 typedef struct {
@@ -61,6 +75,11 @@ typedef struct EdScene {
     int           selectedId;       // -1 = nothing selected
     EngGizmoMode  mode;             // current gizmo mode
     EdPlaceTool   placeTool;        // active placement tool (NONE = select mode)
+    char          placeMobId[ED_MOBID_LEN];  // ED_PLACE_MOB: which mob tag to drop
+
+    // ---- mob catalog (scanned from data/mobs/) -----------------------------
+    EdMobDef      mobDefs[ED_MAX_MOBDEFS];
+    int           mobDefCount;
 
     bool          dragging;
     EngGizmoDrag  drag;
@@ -112,6 +131,11 @@ void EdScene_SaveSettings(EdScene *s, EngCfg *cfg);
 // must already be loaded (they drive history depth, default view, zoom, scale).
 void EdScene_Init(EdScene *s);
 void EdScene_Shutdown(EdScene *s);   // frees history + viewport texture
+
+// Scan data/mobs/*/*.mob into s->mobDefs (called by EdScene_Init). Falls back
+// to a single built-in "ZOMBIE" entry when no catalog is found, so the place
+// palette always has at least one mob tool.
+void EdScene_ScanMobs(EdScene *s);
 
 // Rebuild the proxy list from the document (cheap; called each frame).
 void EdScene_RebuildProxies(EdScene *s);

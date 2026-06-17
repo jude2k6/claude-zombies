@@ -8,6 +8,7 @@
 #include "player.h"
 #include "game.h"
 #include "weapons.h"
+#include "mobs.h"
 #include "entities.h"
 #include "interact.h"
 #include "assets.h"
@@ -27,6 +28,28 @@ static int Dev_Validate(int argc, char **argv) {
     if (argc < 3) { fprintf(stderr, "usage: --validate <map.map>\n"); return 1; }
     SetTraceLogLevel(LOG_ERROR);
     int errs = Level_Validate(argv[2]);
+    return errs > 0 ? 1 : 0;
+}
+
+// ---- --list-mobs -----------------------------------------------------------
+// Headless: load the data/mobs/ catalog, dump each MobDef, run Mob_Validate.
+// Exits non-zero if any validation ERROR is found (CI hook for the catalog).
+
+static int Dev_ListMobs(int argc, char **argv) {
+    (void)argc; (void)argv;
+    SetTraceLogLevel(LOG_ERROR);
+    Mobs_Load();   // prints summary + issues itself
+    int n = Mob_Count();
+    printf("mobs: %d loaded\n", n);
+    for (int i = 0; i < n; i++) {
+        const MobDef *d = Mob_Get(i);
+        printf("  %-10s %-12s model=%-14s behaviour=%-8s hp=%d spd=%.2f dmg=%d\n",
+               d->id, d->name, d->model, d->behaviour, d->healthBase, d->moveSpeed, d->damage);
+    }
+    MobIssue issues[32];
+    int ni = Mob_Validate(issues, 32);
+    int errs = 0;
+    for (int i = 0; i < ni && i < 32; i++) if (issues[i].severity == MOB_ERROR) errs++;
     return errs > 0 ? 1 : 0;
 }
 
@@ -903,6 +926,10 @@ bool Devtools_HandleCLI(int argc, char **argv, int *exitCode) {
     }
     if (argc >= 3 && strcmp(argv[1], "--anim-test") == 0) {
         *exitCode = Dev_AnimTest(argc, argv);
+        return true;
+    }
+    if (argc >= 2 && strcmp(argv[1], "--list-mobs") == 0) {
+        *exitCode = Dev_ListMobs(argc, argv);
         return true;
     }
     if (argc >= 3 && strcmp(argv[1], "--map-roundtrip") == 0) {

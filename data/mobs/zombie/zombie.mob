@@ -1,0 +1,29 @@
+# Zombie — the baseline shambler. `id` is what a SPAWN MOB <tag> stores.
+# These numbers reproduce the previously-hardcoded zombie: round-1 HP 150,
+# round-1 base speed 1.7, contact damage 50. The game's round curve scales
+# health_base / move_speed up each round.
+
+id              ZOMBIE
+name            Shambler
+category        mob
+
+# ---- render (clip names match the bones inside zombie.glb) ----
+model           zombie.glb
+model_scale     1.0
+model_yaw       0.0
+tint            150 200 150 255
+anim_walk       walk
+anim_attack     attack_a
+anim_death      death
+anim_idle       walk
+
+# ---- behaviour: names a game-side AI archetype (see ai/behaviour.h) ----
+behaviour       chaser
+move_speed      1.7
+path_repath     0.5
+
+# ---- stats (game reads these; engine/editor never do) ----
+health_base     150
+damage          50
+attack_windup   0.5
+attack_range    1.6

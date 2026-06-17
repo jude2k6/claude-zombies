@@ -82,6 +82,7 @@ add_executable(shooter
     src/game/level.c
     src/game/player.c
     src/game/weapons.c
+    src/game/mobs.c
     src/game/perks.c
     src/game/entities.c
     src/game/interact.c

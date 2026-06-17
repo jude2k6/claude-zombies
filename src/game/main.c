@@ -7,6 +7,7 @@
 #include "level.h"
 #include "player.h"
 #include "weapons.h"
+#include "mobs.h"
 #include "perks.h"
 #include "entities.h"
 #include "interact.h"
@@ -194,6 +195,7 @@ static void HandleLocalActions(Player *me) {
 
 static void GameMod_Init(void) {
     Weapons_Load();   // before Assets_Load: enrols weapon models for the world shader
+    Mobs_Load();      // data-driven mob catalog (data/mobs/*.mob) — spawn tags resolve here
     Assets_Load();
     Render_LoadZombieAnim();        // shared rigged zombie.glb (skinned shader from Assets_Load)
     Viewmodel_LoadArms();           // shared first-person arms (non-pistol guns bolt onto hand.R)

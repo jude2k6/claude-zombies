@@ -65,6 +65,7 @@ add_library(engine STATIC
     src/engine/gizmo.c
     src/engine/mapedit.c
     src/engine/ui.c
+    src/engine/cfg.c
 )
 target_include_directories(engine PUBLIC
     ${CMAKE_SOURCE_DIR}/src/engine

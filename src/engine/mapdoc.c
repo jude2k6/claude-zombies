@@ -13,6 +13,7 @@
 #include <string.h>
 #include <ctype.h>
 #include <math.h>
+#include <stdarg.h>
 
 /* ---- internal helpers ---- */
 
@@ -1031,4 +1032,138 @@ bool MapDoc_Equal(const MapDoc *a, const MapDoc *b) {
 
 int MapDoc_AllocId(MapDoc *doc) {
     return doc->nextId++;
+}
+
+/* ---- geometry / integrity validation ---- */
+
+/* Append one issue when room remains, and always bump the running total so the
+   caller learns the real count even with a short buffer. */
+static void AddIssue(MapDocIssue *out, int max, int *n, int severity, int entId,
+                     const char *fmt, ...) {
+    if (out && *n < max) {
+        MapDocIssue *it = &out[*n];
+        it->severity = severity;
+        it->entId    = entId;
+        va_list ap; va_start(ap, fmt);
+        vsnprintf(it->msg, sizeof it->msg, fmt, ap);
+        va_end(ap);
+    }
+    (*n)++;
+}
+
+static bool DirValid(const char *d) {
+    return !strcmp(d, "+x") || !strcmp(d, "-x") || !strcmp(d, "+z") || !strcmp(d, "-z");
+}
+
+/* Is (x,z) within valid sector index si's footprint (small slack for edges)? */
+static bool InSector(const MapDoc *d, int si, float x, float z) {
+    const MapDocSector *s = &d->sectors[si];
+    return fabsf(x - s->x) <= s->sx * 0.5f + 0.05f &&
+           fabsf(z - s->z) <= s->sz * 0.5f + 0.05f;
+}
+
+/* Validate an entity's sector reference. Emits an issue and returns -1 if the
+   reference is unusable, else the valid sector index. */
+static int CheckSectorRef(const MapDoc *d, MapDocIssue *out, int max, int *n,
+                          int entId, const char *what, int sectorId) {
+    if (sectorId < 0) {
+        AddIssue(out, max, n, MAPDOC_ERROR, entId, "%s #%d has no sector (ungrouped)", what, entId);
+        return -1;
+    }
+    if (sectorId >= d->sectorCount) {
+        AddIssue(out, max, n, MAPDOC_ERROR, entId, "%s #%d references invalid sector %d", what, entId, sectorId);
+        return -1;
+    }
+    return sectorId;
+}
+
+int MapDoc_Validate(const MapDoc *d, MapDocIssue *out, int max) {
+    int n = 0;
+
+    /* ---- doc-level ---- */
+    if (d->sectorCount == 0)
+        AddIssue(out, max, &n, MAPDOC_ERROR, -1, "map has no sectors");
+
+    int players = 0, mobs = 0;
+    for (int i = 0; i < d->spawnCount; i++) {
+        if (strcmp(d->spawns[i].mob, "PLAYER") == 0) players++; else mobs++;
+    }
+    if (players == 0) AddIssue(out, max, &n, MAPDOC_ERROR, -1, "no PLAYER spawn - nowhere to start");
+    if (mobs == 0)    AddIssue(out, max, &n, MAPDOC_WARN,  -1, "no mob spawns - no zombies will appear");
+    if (d->arenaHalfX <= 0 || d->arenaHalfZ <= 0)
+        AddIssue(out, max, &n, MAPDOC_WARN, -1, "arena half-extents are non-positive");
+
+    /* ---- sectors ---- */
+    for (int i = 0; i < d->sectorCount; i++) {
+        const MapDocSector *s = &d->sectors[i];
+        if (s->sx <= 0 || s->sz <= 0)
+            AddIssue(out, max, &n, MAPDOC_ERROR, s->id, "sector '%s' has non-positive size", s->name);
+        if (s->kind == SECTOR_FLAT && fabsf(s->yHigh - s->yLow) > 1e-3f)
+            AddIssue(out, max, &n, MAPDOC_WARN, s->id, "flat sector '%s' has yLow != yHigh", s->name);
+        if (s->kind == SECTOR_RAMP) {
+            if (s->yHigh - s->yLow <= 1e-3f)
+                AddIssue(out, max, &n, MAPDOC_WARN, s->id, "ramp '%s' has no rise", s->name);
+            if (s->rampAxis != 1 && s->rampAxis != 2)
+                AddIssue(out, max, &n, MAPDOC_ERROR, s->id, "ramp '%s' has invalid axis", s->name);
+            if (s->linkA >= d->sectorCount || s->linkB >= d->sectorCount)
+                AddIssue(out, max, &n, MAPDOC_ERROR, s->id, "ramp '%s' links a non-existent sector", s->name);
+        }
+    }
+
+    /* ---- placed entities: sector ref + containment + per-kind checks ---- */
+    for (int i = 0; i < d->spawnCount; i++) {
+        const MapDocSpawn *e = &d->spawns[i];
+        int si = CheckSectorRef(d, out, max, &n, e->id, "spawn", e->sectorId);
+        // Only PLAYER starts must sit inside their sector. Mob spawns are
+        // legitimately placed outside the arena (zombies enter from outside),
+        // so containment is not an error for them.
+        if (si >= 0 && strcmp(e->mob, "PLAYER") == 0 && !InSector(d, si, e->x, e->z))
+            AddIssue(out, max, &n, MAPDOC_WARN, e->id, "player spawn #%d sits outside its sector", e->id);
+    }
+    for (int i = 0; i < d->wallCount; i++) {
+        const MapDocWall *e = &d->walls[i];
+        int si = CheckSectorRef(d, out, max, &n, e->id, "wall", e->sectorId);
+        if (fabsf(e->x2 - e->x1) < 1e-3f && fabsf(e->z2 - e->z1) < 1e-3f)
+            AddIssue(out, max, &n, MAPDOC_ERROR, e->id, "wall #%d has zero length", e->id);
+        if (si >= 0 && (!InSector(d, si, e->x1, e->z1) || !InSector(d, si, e->x2, e->z2)))
+            AddIssue(out, max, &n, MAPDOC_WARN, e->id, "wall #%d extends outside its sector", e->id);
+    }
+    // Windows (barricades) and wallbuys live ON the perimeter / wall line, so
+    // they are not containment-checked — only their sector ref + facing.
+    for (int i = 0; i < d->windowCount; i++) {
+        const MapDocWindow *e = &d->windows[i];
+        CheckSectorRef(d, out, max, &n, e->id, "window", e->sectorId);
+        if (!DirValid(e->dir))
+            AddIssue(out, max, &n, MAPDOC_ERROR, e->id, "window #%d has invalid facing '%s'", e->id, e->dir);
+    }
+    for (int i = 0; i < d->obstacleCount; i++) {
+        const MapDocObstacle *e = &d->obstacles[i];
+        int si = CheckSectorRef(d, out, max, &n, e->id, "obstacle", e->sectorId);
+        if (e->sx <= 0 || e->sz <= 0 || e->h <= 0)
+            AddIssue(out, max, &n, MAPDOC_WARN, e->id, "obstacle #%d has non-positive size", e->id);
+        if (si >= 0 && !InSector(d, si, e->x, e->z))
+            AddIssue(out, max, &n, MAPDOC_WARN, e->id, "obstacle #%d sits outside its sector", e->id);
+    }
+    for (int i = 0; i < d->propCount; i++) {
+        const MapDocProp *e = &d->props[i];
+        int si = CheckSectorRef(d, out, max, &n, e->id, "prop", e->sectorId);
+        if (e->scale <= 0)
+            AddIssue(out, max, &n, MAPDOC_WARN, e->id, "prop #%d has non-positive scale", e->id);
+        if (si >= 0 && !InSector(d, si, e->x, e->z))
+            AddIssue(out, max, &n, MAPDOC_WARN, e->id, "prop #%d sits outside its sector", e->id);
+    }
+    for (int i = 0; i < d->wallbuyCount; i++) {
+        const MapDocWallbuy *e = &d->wallbuys[i];
+        CheckSectorRef(d, out, max, &n, e->id, "wallbuy", e->sectorId);
+        if (!DirValid(e->dir))
+            AddIssue(out, max, &n, MAPDOC_ERROR, e->id, "wallbuy #%d has invalid facing '%s'", e->id, e->dir);
+    }
+    for (int i = 0; i < d->perkCount; i++) {
+        const MapDocPerk *e = &d->perks[i];
+        int si = CheckSectorRef(d, out, max, &n, e->id, "perk", e->sectorId);
+        if (si >= 0 && !InSector(d, si, e->x, e->z))
+            AddIssue(out, max, &n, MAPDOC_WARN, e->id, "perk #%d sits outside its sector", e->id);
+    }
+
+    return n;
 }

@@ -84,7 +84,28 @@ build/editor --check [map]         # headless: parse, build proxies, print count
 
 `--check` is the editor's CI/smoke hook (the analogue of the game's `--validate`): it
 loads a map and reports entity counts without opening a window, so the editor stays
-buildable-and-loadable in headless environments.
+buildable-and-loadable in headless environments. It also runs `MapDoc_Validate` and
+prints any geometry/integrity issues, exiting non-zero on a parse error or a
+validation ERROR — so a broken map fails CI.
+
+### Settings + validation
+
+The toolbar's **MAP** section opens two modal overlays:
+
+- **Settings** — camera speeds/sensitivity, default view + FOV + zoom, grid spacing/
+  extent, **grid snapping** (toggle + step; snaps both ground placement and gizmo
+  drags), barricade auto-spawn, undo depth, and window/vsync/FPS (applied on restart).
+  Persisted to **`editor.cfg`** via the engine's `cfg.{c,h}` key=value helper — searched
+  from the CWD like the game's `settings.cfg`, loaded before the window opens, and saved
+  on demand or at shutdown. `ui.scale` falls back to the display recommendation when absent.
+- **Validate map** — runs `MapDoc_Validate` and lists issues (errors red, warnings gold);
+  click a row to select the offending entity. The same check backs `--check`.
+
+`MapDoc_Validate` (engine-side, game-clean) checks sector well-formedness, that placed
+entities reference a real sector and (where it makes sense) sit inside it, non-degenerate
+walls, valid facings, and that the map has the spawns it needs. Perimeter entities — mob
+spawns, windows, wallbuys — are deliberately NOT containment-checked (they live on/outside
+the arena edge by design).
 
 ### View modes
 

@@ -268,4 +268,30 @@ bool MapDoc_Equal(const MapDoc *a, const MapDoc *b);
  */
 int  MapDoc_AllocId(MapDoc *doc);
 
+/* ---- geometry / integrity validation ---- */
+
+typedef enum {
+    MAPDOC_WARN  = 1,   /* playable, but probably a mistake */
+    MAPDOC_ERROR = 2    /* will misbehave / fail to instantiate correctly */
+} MapDocSeverity;
+
+typedef struct {
+    int  severity;      /* MapDocSeverity */
+    int  entId;         /* offending entity's stable id, or -1 for doc-level */
+    char msg[160];      /* human-readable description */
+} MapDocIssue;
+
+/*
+ * MapDoc_Validate — check a document's geometry and integrity.
+ * Verifies sectors are well-formed, every placed entity belongs to a real
+ * sector and sits inside that sector's footprint, walls are non-degenerate,
+ * directional entities face a valid axis, and the map has the spawns it needs
+ * (at least one PLAYER start; mob spawns for zombies).
+ *
+ * Writes up to `max` issues into `out` (in check order) and returns the TOTAL
+ * number found — which may exceed `max`, so the caller can report a count even
+ * when the buffer is full. Returns 0 when the map is clean. Pure read-only.
+ */
+int  MapDoc_Validate(const MapDoc *d, MapDocIssue *out, int max);
+
 #endif /* SHOOTER_MAPDOC_H */

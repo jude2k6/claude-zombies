@@ -1,8 +1,11 @@
 # Editor Content Extensibility — entities, mobs, assets, behaviours
 
-**Status: agreed design, NOT yet implemented.** This captures the design settled in
-discussion for how users add their own entities/mobs/assets to the map editor (and how the
-game consumes the same content). It is the plan behind roadmap item #3 in
+**Status: largely implemented (mob path).** The mob slice of this design now ships —
+data-driven `.mob` catalog, behaviour registry (Tier 1 + Tier 2 `.so`), and the editor's
+mob place palette; see §7 for what landed and the divergences. The entity-def registry for
+*all* primitive kinds and the asset browser remain future work. This document captures the
+design settled in discussion for how users add their own entities/mobs/assets to the map
+editor (and how the game consumes the same content). It is the plan behind roadmap item #3 in
 [scene-builder.md](scene-builder.md) ("place all entity kinds") and the broader backlog in
 [editor-feature-ideas.md](editor-feature-ideas.md). It builds on the editor's plugin shell
 ([scene-builder.md](scene-builder.md) §3) and the engine/game seam
@@ -297,17 +300,38 @@ viewport uses engine asset-load APIs — see
 [editor-textured-rendering-plan.md](editor-textured-rendering-plan.md). This and game-accurate
 rendering converge on the same asset path.
 
-## 7. Implementation order (when we start)
+## 7. Implementation order
 
-1. **Shared def-file loader** — one house key=value reader reused by `.mob`, `.weapon`, and
-   future `.perk`/`.prop` catalogs, and by the editor's def-scanner. One format, one parser.
-2. **Zombie refactor (proves the format end-to-end)** — move the existing hardcoded zombie's
-   numbers into `data/mobs/zombie/zombie.mob` and load it. Pure refactor, no behaviour
-   change.
-3. **Behaviour registry** — `Game_RegisterBehaviour(name, ...)` + a `behaviours/` (and
-   per-mob-folder) `.so` scan, mirroring the editor's plugin loader. Register `chaser`
-   (and whatever the current zombie uses) as Tier-1 archetypes.
-4. **Editor def-scanner + palette** — generalise the place palette to read entity defs (mob
-   catalog first), then add POINT/LINE/RECT placement for all primitive kinds.
-5. **Asset browser + picker**; then a second mob (`dog`) to validate reuse, and (optionally)
-   a Tier-2 behaviour `.so` to validate the no-rebuild path.
+1. ~~**Shared def-file loader**~~ **Done** — `src/engine/deffile.{c,h}`
+   (`Eng_DefTokenize` / `Eng_DefParse*` / `Eng_DefForEachLine`), raylib-free so the
+   editor reuses it. `.weapon` and `.mob` both parse through it.
+2. ~~**Zombie refactor**~~ **Done** — `data/mobs/zombie/zombie.mob` carries the (formerly
+   hardcoded) zombie numbers; the game scales the round curve by the mob's round-1
+   baselines so the zombie is byte-identical (`src/game/mobs.{c,h}`, `Mob_Validate`,
+   headless `--list-mobs`).
+3. ~~**Behaviour registry**~~ **Done** — `src/game/mob_ai.{c,h}`:
+   `Game_RegisterBehaviour` + a `./behaviours/` and per-mob-folder `.so` scan
+   (`Game_LoadBehaviourPlugins`, dlopen, ABI-checked, `shooter` is `-rdynamic`). The
+   zombie loop is registered as the Tier-1 `chaser` archetype and dispatched via
+   `Mobs_RunBehaviours`. A mob naming an unregistered behaviour is flagged at startup.
+4. ~~**Editor def-scanner + palette** (mob catalog)~~ **Done** — `EdScene_ScanMobs`
+   reads `data/mobs/` via `deffile`; the PLACE palette renders one button per mob
+   (`ED_PLACE_MOB` + `placeMobId`). POINT/LINE/RECT placement for **all** primitive kinds
+   is still open (see [editor-feature-ideas.md](editor-feature-ideas.md) 3.1).
+5. **Partly done** — `data/mobs/dog/dog.mob` proves data-only reuse (reuses `chaser`); the
+   Tier-2 `.so` no-rebuild path is wired and ready to validate with a sample plugin.
+   **Asset browser + picker** is still open.
+
+### Divergences from the design above (worth knowing)
+
+- **AI dispatch granularity.** `behaviour` resolves to an *update-all* pass per archetype
+  (the archetype iterates `g_world.enemies` and filters to its own), not a per-enemy
+  param-bag call. The registry/lookup is real; the per-enemy param-bag refactor of the
+  300-line chaser loop is deferred (the loop still keys on `ZombieType` internally).
+- **Behaviour code lives flat in `src/game/`** (`mob_ai.c`), not `src/game/ai/`, matching
+  the existing flat game layout.
+- **Render uses one model for all live mobs** (the zombie `.glb`, with model + clip *names*
+  read from the zombie `MobDef`). Per-mob distinct models need the enemy's `mobIdx` on the
+  wire — today it is **host-only / unserialized** — so the netcode is untouched.
+- **`dog` is placeable + loaded + validated but not live-spawned** by the round director
+  (which still picks `ZOMBIE`). Dog rounds are a game-design follow-up, not a data gap.

@@ -8,7 +8,7 @@
 #include "pad.h"
 #include "settings.h"
 #include "raygui.h"
-#include "eng_ui.h"   // house UI toolkit: theme + shadowed/centered text
+#include "ui.h"   // house UI toolkit: theme + shadowed/centered text
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -36,8 +36,8 @@ int      mapListCount = 0;
 int      selectedMapIdx = 0;
 
 // ---- menu styling --------------------------------------------------------
-// Theme + shadowed/centered text come from the engine UI toolkit (eng_ui):
-// ENGUI_* colors, EngUi_TextShadow / EngUi_TextCentered, EngUi_ApplyTheme.
+// Theme + shadowed/centered text come from the engine UI toolkit (ui):
+// ENG_UI_* colors, Eng_UiTextShadow / Eng_UiTextCentered, Eng_UiApplyTheme.
 // Only the menu-specific full-screen gradient background stays local.
 static void MenuBG(int sw, int sh) {
     DrawRectangleGradientV(0, 0, sw, sh, (Color){ 20, 24, 32, 255 }, (Color){ 9, 10, 15, 255 });
@@ -62,7 +62,7 @@ void Menu_ScanMaps(void) {
         UnloadDirectoryFiles(list);
     }
     if (selectedMapIdx >= mapListCount) selectedMapIdx = 0;
-    EngUi_ApplyTheme();
+    Eng_UiApplyTheme();
 }
 
 static void LoadSelectedMap(void) {
@@ -76,15 +76,15 @@ static void LoadSelectedMap(void) {
 // rows (mouse) + Up/Down keys when canEdit. Returns the panel's bottom y.
 static int DrawMapList(int cx, int top, bool canEdit) {
     int w = 440, rowH = 48, pad = 12, x = cx - w / 2;
-    EngUi_TextShadow("SELECT MAP", x + 2, top, 18, ENGUI_GOLD);
+    Eng_UiTextShadow("SELECT MAP", x + 2, top, 18, ENG_UI_GOLD);
     int py = top + 28;
     if (mapListCount == 0) {
-        DrawRectangleRounded((Rectangle){ x, py, w, rowH + 2 * pad }, 0.08f, 8, ENGUI_PANEL);
-        EngUi_TextCentered("(no maps found)", cx, py + pad + rowH / 2 - 10, 20, ENGUI_DIM);
+        DrawRectangleRounded((Rectangle){ x, py, w, rowH + 2 * pad }, 0.08f, 8, ENG_UI_PANEL);
+        Eng_UiTextCentered("(no maps found)", cx, py + pad + rowH / 2 - 10, 20, ENG_UI_DIM);
         return py + rowH + 2 * pad;
     }
     int panelH = mapListCount * rowH + 2 * pad;
-    DrawRectangleRounded((Rectangle){ x, py, w, panelH }, 0.04f, 8, ENGUI_PANEL);
+    DrawRectangleRounded((Rectangle){ x, py, w, panelH }, 0.04f, 8, ENG_UI_PANEL);
 
     if (canEdit) {
         if (IsKeyPressed(KEY_DOWN)) selectedMapIdx = (selectedMapIdx + 1) % mapListCount;
@@ -101,11 +101,11 @@ static int DrawMapList(int cx, int top, bool canEdit) {
                  : hover ? (Color){ 34, 40, 52, 255 }
                          : (Color){ 26, 30, 40, 255 };
         DrawRectangleRounded(row, 0.25f, 6, rb);
-        if (sel) DrawRectangleRounded((Rectangle){ row.x, row.y, 5, row.height }, 1.0f, 4, ENGUI_GOLD);
-        EngUi_TextShadow(mapList[i].name, (int)row.x + 20, (int)(row.y + row.height / 2 - 11), 22,
-                sel ? ENGUI_GOLD : ENGUI_TEXT);
+        if (sel) DrawRectangleRounded((Rectangle){ row.x, row.y, 5, row.height }, 1.0f, 4, ENG_UI_GOLD);
+        Eng_UiTextShadow(mapList[i].name, (int)row.x + 20, (int)(row.y + row.height / 2 - 11), 22,
+                sel ? ENG_UI_GOLD : ENG_UI_TEXT);
         char no[16]; snprintf(no, sizeof no, "%d", i + 1);
-        EngUi_TextShadow(no, (int)(row.x + row.width - 22), (int)(row.y + row.height / 2 - 9), 16, ENGUI_DIM);
+        Eng_UiTextShadow(no, (int)(row.x + row.width - 22), (int)(row.y + row.height / 2 - 9), 16, ENG_UI_DIM);
     }
     return py + panelH;
 }
@@ -113,12 +113,12 @@ static int DrawMapList(int cx, int top, bool canEdit) {
 // Compact one-line ‹ name › picker for space-constrained screens (host lobby).
 static void DrawMapStrip(int cx, int y, bool canEdit) {
     int w = 300, ah = 38, x = cx - (w + 2 * ah + 16) / 2;
-    if (mapListCount == 0) { EngUi_TextCentered("(no maps found)", cx, y + ah / 2 - 10, 20, ENGUI_DIM); return; }
+    if (mapListCount == 0) { Eng_UiTextCentered("(no maps found)", cx, y + ah / 2 - 10, 20, ENG_UI_DIM); return; }
     if (canEdit && GuiButton((Rectangle){ (float)x, (float)y, (float)ah, (float)ah }, "<"))
         selectedMapIdx = (selectedMapIdx - 1 + mapListCount) % mapListCount;
-    DrawRectangleRounded((Rectangle){ (float)(x + ah + 8), (float)y, (float)w, (float)ah }, 0.3f, 8, ENGUI_PANEL);
+    DrawRectangleRounded((Rectangle){ (float)(x + ah + 8), (float)y, (float)w, (float)ah }, 0.3f, 8, ENG_UI_PANEL);
     char label[128]; snprintf(label, sizeof label, "MAP:  %s", mapList[selectedMapIdx].name);
-    EngUi_TextCentered(label, x + ah + 8 + w / 2, y + ah / 2 - 10, 20, ENGUI_GOLD);
+    Eng_UiTextCentered(label, x + ah + 8 + w / 2, y + ah / 2 - 10, 20, ENG_UI_GOLD);
     if (canEdit && GuiButton((Rectangle){ (float)(x + ah + 8 + w + 8), (float)y, (float)ah, (float)ah }, ">"))
         selectedMapIdx = (selectedMapIdx + 1) % mapListCount;
 }
@@ -203,14 +203,14 @@ void Menu_StartConnecting(void) {
 }
 
 void Menu_DrawMenu(int sw, int sh) {
-    EngUi_ApplyTheme();
+    Eng_UiApplyTheme();
     MenuBG(sw, sh);
 
     const char *title = "CLAUDE  ZOMBIES";
     int ts = 78, ty = sh / 6, tw = MeasureText(title, ts);
-    EngUi_TextCentered(title, sw / 2, ty, ts, ENGUI_RED);
-    DrawRectangle(sw / 2 - tw / 2, ty + ts + 8, tw, 3, ENGUI_GOLD);
-    EngUi_TextCentered("Round-based survival  -  guns, perks, Pack-a-Punch", sw / 2, ty + ts + 20, 20, ENGUI_DIM);
+    Eng_UiTextCentered(title, sw / 2, ty, ts, ENG_UI_RED);
+    DrawRectangle(sw / 2 - tw / 2, ty + ts + 8, tw, 3, ENG_UI_GOLD);
+    Eng_UiTextCentered("Round-based survival  -  guns, perks, Pack-a-Punch", sw / 2, ty + ts + 20, 20, ENG_UI_DIM);
 
     int bw = 300, bh = 54, bx = sw / 2 - bw / 2, by = sh / 2 - 40, gap = 66;
     GuiSetStyle(DEFAULT, TEXT_SIZE, 24);
@@ -220,8 +220,8 @@ void Menu_DrawMenu(int sw, int sh) {
     if (GuiButton((Rectangle){ (float)bx, (float)(by + 3*gap),  (float)bw, (float)bh }, "QUIT"))        { CloseWindow(); exit(0); }
     GuiSetStyle(DEFAULT, TEXT_SIZE, 16);
 
-    EngUi_TextCentered("Built with Claude Code", sw / 2, sh - 34, 16, (Color){ 92, 98, 112, 255 });
-    if (statusMsg[0]) EngUi_TextCentered(statusMsg, sw / 2, sh - 62, 18, (Color){ 214, 150, 150, 255 });
+    Eng_UiTextCentered("Built with Claude Code", sw / 2, sh - 34, 16, (Color){ 92, 98, 112, 255 });
+    if (statusMsg[0]) Eng_UiTextCentered(statusMsg, sw / 2, sh - 62, 18, (Color){ 214, 150, 150, 255 });
 }
 
 void Menu_DrawSettings(int sw, int sh) {
@@ -416,10 +416,10 @@ void Menu_DrawMultiplayer(int sw, int sh) {
 }
 
 void Menu_DrawSoloLobby(int sw, int sh) {
-    EngUi_ApplyTheme();
+    Eng_UiApplyTheme();
     MenuBG(sw, sh);
-    EngUi_TextCentered("SOLO", sw / 2, 64, 56, ENGUI_TEXT);
-    EngUi_TextCentered("Pick a map, then start your run.", sw / 2, 134, 20, ENGUI_DIM);
+    Eng_UiTextCentered("SOLO", sw / 2, 64, 56, ENG_UI_TEXT);
+    Eng_UiTextCentered("Pick a map, then start your run.", sw / 2, 134, 20, ENG_UI_DIM);
 
     DrawMapList(sw / 2, 196, true);
 
@@ -483,7 +483,7 @@ void Menu_DrawLobby(int sw, int sh, bool isHost) {
     // via PktStart.
     int pickerY = listY + 4 * rowH + 18;
     if (isHost) {
-        EngUi_TextCentered("MAP", sw/2, pickerY, 18, ENGUI_GOLD);
+        Eng_UiTextCentered("MAP", sw/2, pickerY, 18, ENG_UI_GOLD);
         DrawMapStrip(sw/2, pickerY + 22, true);
     }
 

@@ -39,7 +39,7 @@ The answer to both is the same rule the project already runs on (see §3).
   ┌──────────────────────────────────────────────────────────────────────┐
   │  TOOLKIT  (engine-side, game-agnostic — the "SDK" surface)            │
   │                                                                        │
-  │   ui.h        2D widget facade  (Eng_Ui* over raygui)   ← PROPOSED    │
+  │   ui.h        2D style+text facade (Eng_Ui* over raygui) ← PARTIAL    │
   │   pick.h      screen→ray + ray/primitive tests                        │
   │   gizmo.h     translate/rotate/scale handle math                      │
   │   mapedit.h   id-addressed MapDoc edits + undo/redo                   │
@@ -55,7 +55,10 @@ The answer to both is the same rule the project already runs on (see §3).
 
 **Toolkit is not a separate library from the engine** — it is a *named tier of the
 same `libengine.a`*. Everything in the toolkit box already lives in `src/engine/` and
-links into `libengine.a` today (except `ui.h`, which is proposed). The split is
+links into `libengine.a` today. `ui.h` now exists as `src/engine/ui.{c,h}` but is
+only a *partial* facade — theme (`Eng_UiApplyTheme`), UI scale, scaled text, and an
+accent-bar tool button; menu.c + the editor are ported onto it, but hud.c is not yet
+and apps still call `Gui*` directly for buttons/sliders/etc. The split is
 **conceptual** (core vs toolkit headers), not a second `.a` — see Open #1 for when/if
 that ever changes.
 

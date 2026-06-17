@@ -64,11 +64,10 @@ add_library(engine STATIC
     src/engine/collide.c
     src/engine/gizmo.c
     src/engine/mapedit.c
-    src/engine/tools/eng_ui.c
+    src/engine/ui.c
 )
 target_include_directories(engine PUBLIC
     ${CMAKE_SOURCE_DIR}/src/engine
-    ${CMAKE_SOURCE_DIR}/src/engine/tools
     ${raygui_SOURCE_DIR}/src
     ${enet_SOURCE_DIR}/include
 )

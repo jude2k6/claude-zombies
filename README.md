@@ -148,13 +148,16 @@ so the cheats won't have a real effect.
 ## Layout
 
 ```
-CMakeLists.txt        FetchContent for raylib / raygui / enet; builds libengine.a + shooter
+CMakeLists.txt        FetchContent for raylib / raygui / enet; builds libengine.a + shooter + editor
 src/engine/           reusable, game-clean runtime → static libengine.a
   app                 window, frame loop, time, GameModule host
   gfx                 low-level GL facade (rlgl lives ONLY here)
-  net mapdoc          enet transport + generic map document
+  net mapdoc          enet transport + generic map document (+ validation)
   anim particles decals fx   skeletal anim, particles, decals, camera shake
   audio pad           mixer (event-driven) + input action map
+  ui cfg              house UI (theme/text over raygui) + key=value config
+  pick gizmo mapedit debugdraw   editor toolkit: ray/handle math, id-edits+undo, overlay
+src/editor/           the map editor — a second GameModule on the engine (no game deps)
 src/game/             rules + content; links libengine.a
   main.c              ~10 lines: Eng_Run(Game_Module())
   world.{c,h}         the World struct (all game state, g_world)
@@ -173,8 +176,9 @@ data/shaders/         world (lit + fog), world_skinned (GPU skinning), sky, post
 
 A deeper map for contributors lives in `HANDOFF.md` (architecture table,
 conventions, gotchas) and `TODO.md` (live punch list). To build *on* the engine
-(a new game/tool, e.g. the map editor), see `docs/engine-usage.md` — the
-`GameModule` contract and the `Eng_*` subsystem APIs.
+(a new game/tool, as `src/editor/` does), see `docs/engine-usage.md` — the
+`GameModule` contract and the `Eng_*` subsystem APIs; the editor itself is
+documented in `docs/scene-builder.md`.
 
 ## Maps
 

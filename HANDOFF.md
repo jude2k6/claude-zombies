@@ -19,6 +19,7 @@ Repo: `git@github.com:jude2k6/claude-zombies.git` · branch: `main`.
 - **`NET_PROTO_VERSION` is 11** (`src/engine/net.h`). `SerPlayer` carries `fireHeld` (uint8_t) and `reviverIdx` (int8_t).
 - **Zombie + player third-person rigs** (`zombie.glb`, `player.glb`) are wired and animating. Death/attack clips are sim-driven via `dyingTimer`/`simAttackTimer`. Region-BFS zombie nav over the sector graph is live (`CrossFloorGoalFull` in `entities.c`, driven by `RAMP … LINK` edges).
 - **Post-FX render target** with bloom/vignette/hit-flash/low-HP pulse is live (`data/shaders/postfx.fs`). Particles (`src/engine/particles.c`), decals (`src/engine/decals.c`), full audio pass, equipment system, and weapons data-driven via `.weapon` files are all in.
+- **Map editor** (`src/editor/editor_main.c`) is a second `GameModule` on the engine (links `libengine.a`, zero game deps). Fly/orbit/top views, place/select/move entities via the `pick`/`gizmo`/`mapedit` toolkit, undo/redo, grid snapping, a persisted settings overlay (`editor.cfg` via `cfg.h`), and a `MapDoc_Validate` geometry-check overlay. Headless `./build/editor --check <map>` validates + exits non-zero on error. **No map *save* (`MapDoc_Save`) UI yet.** See `docs/scene-builder.md`.
 
 ## Build / run
 
@@ -26,7 +27,9 @@ Repo: `git@github.com:jude2k6/claude-zombies.git` · branch: `main`.
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
 ./build/shooter
-./build/shooter --validate data/maps/nacht.map  # editor save hook
+./build/shooter --validate data/maps/nacht.map  # game-side map check
+./build/editor data/maps/nacht.map              # map editor (GUI)
+./build/editor --check data/maps/nacht.map      # headless parse + validate
 ```
 
 First Linux build needs X11 dev headers — see `README.md`. The CMake

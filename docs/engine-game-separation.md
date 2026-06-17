@@ -177,10 +177,12 @@ Deferred because it is **low value for the current goals**: the map editor needs
 the same raygui anyway, and there is no second UI backend in view. Tracked but not
 a blocker.
 
-**Update:** the editor becoming real is the trigger that flips this from low-value to
-worth doing — two consumers (game menus + editor panels) would share the widgets. The
-layering rationale (engine/toolkit/game/editor and where UI sits) is scaffolded in
-[engine-layers.md](engine-layers.md); resolving this facade is step 1 there.
+**Update (partially resolved):** the editor becoming real flipped this from low-value to
+worth doing — two consumers (game menus + editor panels) now share the widgets. A
+*partial* `Eng_Ui*` facade exists at `src/engine/ui.{c,h}` (theme + scaled text +
+accent-bar tool button); both `menu.c` and the editor are ported onto it. Still open: a
+full widget facade so apps stop calling raygui `Gui*` directly. See
+[engine-layers.md](engine-layers.md) (step 1) and [engine-usage.md](engine-usage.md) §3 `ui`.
 
 ### Open #2 — `types.h` split (§13) — assessed 2026-06-15, NOT worth doing
 No engine file includes `types.h` (verified: `grep '#include.*types.h' src/engine/`

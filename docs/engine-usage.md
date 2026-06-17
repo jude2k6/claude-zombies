@@ -261,7 +261,13 @@ MapDoc doc; MapDoc_Parse("maps/nacht.map", &doc, stderr);   // returns error cou
 MapDoc_Save("maps/out.map", &doc);
 MapDoc_Equal(&a, &b);                                       // round-trip check
 int id = MapDoc_AllocId(&doc);                              // stable id for a newly added entity
+MapDocIssue iss[64]; int n = MapDoc_Validate(&doc, iss, 64);// geometry/integrity check
 ```
+**Validation:** `MapDoc_Validate` returns a count of `MapDocIssue`s (each WARN or ERROR,
+with the offending entity's id) — bad sector refs / sizes, out-of-sector placement,
+zero-length walls, invalid facings, missing spawns. Perimeter entities (mob spawns,
+windows, wallbuys) are intentionally not containment-checked. The editor surfaces this in
+a Validate panel and in `editor --check` (which exits non-zero on an ERROR).
 **Stable entity IDs:** every placed-entity struct carries an `int id`; `MapDoc_Parse`
 assigns fresh monotonic ids and sets `doc.nextId`. IDs are **runtime-only** — not
 serialised by `MapDoc_Save` and ignored by `MapDoc_Equal` (so the round-trip stays
@@ -395,6 +401,37 @@ the `.map` grammar has no ungrouped entities — so an entity left at `sectorId 
 (the `EngMapEnt_Add` default) is **silently dropped on save**. Always `Eng_SetSector`
 anything you add to a real sector (e.g. the one under the cursor).
 
+### ui — `ui.h` (house UI: theme + scaled text + widgets, over raygui)
+A thin style/text layer on top of raygui shared by the game menus and the editor — so
+both look the same without each re-rolling it. **Not** a widget framework: raygui stays
+the widget layer; apps still call `Gui*` directly for buttons/sliders/etc.
+
+```c
+Eng_UiApplyTheme();                                   // dark/gold raygui style (idempotent)
+Eng_UiSetScale(s); Eng_UiApplyFont(16);               // global UI scale → control font = 16*s
+float s = Eng_UiRecommendedScale();                   // ~1.0 @720p … 3.0 @4K
+Eng_UiText("HP", x, y, 18, WHITE);                     // scaled text (DrawText arg order)
+Eng_UiTextShadow(t, x, y, 18, c); Eng_UiTextCentered(t, cx, y, 18, c);
+bool hit = Eng_UiToolButton(rect, "Place", active);   // accent-bar button
+Eng_UiPanelBg(rect, color);                            // filled panel
+```
+Colors: `ENG_UI_GOLD/RED/TEXT/DIM/PANEL`. Every helper multiplies a base pixel size by
+the global scale (default 1.0), so a whole panel grows on hi-dpi displays. (See
+[engine-layers.md](engine-layers.md) §4: a partial 2D facade; the game still draws raw
+HUD with raylib 2D — §3a.)
+
+### cfg — `cfg.h` (key=value preference files)
+Generic, game-clean line-oriented `key=value` config IO — the shared substrate for any
+app's settings file (the editor's `editor.cfg`; the game's `settings.cfg` predates it).
+
+```c
+EngCfg c; const char *paths[] = { "editor.cfg", "../editor.cfg" };
+EngCfg_Load(&c, paths, 2);                             // first existing path; missing = empty (ok)
+float spd = EngCfg_Float(&c, "cam.flySpeed", 16.0f);   // typed getters w/ defaults: Float/Int/Bool/Str
+FILE *f = EngCfg_BeginSave(&c, "My prefs");             // writes to the resolved/first path
+EngCfg_PutFloat(f, "cam.flySpeed", spd); EngCfg_EndSave(f);
+```
+
 ---
 
 ## 3a. What the engine deliberately leaves to the game
@@ -403,9 +440,10 @@ Three things a game needs but the engine has **no `Eng_*` API for** — on purpo
 They're not gaps; they're the game's job. A second module handles them the same way.
 
 ### 2D / HUD / text — raw raylib, after post-FX
-There is no `Eng_Gfx2D`/text facade. The `Eng_Gfx*` facade exists only to keep
-**rlgl** out of game code (§1); raylib's own 2D immediate calls are *not* engine-only,
-so the game uses them directly:
+There is no engine facade over raylib's 2D *drawing*. The `Eng_Gfx*` facade exists only
+to keep **rlgl** out of game code (§1); raylib's own 2D immediate calls are *not*
+engine-only, so the game uses them directly (`ui.h` styles raygui menus/panels, but HUD
+primitives like the crosshair and bars are drawn raw):
 
 ```c
 // In draw(), AFTER Eng_RenderEndPostFX() so the HUD isn't post-processed:
@@ -416,7 +454,9 @@ DrawTextureEx(icon, pos, 0, scale, tint);
 
 The game's `hud.c` and `menu.c` are the reference: crosshair, health/ammo, hitmarkers,
 and menus are all hand-drawn with these. Load fonts with raylib's `LoadFont*` if you
-outgrow the built-in font. The editor draws its property panels / labels the same way.
+outgrow the built-in font. The editor draws its panels / labels the same way. There's no
+engine facade over raylib's 2D *drawing*, but `ui.h` (§3 `ui`) does provide a shared
+*style/text/widget* layer over raygui (`Eng_Ui*`) that both the menus and editor use.
 
 ### Collision, raycasts & hit detection — game-side geometry
 The engine now ships collision *math* — ray tests (§3 `pick.h`) and sweep/overlap/
@@ -448,11 +488,14 @@ Like the HUD, these aren't wrapped: the window opens **resizable + vsync + MSAA-
 `GetScreenWidth/Height()`. The engine owns `main()` and window creation, but the live
 window is raylib's and game code may drive it.
 
-### Settings persistence — game-side
-Key bindings, sensitivities, and video/audio options are loaded/saved by the game and
-pushed into the engine via `Eng_InputBind` / `Eng_InputSetLookSensitivity` on startup
-and on every rebind (see `Settings_SyncEngineBindings`). The engine holds the live
-action map but never touches disk for you.
+### Settings persistence — app-owned (engine provides the file format)
+*What* an app persists and *when* is its own job: key bindings, sensitivities, and
+video/audio options are loaded/saved by the game and pushed into the engine via
+`Eng_InputBind` / `Eng_InputSetLookSensitivity` on startup and on every rebind (see
+`Settings_SyncEngineBindings`). The engine holds the live action map but never decides
+your settings for you. It *does* ship the plumbing: `cfg.h` (§3 `cfg`) reads/writes a
+generic `key=value` file, used by the editor's `editor.cfg`. (`settings.c` predates it
+and still rolls its own parser; migrating it onto `cfg.h` is a clean follow-up.)
 
 ---
 

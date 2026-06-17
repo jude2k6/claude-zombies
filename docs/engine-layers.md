@@ -160,20 +160,22 @@ engine reusable as an SDK.
 | Area | Today | Target |
 |---|---|---|
 | UI substrate | raygui `#include`d + called directly by `game/ui/*` | `ui.h` / `Eng_Ui*` facade in engine; apps stop touching raygui directly |
-| Game menus/HUD | `src/game/menu.c`, `hud.c` on raw raygui + `DrawText` | same files, rebuilt on `Eng_Ui*` |
-| Editor | **skeleton shipped** — `src/editor/` → `editor` binary (loads/flies/draws/selects + translate-gizmo drag); see [scene-builder.md](scene-builder.md) | grow into a full builder (inspector, add/delete, save) |
-| Editor packaging | n/a | standalone binary first; optional in-game embed later |
+| Game menus/HUD | `menu.c` on `Eng_Ui*` (theme/text); `hud.c` still raw raylib | port `hud.c` too; full widget facade |
+| Editor | **working tool** — `src/editor/` → `editor` binary (fly/orbit/top, place/select/move + translate gizmo, undo, snap, settings, validation); see [scene-builder.md](scene-builder.md) | inspector, rotate/scale, map save |
+| Editor packaging | standalone `editor` binary | optional in-game embed later |
 
 **Suggested order** (small, independently shippable, none blocks the game):
-1. `ui.h` facade — wrap the raygui calls already in use (button, label, panel, slider,
-   text field, toggle) as `Eng_Ui*`; port `menu.c`/`hud.c` onto it. *(Closes Open #1.)*
+1. `ui.h` facade — **partially done**: `Eng_Ui*` theme + scaled text + tool button exist;
+   `menu.c` and the editor toolbar are ported. Remaining: wrap the rest of the raygui
+   widgets (slider/toggle/text field) and port `hud.c`. *(Closes Open #1 when complete.)*
 2. ~~`src/editor/` skeleton — a `GameModule` that loads a `MapDoc`, flies a camera, draws
    the scene via `Eng_Gfx*`, and selects with `pick.h`.~~ **Done** — produces the `editor`
    binary; see [scene-builder.md](scene-builder.md).
 3. Wire the editor verbs — `gizmo.h` drag → `mapedit.h` mutator → `EngMapHistory`
-   commit (translate **done** in the skeleton; rotate/scale + an `Eng_Ui*` inspector
-   panel for the selected entity still to do).
-4. Save/load + a tool palette; then consider the in-game embed.
+   commit. **Done** for translate (+ place/delete, grid snap, undo/redo); rotate/scale
+   drag and an `Eng_Ui*` inspector panel for the selected entity still to do.
+4. ~~A tool palette + settings persistence~~ **done** (toolbar + `editor.cfg` via `cfg.h`)
+   + map validation (`MapDoc_Validate`). Remaining: map save/load, then the in-game embed.
 
 ## 7. Open decisions (pick later; defaults in **bold**)
 

@@ -7,10 +7,11 @@ what makes the project *an engine with a toolkit* rather than *a game with a bui
 editor* — see [engine-layers.md](engine-layers.md) for the layering rationale, and
 [engine-usage.md](engine-usage.md) §4 ("Building a second module") for the host pattern.
 
-> **Status: skeleton.** Builds the `editor` binary; loads a map, flies a camera, draws
-> entities as boxes, picks to select, and drags the translate gizmo to move the
-> selection (proving the whole toolkit stack composes). Not yet: asset rendering, a
-> tool palette, add/delete UI, rotate/scale drag, or save. See §5 roadmap.
+> **Status: working tool (no map *save* yet).** Builds the `editor` binary; loads a map,
+> fly/orbit/top cameras, place / select / move entities (translate gizmo), undo/redo,
+> grid snapping, a persisted settings overlay (`editor.cfg`), and `MapDoc_Validate`
+> map-checking. Not yet: asset rendering (entities draw as boxes), a property inspector,
+> rotate/scale drag, or writing edits back to `.map`. See §5 roadmap.
 
 ## 1. What it is (and is not)
 
@@ -35,11 +36,14 @@ Everything below ships in `libengine.a` already (Phase C of the engine roadmap):
 | `gizmo.h`    | translate/rotate/scale handle hit-test + drag math; `Eng_GizmoDebugDraw` for handles |
 | `debugdraw.h`| selection box + gizmo overlay |
 | `gfx.h`      | draw the scene (grid, cubes, wires) |
+| `ui.h`       | `Eng_Ui*` theme/text + raygui toolbar styling (shared with the game menus) |
+| `cfg.h`      | `editor.cfg` settings persistence (key=value) |
 | `app.h`      | `Eng_Run` + the `GameModule` host |
 
-The missing one is **`ui.h`** (the `Eng_Ui*` 2D widget facade) — until it lands the
-editor draws its HUD with raw `DrawText`. Building that facade is step 1 in
-[engine-layers.md](engine-layers.md); the inspector/tool-palette panels wait on it.
+`ui.h` is a *partial* `Eng_Ui*` facade (theme + scaled text + a tool button); the toolbar
+and overlays use it, but still call raygui `Gui*` directly for most widgets. A full
+widget facade + an entity-inspector panel are the remaining UI work (§5, and step 1 in
+[engine-layers.md](engine-layers.md)).
 
 ## 3. Architecture
 
@@ -134,20 +138,21 @@ clicks don't double as edits.
 
 A solid **left panel** carries the UI so text is readable over the 3D view: a **UI
 scale** slider, view-mode and gizmo-mode toggles, the place-tool buttons + the
-*auto-spawn ZOMBIE* checkbox, Undo/Redo/Delete, and a live selection readout. Every
-hotkey has an equivalent button; the two stay in sync. Clicks inside the panel are
-ignored by the 3D viewport (placement/selection only fire for clicks to the right of
-the panel, whose width tracks the UI scale).
+*auto-spawn ZOMBIE* checkbox, Undo/Redo/Delete, a **MAP** section (Settings + Validate
+overlays — see *Settings + validation* above), and a live selection readout. Every hotkey has an equivalent button;
+the two stay in sync. Clicks inside the panel — and inside an open overlay — are ignored
+by the 3D viewport (placement/selection only fire for clicks to the right of the panel,
+whose width tracks the UI scale).
 
 **UI scale.** The toolbar font and layout scale together by a single factor, seeded
 from the display: ~1.0 at 720p, ~1.5 at 1080p, up to 3.0 on a 4K monitor (so the text
 isn't a few pixels tall on a big screen). Adjust it live with the **UI** slider at the
 top of the panel or **Ctrl + `=` / `-`** (range 70 %–300 %).
 
-> The panel is built with **raygui directly** (the engine already owns
-> `RAYGUI_IMPLEMENTATION`), which is the interim before the `Eng_Ui*` facade lands — the
-> editor is meant to *dogfood* that facade (see [engine-layers.md](engine-layers.md)
-> Open #1 + step 1). When the facade exists, this panel is the first thing to port onto it.
+> The panel is built on **raygui** styled through the `Eng_Ui*` facade (`ui.h`) — theme,
+> scaled text, and the accent-bar tool button are shared with the game menus; raygui
+> `Gui*` is still called directly for sliders/toggles/checkboxes. Completing that facade
+> (and an inspector panel) is the remaining UI work (§5; [engine-layers.md](engine-layers.md) Open #1).
 
 ### Placing spawns & barricades
 
@@ -178,11 +183,14 @@ the engine roadmap for the "primitives not policy" rationale.
 
 Small, independently shippable steps; none blocks the game.
 
-1. **`ui.h` facade**, then an **entity inspector** panel (edit the selected entity's
-   fields: position, yaw/scale, sizes) and a **tool palette**.
+1. ~~**`ui.h` facade** + **tool palette**~~ **Done** — a partial `Eng_Ui*` facade
+   ([engine-usage.md](engine-usage.md) §3 `ui`) and a raygui toolbar (view / gizmo /
+   place tools) plus settings and map-validation overlays. Remaining: an **entity
+   inspector** panel to edit the selected entity's fields (position, yaw/scale, sizes).
 2. ~~**Add / delete** entities (`EngMapEnt_Add/Delete`) with a placement ray
    (`Eng_PickRayGroundY`) and a kind picker.~~ **Done for spawns + barricades** (P/LMB/X,
-   the barricade auto-spawn, retag/aim via R); generalise the picker to the other kinds.
+   the barricade auto-spawn, retag/aim via R, optional grid snap); generalise the picker
+   to the other kinds.
 3. **Rotate / scale** drag (gizmo already returns `rotateRadians` / `scale`; wire them
    to `Eng_SetYaw` / `Eng_SetScale` / size setters).
 4. **Save** (`MapDoc_Save`) + new-map / open-map flow; dirty-state tracking. *(Placement

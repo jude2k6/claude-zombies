@@ -2,12 +2,15 @@
 #include "level.h"
 #include "player.h"
 #include "weapons.h"
+#include "mobs.h"
+#include "mob_ai.h"
 #include "fx.h"
 #include "decals.h"
 #include "particles.h"
 #include "raymath.h"
 #include <math.h>
 #include <stdlib.h>
+#include <string.h>
 
 // enemies[]/bullets[]/throwables[]/powerUps[] + doublePointsTimer/instaKillTimer
 // now live in g_world (world.h).
@@ -73,8 +76,19 @@ void Enemies_TrySpawn(int round) {
     spawn.y = ENEMY_HEIGHT * 0.5f;
 
     ZombieType t = PickType(round);
-    int   baseHp    = Enemies_RoundHP(round);
-    float baseSpeed = Enemies_RoundSpeed(round);
+
+    // Stats are data-driven from the spawn's mob def: scale the round curve by
+    // the mob's round-1 baselines (zombie.mob = 150 HP / 1.7 spd → ×1.0, i.e.
+    // identical to the old hardcoded zombie). A missing catalog (e.g. a headless
+    // devtool that never called Mobs_Load) falls back to the bare curve.
+    int          mobIdx = Mob_FindIndex(ms->mob);
+    const MobDef *md    = Mob_Get(mobIdx);
+    float r1Hp  = (float)Enemies_RoundHP(1);     // 150 — the curve's round-1 base
+    float r1Spd = Enemies_RoundSpeed(1);         // 1.7
+    float hpScale  = (md && md->healthBase > 0) ? (float)md->healthBase / r1Hp : 1.0f;
+    float spdScale = (md && md->moveSpeed  > 0) ? md->moveSpeed / r1Spd        : 1.0f;
+    int   baseHp    = (int)(Enemies_RoundHP(round) * hpScale);
+    float baseSpeed = Enemies_RoundSpeed(round) * spdScale;
     int   hp = baseHp; float spd = baseSpeed;
     switch (t) {
         case ZT_RUNNER:  hp = (int)(baseHp * 0.55f); spd = baseSpeed * 1.6f; break;
@@ -95,6 +109,7 @@ void Enemies_TrySpawn(int round) {
                 // one, the mob is already inside and heads straight for a player.
                 .state = (climbWin >= 0) ? ZS_OUTSIDE : ZS_INSIDE,
                 .type = t,
+                .mobIdx = mobIdx,
                 .targetWindow = climbWin,
                 .targetPlayer = (climbWin >= 0) ? -1 : Player_NearestAlive(spawn),
                 .hasWaypoint = false,
@@ -347,7 +362,11 @@ static bool RampAscentAhead(const Enemy *e, Vector3 dir, float floorY, int allow
     return false;
 }
 
-void Enemies_Update(float dt) {
+// The "chaser" AI archetype: one update-all pass over the enemies whose mob
+// uses it. Registered with the behaviour registry as "chaser" (see
+// Enemies_InitBehaviours) and dispatched via Mobs_RunBehaviours from
+// Enemies_Update — a real name->fn lookup, not a hardcoded call.
+static void Chaser_UpdateAll(float dt) {
     for (int i = 0; i < MAX_ENEMIES; i++) {
         // Tick dying corpses: decrement the window and free the slot when done.
         if (!enemies[i].alive) {
@@ -358,6 +377,10 @@ void Enemies_Update(float dt) {
             continue;
         }
         Enemy *e = &enemies[i];
+        // Skip enemies whose mob names a different archetype (none today — all
+        // mobs use chaser — but this keeps dispatch correct once more land).
+        const MobDef *emd = Mob_Get(e->mobIdx);
+        if (emd && emd->behaviour[0] && strcmp(emd->behaviour, "chaser") != 0) continue;
         e->bobPhase += dt * 4.0f;
         if (e->touchTimer     > 0) e->touchTimer     -= dt;
         if (e->stunTimer      > 0) e->stunTimer      -= dt;
@@ -595,11 +618,15 @@ void Enemies_Update(float dt) {
                 if      (e->type == ZT_RUNNER) ccd *= 0.80f;
                 else if (e->type == ZT_BOSS)   ccd *= 1.30f;
                 if (!cheatProtected) {
-                    int dmg = ENEMY_DAMAGE;
+                    // Base contact damage from the mob def (zombie.mob = 50 =
+                    // the old ENEMY_DAMAGE); ZombieType variants scale it.
+                    const MobDef *bmd = Mob_Get(e->mobIdx);
+                    int baseDmg = (bmd && bmd->damage > 0) ? bmd->damage : ENEMY_DAMAGE;
+                    int dmg = baseDmg;
                     switch (e->type) {
-                        case ZT_RUNNER:  dmg = (int)(ENEMY_DAMAGE * 0.80f); break;  // 40
-                        case ZT_CRAWLER: dmg = ENEMY_DAMAGE;                break;  // 50
-                        case ZT_BOSS:    dmg = ENEMY_DAMAGE * 2;            break;  // 100
+                        case ZT_RUNNER:  dmg = (int)(baseDmg * 0.80f); break;
+                        case ZT_CRAWLER: dmg = baseDmg;                break;
+                        case ZT_BOSS:    dmg = baseDmg * 2;            break;
                         default: break;
                     }
                     tp->hp -= dmg;
@@ -634,6 +661,29 @@ void Enemies_Update(float dt) {
             }
         }
     }
+}
+
+// One-time: register the compiled-in (Tier-1) archetypes, then dlopen any
+// Tier-2 .so behaviours, then warn about any loaded mob whose `behaviour` names
+// an archetype nobody registered (the "missing archetype" signal from
+// editor-content-extensibility.md §4).
+static bool g_behInited = false;
+void Enemies_InitBehaviours(void) {
+    if (g_behInited) return;
+    Game_RegisterBehaviour("chaser", Chaser_UpdateAll);
+    Game_LoadBehaviourPlugins();
+    for (int i = 0; i < Mob_Count(); i++) {
+        const MobDef *m = Mob_Get(i);
+        if (m && m->behaviour[0] && !Game_BehaviourRegistered(m->behaviour))
+            fprintf(stderr, "mob: %s references unregistered behaviour '%s'\n",
+                    m->id, m->behaviour);
+    }
+    g_behInited = true;
+}
+
+void Enemies_Update(float dt) {
+    if (!g_behInited) Enemies_InitBehaviours();
+    Mobs_RunBehaviours(dt);
 }
 
 // ----- Bullets -----

@@ -307,6 +307,8 @@ typedef struct {
     float        speed;
     ZombieState  state;
     ZombieType   type;
+    int          mobIdx;         // index into the mob catalog (mobs.h); HOST-ONLY,
+                                 // not serialized — clients render from `type`.
     int          targetWindow;
     float        attackTimer;
     int          targetPlayer;

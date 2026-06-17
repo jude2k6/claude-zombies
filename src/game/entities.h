@@ -17,6 +17,9 @@ int   Enemies_RoundSpawnCount(int round);
 void  Enemies_TrySpawn(int round);
 void  Enemies_UpdateSpawns(int round, float dt);
 void  Enemies_Update(float dt);
+// Register compiled-in AI archetypes + load Tier-2 .so behaviours (idempotent;
+// Enemies_Update calls it lazily, but a host may call it eagerly at startup).
+void  Enemies_InitBehaviours(void);
 void  Enemies_Separate(void);
 void  Enemies_ClearAll(void);
 

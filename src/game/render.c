@@ -8,6 +8,7 @@
 #include "entities.h"
 #include "interact.h"
 #include "assets.h"
+#include "mobs.h"
 #include "decals.h"
 #include "particles.h"
 #include "anim.h"
@@ -60,11 +61,19 @@ static inline void DrawProp(PropId id, Vector3 pos, float yawDeg, Color tint) {
 // Call once after Assets_Load (which loads worldSkinnedShader). No-op-safe:
 // if the .glb is missing, DrawEnemy falls back to the OBJ / cube draw.
 void Render_LoadZombieAnim(void) {
-    if (!Anim_Load(&zombieAnim, "zombie.glb")) return;
+    // Model + animation clip names are data-driven from the zombie mob def when
+    // the catalog is loaded; fall back to the historical hardcoded names so the
+    // headless devtools (which may not call Mobs_Load) still render.
+    const MobDef *md = Mob_Find("ZOMBIE");
+    const char *model      = (md && md->model[0])      ? md->model      : "zombie.glb";
+    const char *clipWalk   = (md && md->animWalk[0])   ? md->animWalk   : "walk";
+    const char *clipAttack = (md && md->animAttack[0]) ? md->animAttack : "attack_a";
+    const char *clipDeath  = (md && md->animDeath[0])  ? md->animDeath  : "death";
+    if (!Anim_Load(&zombieAnim, model)) return;
     if (Eng_RenderWorldSkinnedShaderLoaded()) Anim_ApplyShader(&zombieAnim, Eng_RenderWorldSkinnedShader());
-    zClipWalk   = Anim_FindClip(&zombieAnim, "walk");
-    zClipAttack = Anim_FindClip(&zombieAnim, "attack_a");
-    zClipDeath  = Anim_FindClip(&zombieAnim, "death");
+    zClipWalk   = Anim_FindClip(&zombieAnim, clipWalk);
+    zClipAttack = Anim_FindClip(&zombieAnim, clipAttack);
+    zClipDeath  = Anim_FindClip(&zombieAnim, clipDeath);
     for (int i = 0; i < MAX_ENEMIES; i++)
         Anim_Play(&zombieAnimState[i], zClipWalk, true, 1.0f);
 }

@@ -196,6 +196,7 @@ static void HandleLocalActions(Player *me) {
 static void GameMod_Init(void) {
     Weapons_Load();   // before Assets_Load: enrols weapon models for the world shader
     Mobs_Load();      // data-driven mob catalog (data/mobs/*.mob) — spawn tags resolve here
+    Enemies_InitBehaviours();  // register chaser + load Tier-2 .so behaviours, validate mob behaviours
     Assets_Load();
     Render_LoadZombieAnim();        // shared rigged zombie.glb (skinned shader from Assets_Load)
     Viewmodel_LoadArms();           // shared first-person arms (non-pistol guns bolt onto hand.R)

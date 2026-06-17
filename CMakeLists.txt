@@ -83,6 +83,7 @@ add_executable(shooter
     src/game/player.c
     src/game/weapons.c
     src/game/mobs.c
+    src/game/mob_ai.c
     src/game/perks.c
     src/game/entities.c
     src/game/interact.c
@@ -100,7 +101,11 @@ add_executable(shooter
 target_include_directories(shooter PRIVATE
     ${CMAKE_SOURCE_DIR}/src/game
 )
-target_link_libraries(shooter PRIVATE engine)
+target_link_libraries(shooter PRIVATE engine ${CMAKE_DL_LIBS})
+# -rdynamic so Tier-2 .so mob behaviours (dlopen'd from ./behaviours) resolve
+# the host's Game_RegisterBehaviour / world symbols — same seam as the editor's
+# dynamic plugins.
+set_target_properties(shooter PROPERTIES ENABLE_EXPORTS ON)
 
 # ---- editor executable (src/editor/ — the scene/map builder) ----------------
 # A SIBLING application to the game: its own GameModule on the engine, linking

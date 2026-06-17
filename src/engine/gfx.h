@@ -40,4 +40,16 @@ void Eng_GfxDrawTriangle3D(Vector3 a, Vector3 b, Vector3 c, Color col);         
 void Eng_GfxDrawLine3D(Vector3 a, Vector3 b, Color c);                                         // DrawLine3D
 void Eng_GfxDrawGrid(int slices, float spacing);                                                // DrawGrid
 
+// Draw an axis-aligned textured box (6 faces) centred at `centre` with full
+// extents `size`. UVs tile every `tileSize` world units so the texture repeats
+// seamlessly. `tex` may be NULL → draws a flat `fallback`-coloured cube instead.
+// `tint` multiplies the texture (use WHITE for none).
+void Eng_DrawTexturedBoxV(Vector3 centre, Vector3 size, Texture2D *tex,
+                          float tileSize, Color tint, Color fallback);
+
+// Draw a horizontal textured quad (floor) centred at `centre`, spanning
+// sizeX×sizeZ, tiling every `tileSize` units. NULL `tex` → flat `fallback`.
+void Eng_DrawTexturedFloorV(Vector3 centre, float sizeX, float sizeZ,
+                            Texture2D *tex, float tileSize, Color tint, Color fallback);
+
 #endif // SHOOTER_GFX_H

@@ -105,18 +105,6 @@ void Render_UnloadPlayerAnim(void) {
 // across the box face.  Caller supplies a fallback colour for when the
 // texture isn't loaded.
 
-static inline void TexQuad(float ax, float ay, float az,
-                           float bx, float by, float bz,
-                           float cx, float cy, float cz,
-                           float dx, float dy, float dz,
-                           float u, float v) {
-    // Four-vertex quad (CCW from outside).  Texture spans U×V repeats.
-    Eng_GfxTexCoord(0, v); Eng_GfxVertex(ax, ay, az);
-    Eng_GfxTexCoord(u, v); Eng_GfxVertex(bx, by, bz);
-    Eng_GfxTexCoord(u, 0); Eng_GfxVertex(cx, cy, cz);
-    Eng_GfxTexCoord(0, 0); Eng_GfxVertex(dx, dy, dz);
-}
-
 // Flush whatever rlgl immediate verts are pending under the *current*
 // tileVariation value, switch the uniform on/off, and ensure the next
 // flush picks up the new value. Called as a bookend around the textured
@@ -143,46 +131,9 @@ static void EndTileVariation(void) {
 // `fallback` — flat colour used when tex == NULL.
 static void DrawTexturedBoxTex(Vector3 c, Vector3 s, Texture2D *tex,
                                Color tint, Color fallback) {
-    if (!tex) {
-        Eng_GfxDrawCubeV(c, s, fallback);
-        Eng_GfxDrawCubeWiresV(c, s, BLACK);
-        return;
-    }
-    float hx = s.x*0.5f, hy = s.y*0.5f, hz = s.z*0.5f;
-    float ux = s.x / TILE_SIZE;
-    float uy = s.y / TILE_SIZE;
-    float uz = s.z / TILE_SIZE;
-
+    if (!tex) { Eng_DrawTexturedBoxV(c, s, tex, TILE_SIZE, tint, fallback); return; }
     BeginTileVariation();
-    Eng_GfxBeginQuads(tex->id);
-    Eng_GfxColor(tint);
-
-    // +Z face
-    Eng_GfxNormal(0, 0, 1);
-    TexQuad(c.x-hx, c.y-hy, c.z+hz,  c.x+hx, c.y-hy, c.z+hz,
-            c.x+hx, c.y+hy, c.z+hz,  c.x-hx, c.y+hy, c.z+hz,  ux, uy);
-    // -Z face
-    Eng_GfxNormal(0, 0, -1);
-    TexQuad(c.x+hx, c.y-hy, c.z-hz,  c.x-hx, c.y-hy, c.z-hz,
-            c.x-hx, c.y+hy, c.z-hz,  c.x+hx, c.y+hy, c.z-hz,  ux, uy);
-    // +X face
-    Eng_GfxNormal(1, 0, 0);
-    TexQuad(c.x+hx, c.y-hy, c.z+hz,  c.x+hx, c.y-hy, c.z-hz,
-            c.x+hx, c.y+hy, c.z-hz,  c.x+hx, c.y+hy, c.z+hz,  uz, uy);
-    // -X face
-    Eng_GfxNormal(-1, 0, 0);
-    TexQuad(c.x-hx, c.y-hy, c.z-hz,  c.x-hx, c.y-hy, c.z+hz,
-            c.x-hx, c.y+hy, c.z+hz,  c.x-hx, c.y+hy, c.z-hz,  uz, uy);
-    // +Y face (top)
-    Eng_GfxNormal(0, 1, 0);
-    TexQuad(c.x-hx, c.y+hy, c.z+hz,  c.x+hx, c.y+hy, c.z+hz,
-            c.x+hx, c.y+hy, c.z-hz,  c.x-hx, c.y+hy, c.z-hz,  ux, uz);
-    // -Y face (bottom)
-    Eng_GfxNormal(0, -1, 0);
-    TexQuad(c.x-hx, c.y-hy, c.z-hz,  c.x+hx, c.y-hy, c.z-hz,
-            c.x+hx, c.y-hy, c.z+hz,  c.x-hx, c.y-hy, c.z+hz,  ux, uz);
-
-    Eng_GfxEndQuads();
+    Eng_DrawTexturedBoxV(c, s, tex, TILE_SIZE, tint, fallback);
     EndTileVariation();
 }
 
@@ -197,23 +148,9 @@ static void DrawTexturedBox(Vector3 c, Vector3 s, TextureId tid,
 // `tex` — explicit Texture2D*; NULL triggers flat colour fallback.
 static void DrawTexturedFloorTex(Vector3 center, float sizeX, float sizeZ,
                                  Texture2D *tex, Color tint, Color fallback) {
-    if (!tex) {
-        Eng_GfxDrawPlane(center, (Vector2){sizeX, sizeZ}, fallback);
-        return;
-    }
-    float hx = sizeX*0.5f, hz = sizeZ*0.5f;
-    float u = sizeX / TILE_SIZE;
-    float v = sizeZ / TILE_SIZE;
-
+    if (!tex) { Eng_DrawTexturedFloorV(center, sizeX, sizeZ, tex, TILE_SIZE, tint, fallback); return; }
     BeginTileVariation();
-    Eng_GfxBeginQuads(tex->id);
-    Eng_GfxColor(tint);
-    Eng_GfxNormal(0, 1, 0);
-    TexQuad(center.x-hx, center.y, center.z+hz,
-            center.x+hx, center.y, center.z+hz,
-            center.x+hx, center.y, center.z-hz,
-            center.x-hx, center.y, center.z-hz,  u, v);
-    Eng_GfxEndQuads();
+    Eng_DrawTexturedFloorV(center, sizeX, sizeZ, tex, TILE_SIZE, tint, fallback);
     EndTileVariation();
 }
 

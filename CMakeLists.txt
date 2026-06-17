@@ -49,6 +49,7 @@ add_library(engine STATIC
     src/engine/audio.c
     src/engine/net.c
     src/engine/mapdoc.c
+    src/engine/deffile.c
     src/engine/pad.c
     src/engine/fx.c
     src/engine/decals.c

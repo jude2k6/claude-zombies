@@ -6,6 +6,7 @@
 #include "particles.h"
 #include "assets.h"     // Assets_RegisterWorldShaderModel (world-shader enrol)
 #include "content.h"    // Eng_LoadModel, Eng_ModelGet, Eng_RegisterContentType
+#include "deffile.h"    // shared tokenizer / number parsing
 #include "raymath.h"
 #include <math.h>
 #include <stdint.h>
@@ -309,36 +310,11 @@ static WeaponCategory CategoryFromStr(const char *s, WeaponCategory fallback) {
     return fallback;
 }
 
-// Tokenize whitespace-separated, in place. Returns token count, fills toks[].
-static int Tokenize(char *line, char *toks[], int maxToks) {
-    int n = 0;
-    char *p = line;
-    while (*p && n < maxToks) {
-        while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') p++;
-        if (!*p) break;
-        toks[n++] = p;
-        while (*p && *p != ' ' && *p != '\t' && *p != '\r' && *p != '\n') p++;
-        if (*p) { *p = 0; p++; }
-    }
-    return n;
-}
-
-static bool ParseFloatTok(const char *s, float *out) {
-    if (!s) return false;
-    char *end = NULL;
-    float v = strtof(s, &end);
-    if (end == s) return false;
-    *out = v;
-    return true;
-}
-static bool ParseIntTok(const char *s, int *out) {
-    if (!s) return false;
-    char *end = NULL;
-    long v = strtol(s, &end, 10);
-    if (end == s) return false;
-    *out = (int)v;
-    return true;
-}
+// Token + number parsing come from the engine's shared def-file reader so the
+// .weapon and .mob catalogs (and the editor) all tokenize identically.
+#define Tokenize(line, toks, maxToks) Eng_DefTokenize((line), (toks), (maxToks))
+#define ParseFloatTok(s, out)         Eng_DefParseFloat((s), (out))
+#define ParseIntTok(s, out)           Eng_DefParseInt((s), (out))
 
 // Returns the directory of `path` (everything up to and including the last
 // '/'). Writes into `out`, caps at outSize. Empty string if no slash.

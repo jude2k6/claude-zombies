@@ -31,6 +31,7 @@
 #include "gizmo.h"
 #include "debugdraw.h"
 #include "gfx.h"
+#include "eng_ui.h"   // house UI toolkit: theme + scaled text + tool button
 
 #include <stdio.h>
 #include <string.h>
@@ -95,17 +96,6 @@ static struct {
 
 // Toolbar width tracks the UI scale so the panel grows with the font.
 static int EdPanelW(void) { return (int)(ED_PANEL_W_BASE * ed.uiScale); }
-
-// A sensible default UI scale for the current display: ~1.0 at 720p, ~1.5 at
-// 1080p, up to 3.0 on a 4K monitor. The user adjusts from here.
-static float RecommendedUiScale(void) {
-    int mh = GetMonitorHeight(GetCurrentMonitor());
-    if (mh <= 0) mh = GetScreenHeight();
-    float s = (float)mh / 720.0f;
-    if (s < 1.0f)      s = 1.0f;
-    if (s > ED_UI_MAX) s = ED_UI_MAX;
-    return s;
-}
 
 // ---- proxy build (MapDoc → selectable boxes) -------------------------------
 
@@ -514,7 +504,8 @@ static void EdInit(void) {
     ed.mode = ENG_GIZMO_TRANSLATE;
     ed.placeTool = ED_PLACE_NONE;
     ed.barricadeAutoSpawn = true;
-    ed.uiScale = RecommendedUiScale();
+    ed.uiScale = EngUi_RecommendedScale();
+    EngUi_ApplyTheme();   // dark/gold house style for every raygui control
 }
 
 static void EdFrame(float dt, int sw, int sh) {
@@ -584,32 +575,23 @@ static void EdFrame(float dt, int sw, int sh) {
 //
 // Everything is laid out in scaled pixels: `s = ed.uiScale` multiplies fonts,
 // row heights, and the panel width, so the toolbar grows/shrinks as one. The
-// raygui font is set via the TEXT_SIZE style; raw DrawText labels take `s`
-// explicitly.
-
-// One stacked, full-width tool button with a gold accent bar when active.
-static bool ToolRow(float x, float y, float w, float s, const char *label, bool active) {
-    if (active) DrawRectangleRec((Rectangle){ x - 5 * s, y, 3 * s, 24 * s }, (Color){ 230, 180, 60, 255 });
-    return GuiButton((Rectangle){ x, y, w, 24 * s }, label);
-}
-// Scaled raw text.
-static void PText(float x, float y, float s, float px, const char *t, Color c) {
-    DrawText(t, (int)x, (int)y, (int)(px * s), c);
-}
+// house style, scaled text, and accent-bar tool button come from eng_ui; the
+// global UI scale is pushed once per frame so its helpers track ed.uiScale.
 
 static void DrawToolPanel(int sh) {
     float s = ed.uiScale;
     int   pw = EdPanelW();
     float X = 10 * s, W = pw - 20 * s;
-    GuiSetStyle(DEFAULT, TEXT_SIZE, (int)(16 * s));   // scale every raygui control's font
+    EngUi_SetScale(s);          // eng_ui text/widgets follow the editor's scale
+    EngUi_ApplyFont(16);        // scale every raygui control's font (16 * s)
 
     DrawRectangle(0, 0, pw, sh, (Color){ 24, 27, 34, 255 });
     DrawRectangle(pw - 1, 0, 1, sh, (Color){ 60, 66, 80, 255 });
 
     float y = 10 * s;
-    PText(X, y, s, 20, "SCENE BUILDER", (Color){ 230, 200, 120, 255 }); y += 26 * s;
-    PText(X, y, s, 12, TextFormat("%s   (%d ents)", GetFileName(ed.path), ed.proxyCount),
-          (Color){ 170, 175, 185, 255 }); y += 20 * s;
+    EngUi_Text("SCENE BUILDER", X, y, 20, (Color){ 230, 200, 120, 255 }); y += 26 * s;
+    EngUi_Text(TextFormat("%s   (%d ents)", GetFileName(ed.path), ed.proxyCount),
+               X, y, 12, (Color){ 170, 175, 185, 255 }); y += 20 * s;
 
     // UI scale (recommended from the display; adjust here or with Ctrl +/-).
     GuiSlider((Rectangle){ X + 18 * s, y, W - 60 * s, 16 * s }, "UI",
@@ -639,7 +621,8 @@ static void DrawToolPanel(int sh) {
         { "Barricade",      ED_PLACE_BARRICADE },
     };
     for (int i = 0; i < 4; i++) {
-        if (ToolRow(X, y, W, s, tools[i].label, ed.placeTool == tools[i].tool))
+        if (EngUi_ToolButton((Rectangle){ X, y, W, 24 * s }, tools[i].label,
+                             ed.placeTool == tools[i].tool))
             ed.placeTool = tools[i].tool;
         y += 28 * s;
     }
@@ -667,24 +650,24 @@ static void DrawToolPanel(int sh) {
     GuiLabel((Rectangle){ X, y, W, 16 * s }, "SELECTION"); y += 18 * s;
     if (ed.selectedId >= 0) {
         EngMapEntKind k; EngMapEnt_Ptr(&ed.doc, EngMapEnt_Find(&ed.doc, ed.selectedId), &k);
-        PText(X, y, s, 16, TextFormat("#%d  %s", ed.selectedId, KindName(k)), YELLOW); y += 20 * s;
+        EngUi_Text(TextFormat("#%d  %s", ed.selectedId, KindName(k)), X, y, 16, YELLOW); y += 20 * s;
         if (k == ENGMAPENT_SPAWN) {
             char m[MAPDOC_SPAWN_MOB_LEN]; Eng_GetSpawnMob(&ed.doc, ed.selectedId, m, sizeof m);
-            PText(X, y, s, 14, TextFormat("mob: %s", m), RAYWHITE); y += 18 * s;
-            PText(X, y, s, 12, "[R] flip PLAYER/ZOMBIE", (Color){ 150, 155, 165, 255 }); y += 18 * s;
+            EngUi_Text(TextFormat("mob: %s", m), X, y, 14, RAYWHITE); y += 18 * s;
+            EngUi_Text("[R] flip PLAYER/ZOMBIE", X, y, 12, (Color){ 150, 155, 165, 255 }); y += 18 * s;
         } else if (k == ENGMAPENT_WINDOW) {
             char d[4]; Eng_GetWindowDir(&ed.doc, ed.selectedId, d, sizeof d);
-            PText(X, y, s, 14, TextFormat("facing: %s", d), RAYWHITE); y += 18 * s;
-            PText(X, y, s, 12, "[R] rotate facing", (Color){ 150, 155, 165, 255 }); y += 18 * s;
+            EngUi_Text(TextFormat("facing: %s", d), X, y, 14, RAYWHITE); y += 18 * s;
+            EngUi_Text("[R] rotate facing", X, y, 12, (Color){ 150, 155, 165, 255 }); y += 18 * s;
         }
     } else {
-        PText(X, y, s, 14, "(nothing selected)", (Color){ 130, 135, 145, 255 });
+        EngUi_Text("(nothing selected)", X, y, 14, (Color){ 130, 135, 145, 255 });
     }
 
     // Nav hint pinned to the bottom.
     const char *nav = ed.view == ED_VIEW_FLY
         ? "RMB+WASDQE fly" : "RMB orbit / MMB pan / wheel zoom";
-    PText(X, sh - 22 * s, s, 12, nav, (Color){ 130, 135, 145, 255 });
+    EngUi_Text(nav, X, sh - 22 * s, 12, (Color){ 130, 135, 145, 255 });
 }
 
 static void EdDraw(int sw, int sh) {

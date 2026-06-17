@@ -1,0 +1,669 @@
+// ============================================================================
+//  edscene.c — implementation of the editor's core document + viewport.
+//  See edscene.h for the role split (scene = document + 3D view; shell = UI).
+// ============================================================================
+
+#include "edscene.h"
+
+#include "raymath.h"
+#include "pick.h"
+#include "debugdraw.h"
+#include "gfx.h"
+
+#include <stdio.h>
+#include <string.h>
+#include <math.h>
+
+#define ED_WALL_H    3.0f   // assumed wall height for drawing/picking
+#define ED_MARKER    0.6f   // half-size of point-entity markers (spawn/perk/…)
+#define ED_ORBIT_DIST 200.0f
+
+// ---- settings persistence (editor.cfg) -------------------------------------
+
+void EdScene_LoadSettings(EdScene *s, EngCfg *cfg) {
+    s->cfg = cfg;
+    const char *paths[] = { "editor.cfg", "../editor.cfg", "./editor.cfg" };
+    EngCfg_Load(cfg, paths, 3);
+    s->camFlySpeed        = EngCfg_Float(cfg, "cam.flySpeed",   16.0f);
+    s->camFlyBoost        = EngCfg_Float(cfg, "cam.flyBoost",   40.0f);
+    s->camLookSens        = EngCfg_Float(cfg, "cam.lookSens",   0.003f);
+    s->camOrbitSens       = EngCfg_Float(cfg, "cam.orbitSens",  0.005f);
+    s->camZoomSpeed       = EngCfg_Float(cfg, "cam.zoomSpeed",  0.1f);
+    s->viewFov            = EngCfg_Float(cfg, "view.fov",       60.0f);
+    s->viewDefault        = (EdViewMode)EngCfg_Int(cfg, "view.default", ED_VIEW_ORBIT);
+    s->viewOrthoH         = EngCfg_Float(cfg, "view.orthoHeight", 40.0f);
+    s->gridSpacing        = EngCfg_Float(cfg, "grid.spacing",   1.0f);
+    s->gridSlices         = EngCfg_Int  (cfg, "grid.slices",    80);
+    s->snapEnabled        = EngCfg_Bool (cfg, "grid.snap",      false);
+    s->snapStep           = EngCfg_Float(cfg, "grid.snapStep",  1.0f);
+    s->barricadeAutoSpawn = EngCfg_Bool (cfg, "edit.barricadeAutoSpawn", true);
+    s->undoDepth          = EngCfg_Int  (cfg, "edit.undoDepth", ENGMAPHISTORY_DEFAULT_DEPTH);
+    s->uiScale            = EngCfg_Float(cfg, "ui.scale",       0.0f);  // 0 = use recommendation
+    s->winW               = EngCfg_Int  (cfg, "win.width",      1280);
+    s->winH               = EngCfg_Int  (cfg, "win.height",     800);
+    s->vsync              = EngCfg_Bool (cfg, "win.vsync",      true);
+    s->fpsCap             = EngCfg_Int  (cfg, "win.fpsCap",     60);
+
+    if (s->viewDefault < ED_VIEW_FLY || s->viewDefault > ED_VIEW_TOP) s->viewDefault = ED_VIEW_ORBIT;
+    if (s->undoDepth < 1) s->undoDepth = ENGMAPHISTORY_DEFAULT_DEPTH;
+}
+
+void EdScene_SaveSettings(EdScene *s, EngCfg *cfg) {
+    FILE *f = EngCfg_BeginSave(cfg, "Claude Zombies map editor settings");
+    if (!f) return;
+    EngCfg_PutFloat(f, "cam.flySpeed",  s->camFlySpeed);
+    EngCfg_PutFloat(f, "cam.flyBoost",  s->camFlyBoost);
+    EngCfg_PutFloat(f, "cam.lookSens",  s->camLookSens);
+    EngCfg_PutFloat(f, "cam.orbitSens", s->camOrbitSens);
+    EngCfg_PutFloat(f, "cam.zoomSpeed", s->camZoomSpeed);
+    EngCfg_PutFloat(f, "view.fov",      s->viewFov);
+    EngCfg_PutInt  (f, "view.default",  (int)s->viewDefault);
+    EngCfg_PutFloat(f, "view.orthoHeight", s->viewOrthoH);
+    EngCfg_PutFloat(f, "grid.spacing",  s->gridSpacing);
+    EngCfg_PutInt  (f, "grid.slices",   s->gridSlices);
+    EngCfg_PutBool (f, "grid.snap",     s->snapEnabled);
+    EngCfg_PutFloat(f, "grid.snapStep", s->snapStep);
+    EngCfg_PutBool (f, "edit.barricadeAutoSpawn", s->barricadeAutoSpawn);
+    EngCfg_PutInt  (f, "edit.undoDepth", s->undoDepth);
+    EngCfg_PutFloat(f, "ui.scale",      s->uiScale);
+    EngCfg_PutInt  (f, "win.width",     s->winW);
+    EngCfg_PutInt  (f, "win.height",    s->winH);
+    EngCfg_PutBool (f, "win.vsync",     s->vsync);
+    EngCfg_PutInt  (f, "win.fpsCap",    s->fpsCap);
+    EngCfg_EndSave(f);
+}
+
+static float EdSnap(EdScene *s, float v) {
+    if (!s->snapEnabled || s->snapStep <= 0.0f) return v;
+    return roundf(v / s->snapStep) * s->snapStep;
+}
+
+// ---- proxy build (MapDoc → selectable boxes) -------------------------------
+
+static float SectorFloorY(EdScene *s, int sectorId) {
+    if (sectorId < 0 || sectorId >= s->doc.sectorCount) return 0.0f;
+    return s->doc.sectors[sectorId].yLow;
+}
+
+static BoundingBox BoxAround(float cx, float cy, float cz, float hx, float hy, float hz) {
+    return (BoundingBox){ { cx - hx, cy - hy, cz - hz }, { cx + hx, cy + hy, cz + hz } };
+}
+
+static void AddProxy(EdScene *s, int id, EngMapEntKind kind, BoundingBox box, Color col) {
+    if (s->proxyCount >= ED_MAX_ENTS) return;
+    s->proxies[s->proxyCount++] = (EdProxy){ id, kind, box, col };
+}
+
+void EdScene_RebuildProxies(EdScene *s) {
+    s->proxyCount = 0;
+    const MapDoc *d = &s->doc;
+
+    for (int i = 0; i < d->sectorCount; i++) {
+        const MapDocSector *sc = &d->sectors[i];
+        float cy = (sc->yLow + sc->yHigh) * 0.5f;
+        AddProxy(s, sc->id, ENGMAPENT_SECTOR,
+                 BoxAround(sc->x, cy, sc->z, sc->sx * 0.5f, 0.1f, sc->sz * 0.5f),
+                 (Color){ 60, 70, 90, 255 });
+    }
+    for (int i = 0; i < d->wallCount; i++) {
+        const MapDocWall *w = &d->walls[i];
+        float y  = SectorFloorY(s, w->sectorId);
+        float cx = (w->x1 + w->x2) * 0.5f, cz = (w->z1 + w->z2) * 0.5f;
+        float hx = fabsf(w->x2 - w->x1) * 0.5f + 0.15f;
+        float hz = fabsf(w->z2 - w->z1) * 0.5f + 0.15f;
+        AddProxy(s, w->id, ENGMAPENT_WALL,
+                 BoxAround(cx, y + ED_WALL_H * 0.5f, cz, hx, ED_WALL_H * 0.5f, hz),
+                 (Color){ 150, 140, 120, 255 });
+    }
+    for (int i = 0; i < d->obstacleCount; i++) {
+        const MapDocObstacle *o = &d->obstacles[i];
+        float y = SectorFloorY(s, o->sectorId);
+        AddProxy(s, o->id, ENGMAPENT_OBSTACLE,
+                 BoxAround(o->x, y + o->h * 0.5f, o->z, o->sx * 0.5f, o->h * 0.5f, o->sz * 0.5f),
+                 (Color){ 120, 110, 90, 255 });
+    }
+    for (int i = 0; i < d->propCount; i++) {
+        const MapDocProp *p = &d->props[i];
+        float y = SectorFloorY(s, p->sectorId);
+        float h = ED_MARKER * p->scale;
+        AddProxy(s, p->id, ENGMAPENT_PROP,
+                 BoxAround(p->x, y + h, p->z, h, h, h), (Color){ 90, 160, 110, 255 });
+    }
+    for (int i = 0; i < d->spawnCount; i++) {
+        const MapDocSpawn *sp = &d->spawns[i];
+        float y = SectorFloorY(s, sp->sectorId);
+        bool player = (strcmp(sp->mob, "PLAYER") == 0);
+        AddProxy(s, sp->id, ENGMAPENT_SPAWN,
+                 BoxAround(sp->x, y + ED_MARKER, sp->z, ED_MARKER, ED_MARKER, ED_MARKER),
+                 player ? (Color){ 90, 130, 200, 255 } : (Color){ 200, 80, 80, 255 });
+    }
+    for (int i = 0; i < d->windowCount; i++) {
+        const MapDocWindow *w = &d->windows[i];
+        float y = SectorFloorY(s, w->sectorId);
+        AddProxy(s, w->id, ENGMAPENT_WINDOW,
+                 BoxAround(w->x, y + ED_MARKER, w->z, ED_MARKER, ED_MARKER, ED_MARKER),
+                 (Color){ 200, 170, 90, 255 });
+    }
+    for (int i = 0; i < d->wallbuyCount; i++) {
+        const MapDocWallbuy *w = &d->wallbuys[i];
+        float y = SectorFloorY(s, w->sectorId);
+        AddProxy(s, w->id, ENGMAPENT_WALLBUY,
+                 BoxAround(w->x, y + ED_MARKER, w->z, ED_MARKER, ED_MARKER, ED_MARKER),
+                 (Color){ 200, 120, 90, 255 });
+    }
+    for (int i = 0; i < d->perkCount; i++) {
+        const MapDocPerk *p = &d->perks[i];
+        float y = SectorFloorY(s, p->sectorId);
+        AddProxy(s, p->id, ENGMAPENT_PERK,
+                 BoxAround(p->x, y + ED_MARKER, p->z, ED_MARKER, ED_MARKER, ED_MARKER),
+                 (Color){ 170, 90, 200, 255 });
+    }
+}
+
+static const EdProxy *FindProxy(EdScene *s, int id) {
+    for (int i = 0; i < s->proxyCount; i++)
+        if (s->proxies[i].id == id) return &s->proxies[i];
+    return NULL;
+}
+
+const char *EdScene_KindName(EngMapEntKind k) {
+    switch (k) {
+        case ENGMAPENT_SPAWN:    return "spawn";
+        case ENGMAPENT_WALL:     return "wall";
+        case ENGMAPENT_WINDOW:   return "window";
+        case ENGMAPENT_OBSTACLE: return "obstacle";
+        case ENGMAPENT_PROP:     return "prop";
+        case ENGMAPENT_WALLBUY:  return "wallbuy";
+        case ENGMAPENT_PERK:     return "perk";
+        case ENGMAPENT_SECTOR:   return "sector";
+        default:                 return "none";
+    }
+}
+
+// ---- selection origin (gizmo pivot) ----------------------------------------
+
+static bool SelectedOrigin(EdScene *s, Vector3 *out) {
+    if (s->selectedId < 0) return false;
+    const EdProxy *p = FindProxy(s, s->selectedId);
+    if (!p) return false;
+    float cx, cz;
+    if (!Eng_GetPos(&s->doc, s->selectedId, &cx, &cz)) return false;
+    float cy = (p->box.min.y + p->box.max.y) * 0.5f;
+    *out = (Vector3){ cx, cy, cz };
+    return true;
+}
+
+// ---- cameras (fly / orbit / top) -------------------------------------------
+
+static Vector3 ForwardFrom(float yaw, float pitch) {
+    return (Vector3){ cosf(pitch) * sinf(yaw), sinf(pitch), -cosf(pitch) * cosf(yaw) };
+}
+
+static void ViewBasis(Vector3 fwd, Vector3 *right, Vector3 *up) {
+    Vector3 worldUp = (fabsf(fwd.y) > 0.999f) ? (Vector3){ 0, 0, -1 } : (Vector3){ 0, 1, 0 };
+    *right = Vector3Normalize(Vector3CrossProduct(fwd, worldUp));
+    *up    = Vector3Normalize(Vector3CrossProduct(*right, fwd));
+}
+
+void EdScene_SwitchView(EdScene *s, EdViewMode m) {
+    if (m == s->view) return;
+    if (m == ED_VIEW_FLY) {
+        if (s->view == ED_VIEW_TOP) s->pitch = -1.2f;
+        Vector3 fwd = ForwardFrom(s->yaw, s->pitch);
+        s->cam.position = Vector3Subtract(s->focus, Vector3Scale(fwd, 20.0f));
+        if (s->looking) { s->looking = false; ShowCursor(); }
+    } else if (m == ED_VIEW_TOP) {
+        s->pitch = -PI * 0.5f;
+    } else if (m == ED_VIEW_ORBIT && s->view == ED_VIEW_TOP) {
+        s->pitch = -0.9f;
+    }
+    s->view = m;
+}
+
+// Fly camera: use HideCursor()/ShowCursor() + per-frame viewport-centre warp
+// instead of DisableCursor()/EnableCursor().  DisableCursor locks the cursor
+// to the WINDOW centre (not the viewport centre), which on Wayland is
+// asynchronous and temporarily blocks all cursor events; on every platform it
+// means ptIn is false for the frame after the warp, relying on vpActive/looking
+// to keep vpInput true.  The simpler and more IDE-friendly approach: hide the
+// cursor while looking, read GetMouseDelta() normally (always frame-accurate),
+// then warp back to the viewport centre so the cursor stays inside the viewport
+// and edge-clamping never limits look range.
+static void UpdateCamFly(EdScene *s, float dt, Rectangle vp) {
+    if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)) { s->looking = true;  HideCursor(); }
+    if (IsMouseButtonReleased(MOUSE_BUTTON_RIGHT) && s->looking) { s->looking = false; ShowCursor(); }
+
+    if (s->looking) {
+        Vector2 md = GetMouseDelta();
+        s->yaw   += md.x * s->camLookSens;
+        s->pitch -= md.y * s->camLookSens;
+        if (s->pitch >  1.55f) s->pitch =  1.55f;
+        if (s->pitch < -1.55f) s->pitch = -1.55f;
+        // Warp cursor to viewport centre so subsequent GetMouseDelta() measures
+        // from a stable, in-viewport reference point (prevents edge-clamping).
+        SetMousePosition((int)(vp.x + vp.width  * 0.5f),
+                         (int)(vp.y + vp.height * 0.5f));
+    }
+
+    Vector3 fwd   = ForwardFrom(s->yaw, s->pitch);
+    Vector3 right = { cosf(s->yaw), 0, sinf(s->yaw) };
+    Vector3 up    = { 0, 1, 0 };
+    Vector3 move  = { 0 };
+    if (s->looking) {
+        if (IsKeyDown(KEY_W)) move = Vector3Add(move, fwd);
+        if (IsKeyDown(KEY_S)) move = Vector3Subtract(move, fwd);
+        if (IsKeyDown(KEY_D)) move = Vector3Add(move, right);
+        if (IsKeyDown(KEY_A)) move = Vector3Subtract(move, right);
+        if (IsKeyDown(KEY_E)) move = Vector3Add(move, up);
+        if (IsKeyDown(KEY_Q)) move = Vector3Subtract(move, up);
+    }
+    float speed = IsKeyDown(KEY_LEFT_SHIFT) ? s->camFlyBoost : s->camFlySpeed;
+    if (Vector3LengthSqr(move) > 1e-4f)
+        s->cam.position = Vector3Add(s->cam.position, Vector3Scale(Vector3Normalize(move), speed * dt));
+
+    s->cam.target     = Vector3Add(s->cam.position, fwd);
+    s->cam.up         = up;
+    s->cam.fovy       = s->viewFov;
+    s->cam.projection = CAMERA_PERSPECTIVE;
+    s->focus = Vector3Add(s->cam.position, Vector3Scale(fwd, 20.0f));
+}
+
+static void UpdateCamOrtho(EdScene *s, bool allowRotate) {
+    if (allowRotate && IsMouseButtonDown(MOUSE_BUTTON_RIGHT)) {
+        Vector2 md = GetMouseDelta();
+        s->yaw   += md.x * s->camOrbitSens;
+        s->pitch -= md.y * s->camOrbitSens;
+        if (s->pitch < -1.55f) s->pitch = -1.55f;
+        if (s->pitch >  1.55f) s->pitch =  1.55f;
+    }
+
+    Vector3 fwd = (s->view == ED_VIEW_TOP) ? (Vector3){ 0, -1, 0 }
+                                           : ForwardFrom(s->yaw, s->pitch);
+    Vector3 right, up;
+    ViewBasis(fwd, &right, &up);
+
+    if (IsMouseButtonDown(MOUSE_BUTTON_MIDDLE)) {
+        Vector2 md = GetMouseDelta();
+        float wpp = s->orthoH / (float)s->vpH;
+        s->focus = Vector3Add(s->focus, Vector3Scale(right, -md.x * wpp));
+        s->focus = Vector3Add(s->focus, Vector3Scale(up,     md.y * wpp));
+    }
+
+    float wheel = GetMouseWheelMove();
+    if (wheel != 0.0f) {
+        s->orthoH *= (1.0f - wheel * s->camZoomSpeed);
+        if (s->orthoH <   2.0f) s->orthoH =   2.0f;
+        if (s->orthoH > 400.0f) s->orthoH = 400.0f;
+    }
+
+    s->cam.position   = Vector3Subtract(s->focus, Vector3Scale(fwd, ED_ORBIT_DIST));
+    s->cam.target     = s->focus;
+    s->cam.up         = up;
+    s->cam.fovy       = s->orthoH;
+    s->cam.projection = CAMERA_ORTHOGRAPHIC;
+}
+
+static void EdUpdateCamera(EdScene *s, float dt, Rectangle vp) {
+    switch (s->view) {
+        case ED_VIEW_FLY:   UpdateCamFly(s, dt, vp);     break;
+        case ED_VIEW_ORBIT: UpdateCamOrtho(s, true);      break;
+        case ED_VIEW_TOP:   UpdateCamOrtho(s, false);     break;
+    }
+}
+
+// ---- pick selection --------------------------------------------------------
+
+static void PickSelection(EdScene *s) {
+    Ray ray = Eng_PickRayFromScreen(s->cam, s->vpMouse, s->vpW, s->vpH);
+    int   best = -1;
+    float bestT = 1e30f;
+    for (int i = 0; i < s->proxyCount; i++) {
+        float t;
+        if (Eng_PickRayAABB(ray, s->proxies[i].box, &t) && t < bestT) {
+            bestT = t; best = s->proxies[i].id;
+        }
+    }
+    s->selectedId = best;
+}
+
+// ---- placement (mapedit add + retag) ---------------------------------------
+
+void EdScene_Commit(EdScene *s) {
+    EngMapHistory_Commit(&s->hist, &s->doc, 0);
+    s->dirty = true;
+}
+
+static const char *FacingToward(Vector3 p) {
+    if (fabsf(p.x) >= fabsf(p.z)) return p.x > 0 ? "-x" : "+x";
+    return p.z > 0 ? "-z" : "+z";
+}
+static Vector3 DirNormal(const char *d) {
+    if (!strcmp(d, "+x")) return (Vector3){  1, 0,  0 };
+    if (!strcmp(d, "-x")) return (Vector3){ -1, 0,  0 };
+    if (!strcmp(d, "+z")) return (Vector3){  0, 0,  1 };
+    return (Vector3){ 0, 0, -1 };
+}
+
+static int SectorAt(EdScene *s, float x, float z) {
+    for (int i = 0; i < s->doc.sectorCount; i++) {
+        const MapDocSector *sc = &s->doc.sectors[i];
+        if (fabsf(x - sc->x) <= sc->sx * 0.5f && fabsf(z - sc->z) <= sc->sz * 0.5f) return i;
+    }
+    return s->doc.sectorCount > 0 ? 0 : -1;
+}
+
+static int AddSpawn(EdScene *s, const char *mob, float x, float z) {
+    int id = EngMapEnt_Add(&s->doc, ENGMAPENT_SPAWN);
+    if (id < 0) return -1;
+    Eng_SetSpawnMob(&s->doc, id, mob);
+    Eng_SetSector(&s->doc, id, SectorAt(s, x, z));
+    Eng_SetPos(&s->doc, id, x, z);
+    return id;
+}
+
+static void PlaceAt(EdScene *s, Vector3 p) {
+    switch (s->placeTool) {
+        case ED_PLACE_PLAYER: s->selectedId = AddSpawn(s, "PLAYER", p.x, p.z); EdScene_Commit(s); break;
+        case ED_PLACE_ZOMBIE: s->selectedId = AddSpawn(s, "ZOMBIE", p.x, p.z); EdScene_Commit(s); break;
+        case ED_PLACE_BARRICADE: {
+            int wid = EngMapEnt_Add(&s->doc, ENGMAPENT_WINDOW);
+            if (wid < 0) return;
+            const char *dir = FacingToward(p);
+            Eng_SetWindowDir(&s->doc, wid, dir);
+            Eng_SetSector(&s->doc, wid, SectorAt(s, p.x, p.z));
+            Eng_SetPos(&s->doc, wid, p.x, p.z);
+            s->selectedId = wid;
+            if (s->barricadeAutoSpawn) {
+                Vector3 n = DirNormal(dir);
+                AddSpawn(s, "ZOMBIE", p.x - n.x * 5.0f, p.z - n.z * 5.0f);
+            }
+            EdScene_Commit(s);
+            break;
+        }
+        default: break;
+    }
+}
+
+void EdScene_CycleSelected(EdScene *s) {
+    if (s->selectedId < 0) return;
+    EngMapEntKind k; EngMapEnt_Ptr(&s->doc, EngMapEnt_Find(&s->doc, s->selectedId), &k);
+    if (k == ENGMAPENT_WINDOW) {
+        char d[4]; Eng_GetWindowDir(&s->doc, s->selectedId, d, sizeof d);
+        const char *order[4] = { "+x", "+z", "-x", "-z" };
+        int cur = 0; for (int i = 0; i < 4; i++) if (!strcmp(d, order[i])) cur = i;
+        Eng_SetWindowDir(&s->doc, s->selectedId, order[(cur + 1) % 4]);
+        EdScene_Commit(s);
+    } else if (k == ENGMAPENT_SPAWN) {
+        char m[MAPDOC_SPAWN_MOB_LEN]; Eng_GetSpawnMob(&s->doc, s->selectedId, m, sizeof m);
+        Eng_SetSpawnMob(&s->doc, s->selectedId, strcmp(m, "PLAYER") == 0 ? "ZOMBIE" : "PLAYER");
+        EdScene_Commit(s);
+    }
+}
+
+void EdScene_DeleteSelected(EdScene *s) {
+    if (s->selectedId < 0) return;
+    EngMapEnt_Delete(&s->doc, s->selectedId);
+    s->selectedId = -1;
+    EdScene_Commit(s);
+}
+
+void EdScene_Undo(EdScene *s) { if (EngMapHistory_Undo(&s->hist, &s->doc)) s->dirty = true; }
+void EdScene_Redo(EdScene *s) { if (EngMapHistory_Redo(&s->hist, &s->doc)) s->dirty = true; }
+
+// ---- gizmo drag (translate) → mapedit → history ----------------------------
+
+static uint32_t g_nextTag = 1;
+
+static float GizmoHandleSize(EdScene *s, Vector3 origin) {
+    if (s->view == ED_VIEW_FLY)
+        return Vector3Distance(s->cam.position, origin) * 0.12f + 0.5f;
+    return s->orthoH * 0.06f + 0.5f;
+}
+
+static void UpdateGizmo(EdScene *s, bool allowGrab) {
+    Vector3 origin;
+    if (!SelectedOrigin(s, &origin)) { s->dragging = false; return; }
+
+    float handleSize = GizmoHandleSize(s, origin);
+    Vector2 mouse = s->vpMouse;
+
+    if (!s->dragging) {
+        EngGizmoAxis hot = Eng_GizmoHitTest(s->cam, mouse, s->vpW, s->vpH, origin, s->mode, handleSize);
+        Eng_GizmoDebugDraw(origin, s->mode, handleSize, hot);
+
+        if (allowGrab && hot != ENG_GIZMO_AXIS_NONE && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+            // ROTATE and SCALE only make sense for props; TRANSLATE works for all kinds.
+            bool modeOk = (s->mode == ENG_GIZMO_TRANSLATE);
+            if (!modeOk) {
+                EngMapEntKind k;
+                EngMapEnt_Ptr(&s->doc, EngMapEnt_Find(&s->doc, s->selectedId), &k);
+                modeOk = (k == ENGMAPENT_PROP);
+            }
+            if (modeOk) {
+                s->drag = Eng_GizmoBeginDrag(s->cam, mouse, s->vpW, s->vpH, origin, s->mode, hot);
+                if (s->drag.axis != ENG_GIZMO_AXIS_NONE) {
+                    float x, z; Eng_GetPos(&s->doc, s->selectedId, &x, &z);
+                    s->dragStartPos = (Vector3){ x, origin.y, z };
+                    Eng_GetYaw(&s->doc, s->selectedId, &s->dragStartYaw);
+                    Eng_GetScale(&s->doc, s->selectedId, &s->dragStartScale);
+                    s->dragTag = g_nextTag++;
+                    if (g_nextTag == 0) g_nextTag = 1;
+                    s->dragging = true;
+                }
+            }
+        }
+        return;
+    }
+
+    Eng_GizmoDebugDraw(origin, s->mode, handleSize, s->drag.axis);
+    EngGizmoDelta d = Eng_GizmoUpdateDrag(s->drag, s->cam, mouse, s->vpW, s->vpH);
+
+    switch (s->mode) {
+        case ENG_GIZMO_TRANSLATE:
+            Eng_SetPos(&s->doc, s->selectedId,
+                       EdSnap(s, s->dragStartPos.x + d.translate.x),
+                       EdSnap(s, s->dragStartPos.z + d.translate.z));
+            break;
+        case ENG_GIZMO_ROTATE:
+            Eng_SetYaw(&s->doc, s->selectedId, s->dragStartYaw + d.rotateRadians * RAD2DEG);
+            break;
+        case ENG_GIZMO_SCALE: {
+            // d.scale is a per-axis multiplier; pick the component for the active axis.
+            float factor;
+            switch (s->drag.axis) {
+                case ENG_GIZMO_AXIS_Y:  factor = d.scale.y; break;
+                case ENG_GIZMO_AXIS_Z:  factor = d.scale.z; break;
+                default:                factor = d.scale.x; break;
+            }
+            float newScale = s->dragStartScale * factor;
+            if (newScale < 0.05f) newScale = 0.05f;
+            Eng_SetScale(&s->doc, s->selectedId, newScale);
+            break;
+        }
+    }
+
+    EngMapHistory_Commit(&s->hist, &s->doc, s->dragTag);
+    s->dirty = true;
+
+    if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) s->dragging = false;
+}
+
+// ---- lifecycle -------------------------------------------------------------
+
+void EdScene_Init(EdScene *s) {
+    if (MapDoc_Parse(s->path, &s->doc, stderr) > 0)
+        fprintf(stderr, "editor: '%s' parsed with errors (continuing)\n", s->path);
+    EngMapHistory_Init(&s->hist, s->undoDepth);
+    EngMapHistory_Commit(&s->hist, &s->doc, 0);
+    Eng_DebugSetEnabled(true);
+
+    s->cam = (Camera3D){ .position = { 0, 24, 28 }, .target = { 0, 0, 0 },
+                         .up = { 0, 1, 0 }, .fovy = s->viewFov, .projection = CAMERA_PERSPECTIVE };
+    s->view   = s->viewDefault;
+    s->yaw    = PI * 0.25f;
+    s->pitch  = -0.6f;
+    s->focus  = (Vector3){ 0, 0, 0 };
+    s->orthoH = s->viewOrthoH;
+    s->selectedId = -1;
+    s->mode = ENG_GIZMO_TRANSLATE;
+    s->placeTool = ED_PLACE_NONE;
+    s->dirty = false;
+}
+
+void EdScene_Shutdown(EdScene *s) {
+    EngMapHistory_Free(&s->hist);
+    if (s->vpTexValid) { UnloadRenderTexture(s->vpTex); s->vpTexValid = false; }
+}
+
+bool EdScene_Save(EdScene *s) {
+    int rc = MapDoc_Save(s->path, &s->doc);
+    if (rc == 0) s->dirty = false;
+    return rc == 0;
+}
+
+bool EdScene_Open(EdScene *s, const char *path) {
+    MapDoc nd; memset(&nd, 0, sizeof nd);
+    if (MapDoc_Parse(path, &nd, stderr) > 0) return false;
+    s->doc = nd;
+    snprintf(s->path, sizeof s->path, "%s", path);
+    EngMapHistory_Free(&s->hist);
+    EngMapHistory_Init(&s->hist, s->undoDepth);
+    EngMapHistory_Commit(&s->hist, &s->doc, 0);
+    s->selectedId = -1;
+    s->dragging = false;
+    s->dirty = false;
+    return true;
+}
+
+void EdScene_New(EdScene *s) {
+    // Reset to a fresh empty document: one default sector so the .map grammar
+    // has somewhere to group entities into.
+    memset(&s->doc, 0, sizeof s->doc);
+    int sid = EngMapEnt_Add(&s->doc, ENGMAPENT_SECTOR);
+    if (sid >= 0) {
+        Eng_SetSectorSize(&s->doc, sid, 40.0f, 40.0f);
+        Eng_SetSectorHeights(&s->doc, sid, 0.0f, 0.0f);
+    }
+    EngMapHistory_Free(&s->hist);
+    EngMapHistory_Init(&s->hist, s->undoDepth);
+    EngMapHistory_Commit(&s->hist, &s->doc, 0);
+    s->selectedId = -1;
+    s->dragging = false;
+    snprintf(s->path, sizeof s->path, "untitled.map");
+    s->dirty = true;
+}
+
+bool EdScene_SaveAs(EdScene *s, const char *path) {
+    snprintf(s->path, sizeof s->path, "%s", path);
+    return EdScene_Save(s);
+}
+
+// ---- per-frame viewport ----------------------------------------------------
+
+void EdScene_UpdateViewport(EdScene *s, Rectangle vp, bool inputAllowed) {
+    float dt = GetFrameTime();
+    s->vpW = (int)vp.width  < 1 ? 1 : (int)vp.width;
+    s->vpH = (int)vp.height < 1 ? 1 : (int)vp.height;
+    s->vpMouse = (Vector2){ GetMousePosition().x - vp.x, GetMousePosition().y - vp.y };
+
+    EdScene_RebuildProxies(s);
+
+    if (inputAllowed) {
+        if (IsKeyPressed(KEY_F1)) EdScene_SwitchView(s, ED_VIEW_FLY);
+        if (IsKeyPressed(KEY_F2)) EdScene_SwitchView(s, ED_VIEW_ORBIT);
+        if (IsKeyPressed(KEY_F3)) EdScene_SwitchView(s, ED_VIEW_TOP);
+        EdUpdateCamera(s, dt, vp);
+
+        if (IsKeyPressed(KEY_ONE))   s->mode = ENG_GIZMO_TRANSLATE;
+        if (IsKeyPressed(KEY_TWO))   s->mode = ENG_GIZMO_ROTATE;
+        if (IsKeyPressed(KEY_THREE)) s->mode = ENG_GIZMO_SCALE;
+
+        if (IsKeyPressed(KEY_P)) s->placeTool = (s->placeTool + 1) % ED_PLACE_COUNT;
+        if (IsKeyPressed(KEY_O)) s->barricadeAutoSpawn = !s->barricadeAutoSpawn;
+        if (IsKeyPressed(KEY_R)) EdScene_CycleSelected(s);
+        if (IsKeyPressed(KEY_X)) EdScene_DeleteSelected(s);
+
+        // F: recenter the view on the selected entity.
+        if (IsKeyPressed(KEY_F) && s->selectedId >= 0) {
+            Vector3 origin;
+            if (SelectedOrigin(s, &origin)) {
+                s->focus = origin;
+                if (s->view == ED_VIEW_FLY) {
+                    // Pull the fly camera back 20 units so the entity is in frame.
+                    s->cam.position = Vector3Subtract(origin,
+                        Vector3Scale(ForwardFrom(s->yaw, s->pitch), 20.0f));
+                }
+            }
+        }
+    } else if (s->looking) {
+        // Lost focus mid-mouselook: show cursor again so the OS pointer is visible.
+        s->looking = false; ShowCursor();
+    }
+
+    bool camBusy = s->looking || IsMouseButtonDown(MOUSE_BUTTON_RIGHT) ||
+                   IsMouseButtonDown(MOUSE_BUTTON_MIDDLE);
+
+    if (inputAllowed && !camBusy && !s->dragging && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+        if (s->placeTool != ED_PLACE_NONE) {
+            Vector3 hit;
+            Ray ray = Eng_PickRayFromScreen(s->cam, s->vpMouse, s->vpW, s->vpH);
+            if (Eng_PickRayGroundY(ray, 0.0f, &hit)) {
+                hit.x = EdSnap(s, hit.x); hit.z = EdSnap(s, hit.z);
+                PlaceAt(s, hit);
+            }
+        } else {
+            Vector3 origin;
+            EngGizmoAxis hot = ENG_GIZMO_AXIS_NONE;
+            if (SelectedOrigin(s, &origin))
+                hot = Eng_GizmoHitTest(s->cam, s->vpMouse, s->vpW, s->vpH, origin, s->mode,
+                                       GizmoHandleSize(s, origin));
+            if (hot == ENG_GIZMO_AXIS_NONE) PickSelection(s);
+        }
+    }
+
+    UpdateGizmo(s, inputAllowed && !camBusy && s->placeTool == ED_PLACE_NONE);
+}
+
+void EdScene_DrawViewport(EdScene *s, Rectangle vp) {
+    // (Re)create the render texture when the viewport size changes.
+    if (!s->vpTexValid || s->vpTex.texture.width != s->vpW || s->vpTex.texture.height != s->vpH) {
+        if (s->vpTexValid) UnloadRenderTexture(s->vpTex);
+        s->vpTex = LoadRenderTexture(s->vpW, s->vpH);
+        s->vpTexValid = true;
+    }
+
+    BeginTextureMode(s->vpTex);
+    ClearBackground((Color){ 18, 20, 26, 255 });
+    Eng_GfxBeginMode3D(s->cam);
+    Eng_GfxDrawGrid(s->gridSlices, s->gridSpacing);
+    for (int i = 0; i < s->proxyCount; i++) {
+        EdProxy *p = &s->proxies[i];
+        Vector3 c  = Vector3Scale(Vector3Add(p->box.min, p->box.max), 0.5f);
+        Vector3 sz = Vector3Subtract(p->box.max, p->box.min);
+        bool sel = (p->id == s->selectedId);
+        Color fill = p->col; fill.a = sel ? 220 : 150;
+        Eng_GfxDrawCubeV(c, sz, fill);
+        Eng_GfxDrawCubeWiresV(c, sz, sel ? YELLOW : (Color){ 0, 0, 0, 120 });
+        if (sel) Eng_DebugBox(p->box, YELLOW);
+    }
+
+    // Validation: outline offending entities in red.
+    {
+        MapDocIssue issues[64];
+        int n = MapDoc_Validate(&s->doc, issues, 64);
+        for (int i = 0; i < n && i < 64; i++) {
+            if (issues[i].entId < 0) continue;
+            const EdProxy *ep = FindProxy(s, issues[i].entId);
+            if (ep) Eng_DebugBox(ep->box, RED);
+        }
+    }
+
+    Eng_DebugDraw3D(s->cam);
+    Eng_GfxEndMode3D();
+    EndTextureMode();
+
+    // Blit (render textures are y-flipped → negative source height).
+    DrawTextureRec(s->vpTex.texture,
+                   (Rectangle){ 0, 0, (float)s->vpW, -(float)s->vpH },
+                   (Vector2){ vp.x, vp.y }, WHITE);
+}

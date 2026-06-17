@@ -1,0 +1,959 @@
+// ============================================================================
+//  builtins.c — the editor's first-party plugins (see builtins.h).
+//
+//  Four plugins contribute the whole default IDE: the menu bar, the docked
+//  panels (Tools palette / Hierarchy / Inspector / Console), the Tools-menu map
+//  utilities (Settings dialog + Validate), and the status bar. They are written
+//  exactly as a third-party plugin would be, against the EdHost_* API — the
+//  proof that the seam is real.
+// ============================================================================
+
+#include "builtins.h"
+#include "edscene.h"
+#include "edfiledialog.h"
+
+#include "raygui.h"
+#include "ui.h"
+#include "mapedit.h"
+#include "cfg.h"
+#include "app.h"      // Eng_RequestClose
+
+#include <stdio.h>
+#include <stdlib.h>   // atof, for inspector number fields
+#include <string.h>
+#include <stdint.h>
+#include <ctype.h>    // tolower, for case-insensitive filter
+
+#define ED_UI_MIN 0.7f
+#define ED_UI_MAX 3.0f
+
+// ============================================================================
+//  Recent files — persisted in editor.cfg as recent.0 .. recent.7
+// ============================================================================
+
+#define ED_RECENT_MAX  8
+#define ED_RECENT_LEN  512
+
+static char g_recent[ED_RECENT_MAX][ED_RECENT_LEN];
+static int  g_recentCount = 0;
+
+// Load recents from the scene's cfg handle.
+static void Recents_Load(EngCfg *cfg) {
+    g_recentCount = 0;
+    for (int i = 0; i < ED_RECENT_MAX; i++) {
+        char key[32]; snprintf(key, sizeof key, "recent.%d", i);
+        const char *v = EngCfg_Str(cfg, key, "");
+        if (!v || !v[0]) break;
+        snprintf(g_recent[g_recentCount++], ED_RECENT_LEN, "%s", v);
+    }
+}
+
+// Save recents back via the cfg BeginSave/Put/EndSave path — called after any
+// change so the list is always current on disk. We do a full cfg rewrite here
+// (same pattern as EdScene_SaveSettings) to keep everything in one file.
+static void Recents_Save(EdScene *s) {
+    FILE *f = EngCfg_BeginSave(s->cfg, "Claude Zombies map editor settings");
+    if (!f) return;
+    // --- camera ---
+    EngCfg_PutFloat(f, "cam.flySpeed",  s->camFlySpeed);
+    EngCfg_PutFloat(f, "cam.flyBoost",  s->camFlyBoost);
+    EngCfg_PutFloat(f, "cam.lookSens",  s->camLookSens);
+    EngCfg_PutFloat(f, "cam.orbitSens", s->camOrbitSens);
+    EngCfg_PutFloat(f, "cam.zoomSpeed", s->camZoomSpeed);
+    // --- view ---
+    EngCfg_PutFloat(f, "view.fov",         s->viewFov);
+    EngCfg_PutInt  (f, "view.default",     (int)s->viewDefault);
+    EngCfg_PutFloat(f, "view.orthoHeight", s->viewOrthoH);
+    // --- grid ---
+    EngCfg_PutFloat(f, "grid.spacing",  s->gridSpacing);
+    EngCfg_PutInt  (f, "grid.slices",   s->gridSlices);
+    EngCfg_PutBool (f, "grid.snap",     s->snapEnabled);
+    EngCfg_PutFloat(f, "grid.snapStep", s->snapStep);
+    // --- editing ---
+    EngCfg_PutBool (f, "edit.barricadeAutoSpawn", s->barricadeAutoSpawn);
+    EngCfg_PutInt  (f, "edit.undoDepth", s->undoDepth);
+    // --- display ---
+    EngCfg_PutFloat(f, "ui.scale",   s->uiScale);
+    EngCfg_PutInt  (f, "win.width",  s->winW);
+    EngCfg_PutInt  (f, "win.height", s->winH);
+    EngCfg_PutBool (f, "win.vsync",  s->vsync);
+    EngCfg_PutInt  (f, "win.fpsCap", s->fpsCap);
+    // --- recents ---
+    for (int i = 0; i < g_recentCount; i++) {
+        char key[32]; snprintf(key, sizeof key, "recent.%d", i);
+        EngCfg_PutStr(f, key, g_recent[i]);
+    }
+    EngCfg_EndSave(f);
+}
+
+// Push a path to the front of the recents list (dedup, cap ED_RECENT_MAX).
+static void Recents_Push(EdScene *s, const char *path) {
+    if (!path || !path[0]) return;
+    // Collect existing entries that differ from `path` into a temp buffer.
+    int n = 0;
+    int keep[ED_RECENT_MAX];
+    for (int i = 0; i < g_recentCount; i++) {
+        if (strcmp(g_recent[i], path) != 0) keep[n++] = i;
+    }
+    // Shift kept entries down by one slot (making room for `path` at index 0).
+    for (int i = n - 1; i >= 0 && i + 1 < ED_RECENT_MAX; i--)
+        memcpy(g_recent[i + 1], g_recent[keep[i]], ED_RECENT_LEN);
+    // Write the new path at the front.
+    strncpy(g_recent[0], path, ED_RECENT_LEN - 1);
+    g_recent[0][ED_RECENT_LEN - 1] = '\0';
+    g_recentCount = (n + 1 < ED_RECENT_MAX) ? n + 1 : ED_RECENT_MAX;
+    Recents_Save(s);
+}
+
+// ============================================================================
+//  Unsaved-changes guard — Feature 4
+// ============================================================================
+
+static enum { PEND_NONE = 0, PEND_NEW, PEND_OPEN, PEND_EXIT } g_pending = PEND_NONE;
+
+// Forward-declare the do_* helpers (bodies below, after a_save is declared).
+static void do_new (EdHost *h);
+static void do_open(EdHost *h);
+static void do_exit(EdHost *h);
+
+static void RunPending(EdHost *h) {
+    int p = g_pending;
+    g_pending = PEND_NONE;
+    if      (p == PEND_NEW)  do_new(h);
+    else if (p == PEND_OPEN) do_open(h);
+    else if (p == PEND_EXIT) do_exit(h);
+}
+
+static void DirtyGuardModal(EdHost *h, Rectangle area, void *u) {
+    (void)u;
+    float sc = EdHost_UiScale(h);
+    Eng_UiSetScale(sc); Eng_UiApplyFont(13);
+    float pw = 340 * sc, ph = 140 * sc;
+    float px = (area.width  - pw) / 2.0f;
+    float py = (area.height - ph) / 2.0f; if (py < 6 * sc) py = 6 * sc;
+    Eng_UiPanelBg((Rectangle){ px - 2, py - 2, pw + 4, ph + 4 }, (Color){ 60, 66, 80, 255 });
+    Eng_UiPanelBg((Rectangle){ px, py, pw, ph },                 (Color){ 24, 27, 34, 255 });
+
+    float X = px + 16 * sc, W = pw - 32 * sc, y = py + 16 * sc;
+    Eng_UiText("UNSAVED CHANGES", X, y, 16, ENG_UI_GOLD); y += 28 * sc;
+    Eng_UiText("You have unsaved changes.", X, y, 13, ENG_UI_TEXT); y += 32 * sc;
+
+    float bw = (W - 16 * sc) / 3.0f;
+    // Save → save then run pending
+    if (GuiButton((Rectangle){ X, y, bw, 24 * sc }, "Save")) {
+        // Call a_save logic inline: we need access to it, call via the existing
+        // action function pointer — just replicate the EdScene_Save call chain.
+        EdScene *s = EdHost_Scene(h);
+        bool saved = false;
+        if (strcmp(GetFileName(s->path), "untitled.map") == 0) {
+            char startDir[512]; snprintf(startDir, sizeof startDir, "data/maps");
+            char chosen[512];
+            if (EdFileDialog_Save(chosen, sizeof chosen, startDir, "untitled.map")) {
+                if (EdScene_SaveAs(s, chosen)) {
+                    Recents_Push(s, chosen);
+                    EdHost_Log(h, ED_LOG_INFO, "saved %s", chosen);
+                    saved = true;
+                } else {
+                    EdHost_Log(h, ED_LOG_ERROR, "save FAILED: %s", chosen);
+                }
+            }
+        } else {
+            if (EdScene_Save(s)) {
+                Recents_Push(s, s->path);
+                EdHost_Log(h, ED_LOG_INFO, "saved %s", s->path);
+                saved = true;
+            } else {
+                EdHost_Log(h, ED_LOG_ERROR, "save FAILED: %s", s->path);
+            }
+        }
+        if (saved) {
+            EdHost_SetModal(h, NULL, NULL);
+            RunPending(h);
+        }
+    }
+    // Discard → discard edits, run pending
+    if (GuiButton((Rectangle){ X + bw + 8 * sc, y, bw, 24 * sc }, "Discard")) {
+        EdHost_SetModal(h, NULL, NULL);
+        RunPending(h);
+    }
+    // Cancel → do nothing
+    if (GuiButton((Rectangle){ X + (bw + 8 * sc) * 2, y, bw, 24 * sc }, "Cancel")) {
+        g_pending = PEND_NONE;
+        EdHost_SetModal(h, NULL, NULL);
+    }
+}
+
+// ============================================================================
+//  Menus: File / Edit / View / Help   (Tools is owned by EdBuiltin_MapTools)
+// ============================================================================
+
+static bool q_can_undo(EdHost *h, void *u) { (void)u; return EngMapHistory_CanUndo(&EdHost_Scene(h)->hist); }
+static bool q_can_redo(EdHost *h, void *u) { (void)u; return EngMapHistory_CanRedo(&EdHost_Scene(h)->hist); }
+static bool q_has_sel (EdHost *h, void *u) { (void)u; return EdHost_SelectedId(h) >= 0; }
+static bool q_dirty   (EdHost *h, void *u) { (void)u; return EdHost_Scene(h)->dirty; }
+
+static bool q_view_fly(EdHost *h, void *u) { (void)u; return EdHost_Scene(h)->view == ED_VIEW_FLY; }
+static bool q_view_iso(EdHost *h, void *u) { (void)u; return EdHost_Scene(h)->view == ED_VIEW_ORBIT; }
+static bool q_view_top(EdHost *h, void *u) { (void)u; return EdHost_Scene(h)->view == ED_VIEW_TOP; }
+static bool q_snap    (EdHost *h, void *u) { (void)u; return EdHost_Scene(h)->snapEnabled; }
+
+// ---- do_* helpers (real work, no dirty check) --------------------------------
+
+static void do_new(EdHost *h) {
+    EdScene *s = EdHost_Scene(h);
+    EdScene_New(s);
+    EdHost_Log(h, ED_LOG_INFO, "new map — untitled.map");
+}
+
+static void do_open(EdHost *h) {
+    EdScene *s = EdHost_Scene(h);
+    char startDir[512]; snprintf(startDir, sizeof startDir, "%s", s->path);
+    char *slash = strrchr(startDir, '/');
+    if (slash) *slash = '\0'; else snprintf(startDir, sizeof startDir, "data/maps");
+
+    char chosen[512];
+    if (!EdFileDialog_Open(chosen, sizeof chosen, startDir)) return;
+    if (EdScene_Open(s, chosen)) {
+        Recents_Push(s, chosen);
+        EdHost_Log(h, ED_LOG_INFO, "opened %s", chosen);
+    } else {
+        EdHost_Log(h, ED_LOG_ERROR, "open FAILED: %s", chosen);
+    }
+}
+
+static void do_exit(EdHost *h) {
+    (void)h;
+    Eng_RequestClose();
+}
+
+// ---- File menu actions -------------------------------------------------------
+
+static void a_new(EdHost *h, void *u) {
+    (void)u;
+    if (EdHost_Scene(h)->dirty) { g_pending = PEND_NEW;  EdHost_SetModal(h, DirtyGuardModal, NULL); }
+    else                          do_new(h);
+}
+
+static void a_open(EdHost *h, void *u) {
+    (void)u;
+    if (EdHost_Scene(h)->dirty) { g_pending = PEND_OPEN; EdHost_SetModal(h, DirtyGuardModal, NULL); }
+    else                          do_open(h);
+}
+
+static void a_save(EdHost *h, void *u) {
+    (void)u; EdScene *s = EdHost_Scene(h);
+    // If the file has never been saved (untitled), behave like Save As.
+    if (strcmp(GetFileName(s->path), "untitled.map") == 0) {
+        char startDir[512]; snprintf(startDir, sizeof startDir, "data/maps");
+        char chosen[512];
+        if (!EdFileDialog_Save(chosen, sizeof chosen, startDir, "untitled.map")) return;
+        if (EdScene_SaveAs(s, chosen)) {
+            Recents_Push(s, chosen);
+            EdHost_Log(h, ED_LOG_INFO, "saved %s", chosen);
+        } else {
+            EdHost_Log(h, ED_LOG_ERROR, "save FAILED: %s", chosen);
+        }
+        return;
+    }
+    if (EdScene_Save(s)) {
+        Recents_Push(s, s->path);
+        EdHost_Log(h, ED_LOG_INFO, "saved %s", s->path);
+    } else {
+        EdHost_Log(h, ED_LOG_ERROR, "save FAILED: %s", s->path);
+    }
+}
+
+static void a_save_as(EdHost *h, void *u) {
+    (void)u; EdScene *s = EdHost_Scene(h);
+    char startDir[512]; snprintf(startDir, sizeof startDir, "%s", s->path);
+    char *slash = strrchr(startDir, '/');
+    if (slash) *slash = '\0'; else snprintf(startDir, sizeof startDir, "data/maps");
+    const char *defName = GetFileName(s->path);
+
+    char chosen[512];
+    if (!EdFileDialog_Save(chosen, sizeof chosen, startDir, defName)) return;
+    if (EdScene_SaveAs(s, chosen)) {
+        Recents_Push(s, chosen);
+        EdHost_Log(h, ED_LOG_INFO, "saved as %s", chosen);
+    } else {
+        EdHost_Log(h, ED_LOG_ERROR, "save as FAILED: %s", chosen);
+    }
+}
+
+static void a_reload(EdHost *h, void *u) {
+    (void)u; EdScene *s = EdHost_Scene(h);
+    char path[512]; snprintf(path, sizeof path, "%s", s->path);
+    if (EdScene_Open(s, path)) EdHost_Log(h, ED_LOG_INFO, "reloaded %s (edits discarded)", path);
+    else                       EdHost_Log(h, ED_LOG_ERROR, "reload FAILED: %s", path);
+}
+
+static void a_exit(EdHost *h, void *u) {
+    (void)u;
+    if (EdHost_Scene(h)->dirty) { g_pending = PEND_EXIT; EdHost_SetModal(h, DirtyGuardModal, NULL); }
+    else                          do_exit(h);
+}
+
+// ---- Dynamic recents provider -----------------------------------------------
+
+// onClick for a recent-file entry: user = (void*)(intptr_t)index into g_recent.
+static void a_open_recent(EdHost *h, void *u) {
+    int idx = (int)(intptr_t)u;
+    if (idx < 0 || idx >= g_recentCount) return;
+    EdScene *s = EdHost_Scene(h);
+    char path[ED_RECENT_LEN]; snprintf(path, sizeof path, "%s", g_recent[idx]);
+    if (EdScene_Open(s, path)) {
+        Recents_Push(s, path);   // bump to front
+        EdHost_Log(h, ED_LOG_INFO, "opened %s", path);
+    } else {
+        EdHost_Log(h, ED_LOG_ERROR, "open FAILED: %s", path);
+    }
+}
+
+// Labels need persistent storage — we write them into a static ring each frame.
+static char g_recentLabels[ED_RECENT_MAX][256];
+
+static int RecentsDynProvider(EdHost *h, EdMenuItem *out, int max, void *user) {
+    (void)h; (void)user;
+    int n = g_recentCount < max ? g_recentCount : max;
+    for (int i = 0; i < n; i++) {
+        // Show just the filename in the menu, open the full stored path.
+        snprintf(g_recentLabels[i], sizeof g_recentLabels[i], "%s", GetFileName(g_recent[i]));
+        out[i] = (EdMenuItem){
+            .menu    = "File",
+            .label   = g_recentLabels[i],
+            .shortcut = NULL,
+            .onClick = a_open_recent,
+            .enabled = NULL,
+            .checked = NULL,
+            .user    = (void*)(intptr_t)i,
+        };
+    }
+    return n;
+}
+
+// ---- non-File actions -------------------------------------------------------
+
+static void a_undo(EdHost *h, void *u)  { (void)u; EdScene_Undo(EdHost_Scene(h)); }
+static void a_redo(EdHost *h, void *u)  { (void)u; EdScene_Redo(EdHost_Scene(h)); }
+static void a_del (EdHost *h, void *u)  { (void)u; EdScene_DeleteSelected(EdHost_Scene(h)); }
+
+static void a_view_fly(EdHost *h, void *u) { (void)u; EdScene_SwitchView(EdHost_Scene(h), ED_VIEW_FLY); }
+static void a_view_iso(EdHost *h, void *u) { (void)u; EdScene_SwitchView(EdHost_Scene(h), ED_VIEW_ORBIT); }
+static void a_view_top(EdHost *h, void *u) { (void)u; EdScene_SwitchView(EdHost_Scene(h), ED_VIEW_TOP); }
+static void a_snap(EdHost *h, void *u)     { (void)u; EdScene *s = EdHost_Scene(h); s->snapEnabled = !s->snapEnabled; }
+
+static void a_help_controls(EdHost *h, void *u) {
+    (void)u;
+    EdHost_Log(h, ED_LOG_INFO, "View: F1 fly / F2 iso / F3 top   Gizmo: 1 move 2 rot 3 scale");
+    EdHost_Log(h, ED_LOG_INFO, "Place: P cycle tool, click ground   R retag/rotate   X delete");
+    EdHost_Log(h, ED_LOG_INFO, "Fly: RMB+WASDQE (Shift fast)   Ortho: RMB orbit / MMB pan / wheel zoom");
+    EdHost_Log(h, ED_LOG_INFO, "Edit: Ctrl+Z undo / Ctrl+Y redo / Ctrl+S save   UI: Ctrl +/-");
+}
+static void a_help_about(EdHost *h, void *u) {
+    (void)u;
+    EdHost_Log(h, ED_LOG_INFO, "Scene Builder — engine-native map editor (libengine.a, no game code).");
+}
+
+static void RegisterMenus(EdHost *h) {
+    // Load recents from cfg on first registration (scene is already loaded by now).
+    Recents_Load(EdHost_Scene(h)->cfg);
+
+    // File menu — New, Open, Save, Save As, separator, [recents via dyn hook],
+    // separator, Reload, Exit.
+    EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="File", .label="New",       .onClick=a_new });
+    EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="File", .label="Open...",   .shortcut="Ctrl+O", .onClick=a_open });
+    EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="File", .label="Save",      .shortcut="Ctrl+S", .onClick=a_save });
+    EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="File", .label="Save As...", .onClick=a_save_as });
+    EdHost_AddMenuSeparator(h, "File");
+    // (recents appear here via the dynamic hook — registered below)
+    EdHost_AddMenuSeparator(h, "File");
+    EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="File", .label="Reload", .onClick=a_reload, .enabled=q_dirty });
+    EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="File", .label="Exit",   .onClick=a_exit });
+
+    // Register the recents dynamic provider for the File menu.
+    EdHost_SetMenuDynamic(h, "File", RecentsDynProvider, NULL);
+
+    EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="Edit", .label="Undo", .shortcut="Ctrl+Z", .onClick=a_undo, .enabled=q_can_undo });
+    EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="Edit", .label="Redo", .shortcut="Ctrl+Y", .onClick=a_redo, .enabled=q_can_redo });
+    EdHost_AddMenuSeparator(h, "Edit");
+    EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="Edit", .label="Delete selected", .shortcut="X", .onClick=a_del, .enabled=q_has_sel });
+
+    EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="View", .label="Fly camera",       .shortcut="F1", .onClick=a_view_fly, .checked=q_view_fly });
+    EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="View", .label="Isometric camera", .shortcut="F2", .onClick=a_view_iso, .checked=q_view_iso });
+    EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="View", .label="Top-down camera",  .shortcut="F3", .onClick=a_view_top, .checked=q_view_top });
+    EdHost_AddMenuSeparator(h, "View");
+    EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="View", .label="Snap to grid", .onClick=a_snap, .checked=q_snap });
+
+    EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="Help", .label="Controls", .onClick=a_help_controls });
+    EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="Help", .label="About",    .onClick=a_help_about });
+}
+
+// ============================================================================
+//  Panels: Tools palette (L), Hierarchy (L), Inspector (R), Console (B)
+// ============================================================================
+
+// ---- Tools palette ---------------------------------------------------------
+static void PanelTools(EdHost *h, Rectangle c, void *u) {
+    (void)u; EdScene *s = EdHost_Scene(h);
+    float sc = EdHost_UiScale(h);
+    float X = c.x, W = c.width, y = c.y;
+
+    GuiSlider((Rectangle){ X + 18 * sc, y, W - 56 * sc, 16 * sc }, "UI",
+              TextFormat("%.0f%%", s->uiScale * 100.0f), &s->uiScale, ED_UI_MIN, ED_UI_MAX);
+    y += 24 * sc;
+
+    GuiLabel((Rectangle){ X, y, W, 14 * sc }, "VIEW"); y += 16 * sc;
+    int v = (int)s->view;
+    GuiToggleGroup((Rectangle){ X, y, (W - 8 * sc) / 3.0f, 22 * sc }, "Fly;Iso;Top", &v);
+    if (v != (int)s->view) EdScene_SwitchView(s, (EdViewMode)v);
+    y += 30 * sc;
+
+    GuiLabel((Rectangle){ X, y, W, 14 * sc }, "GIZMO (move drag only)"); y += 16 * sc;
+    int g = (int)s->mode;
+    GuiToggleGroup((Rectangle){ X, y, (W - 8 * sc) / 3.0f, 22 * sc }, "Move;Rot;Scale", &g);
+    s->mode = (EngGizmoMode)g;
+    y += 30 * sc;
+
+    GuiLabel((Rectangle){ X, y, W, 14 * sc }, "PLACE (click ground)"); y += 16 * sc;
+    struct { const char *label; EdPlaceTool tool; } tools[] = {
+        { "Select / move", ED_PLACE_NONE }, { "Player spawn", ED_PLACE_PLAYER },
+        { "Zombie spawn",  ED_PLACE_ZOMBIE }, { "Barricade", ED_PLACE_BARRICADE },
+    };
+    for (int i = 0; i < 4; i++) {
+        if (Eng_UiToolButton((Rectangle){ X, y, W, 22 * sc }, tools[i].label, s->placeTool == tools[i].tool))
+            s->placeTool = tools[i].tool;
+        y += 25 * sc;
+    }
+    GuiCheckBox((Rectangle){ X, y, 16 * sc, 16 * sc }, " auto-spawn ZOMBIE", &s->barricadeAutoSpawn);
+}
+
+// ---- Hierarchy — Feature 2: filter input -----------------------------------
+static float g_hierScroll = 0;
+static char  g_hierFilter[64]  = "";
+static bool  g_hierFilterEdit  = false;
+
+static void PanelHierarchy(EdHost *h, Rectangle c, void *u) {
+    (void)u; EdScene *s = EdHost_Scene(h);
+    float sc = EdHost_UiScale(h);
+    float rowH   = 16 * sc;
+    float filterH = 20 * sc;
+
+    // --- filter text box ---
+    Rectangle filterRect = { c.x, c.y, c.width, filterH };
+    if (GuiTextBox(filterRect, g_hierFilter, sizeof g_hierFilter, g_hierFilterEdit)) {
+        g_hierFilterEdit = !g_hierFilterEdit;
+    }
+
+    // shift the list area down past the filter box
+    Rectangle listArea = { c.x, c.y + filterH + 2 * sc, c.width, c.height - filterH - 2 * sc };
+
+    // Build the filtered index list (stack-allocated, max ED_MAX_ENTS).
+    int filtered[ED_MAX_ENTS];
+    int nFiltered = 0;
+    bool hasFilter = (g_hierFilter[0] != '\0');
+    for (int i = 0; i < s->proxyCount; i++) {
+        EdProxy *p = &s->proxies[i];
+        if (hasFilter) {
+            // Build the display string and do a case-insensitive substring check.
+            const char *rowStr = TextFormat("#%d %s", p->id, EdScene_KindName(p->kind));
+            // Simple tolower strstr via manual scan.
+            const char *haystack = rowStr;
+            const char *needle   = g_hierFilter;
+            bool found = false;
+            for (int hi = 0; haystack[hi]; hi++) {
+                int ni = 0;
+                while (needle[ni] && tolower((unsigned char)haystack[hi + ni]) == tolower((unsigned char)needle[ni]))
+                    ni++;
+                if (!needle[ni]) { found = true; break; }
+            }
+            if (!found) continue;
+        }
+        filtered[nFiltered++] = i;
+    }
+
+    float total = nFiltered * rowH;
+    if (CheckCollisionPointRec(GetMousePosition(), listArea))
+        g_hierScroll -= GetMouseWheelMove() * rowH * 3.0f;
+    float maxScroll = total - listArea.height; if (maxScroll < 0) maxScroll = 0;
+    if (g_hierScroll < 0) g_hierScroll = 0;
+    if (g_hierScroll > maxScroll) g_hierScroll = maxScroll;
+
+    BeginScissorMode((int)listArea.x, (int)listArea.y, (int)listArea.width, (int)listArea.height);
+    bool interactive = EdHost_PanelsInteractive(h);
+    for (int fi = 0; fi < nFiltered; fi++) {
+        float ry = listArea.y - g_hierScroll + fi * rowH;
+        if (ry + rowH < listArea.y || ry > listArea.y + listArea.height) continue;
+        EdProxy *p = &s->proxies[filtered[fi]];
+        Rectangle row = { listArea.x, ry, listArea.width, rowH };
+        bool sel = (p->id == s->selectedId);
+        bool hot = CheckCollisionPointRec(GetMousePosition(), row);
+        if (sel)      DrawRectangleRec(row, (Color){ 60, 70, 90, 255 });
+        else if (hot) DrawRectangleRec(row, (Color){ 40, 46, 56, 255 });
+        Color dot = p->col; dot.a = 255;
+        DrawRectangle((int)(listArea.x + 2 * sc), (int)(ry + 4 * sc), (int)(8 * sc), (int)(8 * sc), dot);
+        Eng_UiText(TextFormat("#%d %s", p->id, EdScene_KindName(p->kind)),
+                   listArea.x + 14 * sc, ry + 1 * sc, 11, sel ? ENG_UI_GOLD : ENG_UI_TEXT);
+        if (interactive && hot && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) s->selectedId = p->id;
+    }
+    EndScissorMode();
+    if (nFiltered == 0) {
+        const char *msg = (s->proxyCount == 0) ? "(empty map)" : "(no match)";
+        Eng_UiText(msg, listArea.x + 4 * sc, listArea.y + 2 * sc, 11, ENG_UI_DIM);
+    }
+}
+
+// ============================================================================
+//  Inspector helpers — tiny field widgets used by PanelInspector
+// ============================================================================
+
+// Draw a float field via a GuiSlider.  Returns true and writes *v if changed.
+static bool InspSlider(float X, float W, float *y, float sc,
+                       const char *label, float *v, float lo, float hi) {
+    float oldV = *v;
+    Eng_UiText(label, X, *y + 1 * sc, 12, ENG_UI_TEXT);
+    char buf[32]; snprintf(buf, sizeof buf, "%.2f", *v);
+    GuiSlider((Rectangle){ X + 60 * sc, *y, W - 100 * sc, 16 * sc }, "", buf, v, lo, hi);
+    *y += 22 * sc;
+    return (*v != oldV);
+}
+
+// Float text-box state (one set per named field — we use a small static array).
+// We track edit mode + buffer per logical field via a simple index.
+#define INSP_FLOAT_FIELDS 4
+static bool g_inspFloatEdit[INSP_FLOAT_FIELDS];
+static char g_inspFloatBuf[INSP_FLOAT_FIELDS][32];
+static int  g_inspLastId = -1;  // reset buffers when selection changes
+
+// Draw a float field via a GuiTextBox; idx indexes g_inspFloatBuf/Edit.
+// Returns true and writes *v if the user committed a change (toggled out of edit).
+static bool InspFloatBox(float X, float W, float *y, float sc,
+                         const char *label, float *v, int idx) {
+    if (idx < 0 || idx >= INSP_FLOAT_FIELDS) return false;
+    Eng_UiText(label, X, *y + 1 * sc, 12, ENG_UI_TEXT);
+    bool changed = false;
+    bool wasEdit = g_inspFloatEdit[idx];
+    if (!wasEdit) snprintf(g_inspFloatBuf[idx], sizeof g_inspFloatBuf[idx], "%.3f", *v);
+    if (GuiTextBox((Rectangle){ X + 60 * sc, *y, W - 60 * sc, 18 * sc },
+                   g_inspFloatBuf[idx], sizeof g_inspFloatBuf[idx], wasEdit)) {
+        g_inspFloatEdit[idx] = !wasEdit;
+        if (wasEdit) {
+            // toggling out of edit → parse and commit
+            float parsed = (float)atof(g_inspFloatBuf[idx]);
+            if (parsed != *v) { *v = parsed; changed = true; }
+        }
+    }
+    *y += 22 * sc;
+    return changed;
+}
+
+// ---- Inspector — Feature 1: editable fields / Feature 3: map metadata ------
+static void PanelInspector(EdHost *h, Rectangle c, void *u) {
+    (void)u; EdScene *s = EdHost_Scene(h);
+    float sc = EdHost_UiScale(h);
+    float X = c.x, W = c.width, y = c.y;
+
+    // Reset per-field buffers when the selection changes (avoids stale text).
+    if (s->selectedId != g_inspLastId) {
+        g_inspLastId = s->selectedId;
+        for (int i = 0; i < INSP_FLOAT_FIELDS; i++) {
+            g_inspFloatEdit[i] = false;
+            g_inspFloatBuf[i][0] = '\0';
+        }
+    }
+
+    // ---- Feature 3: Map Metadata when nothing selected ---------------------
+    if (s->selectedId < 0) {
+        Eng_UiText("MAP METADATA", X, y, 14, ENG_UI_GOLD); y += 22 * sc;
+
+        // Map name (doc.name)
+        Eng_UiText("Name", X, y + 1 * sc, 12, ENG_UI_TEXT);
+        static char g_mapNameBuf[MAPDOC_NAME_LEN] = "";
+        static bool g_mapNameEdit = false;
+        static int  g_mapNameLastId = -2; // use -2 as "uninitialised sentinel"
+        // Reset buffer when we come back to the no-selection state and the doc
+        // name might have changed from an Open/New.
+        if (g_mapNameLastId != s->selectedId) {
+            g_mapNameLastId = s->selectedId;
+            snprintf(g_mapNameBuf, sizeof g_mapNameBuf, "%s", s->doc.name);
+            g_mapNameEdit = false;
+        }
+        bool wasNameEdit = g_mapNameEdit;
+        if (GuiTextBox((Rectangle){ X + 60 * sc, y, W - 60 * sc, 18 * sc },
+                       g_mapNameBuf, sizeof g_mapNameBuf, wasNameEdit)) {
+            g_mapNameEdit = !wasNameEdit;
+            if (wasNameEdit && strcmp(g_mapNameBuf, s->doc.name) != 0) {
+                snprintf(s->doc.name, sizeof s->doc.name, "%s", g_mapNameBuf);
+                EdHost_CommitEdit(h);
+            }
+        }
+        y += 22 * sc;
+
+        // ---- Atmosphere -------------------------------------------------------
+        MapDocAtmosphere *atm = &s->doc.atmosphere;
+        y += 4 * sc;
+        Eng_UiText("ATMOSPHERE", X, y, 13, (Color){ 200, 205, 215, 255 }); y += 18 * sc;
+
+        // Fog color — stored as float 0-255 components.
+        Color fogCol = { (unsigned char)atm->fogR, (unsigned char)atm->fogG,
+                         (unsigned char)atm->fogB, 255 };
+        Color newFogCol = fogCol;
+        // GuiColorPicker needs a square-ish area; give it a compact block.
+        float cpSz = 80 * sc;
+        Eng_UiText("Fog color", X, y + 1 * sc, 12, ENG_UI_TEXT);
+        GuiColorPicker((Rectangle){ X + 80 * sc, y, cpSz, cpSz }, NULL, &newFogCol);
+        if (newFogCol.r != fogCol.r || newFogCol.g != fogCol.g || newFogCol.b != fogCol.b) {
+            atm->fogR = (float)newFogCol.r;
+            atm->fogG = (float)newFogCol.g;
+            atm->fogB = (float)newFogCol.b;
+            atm->present = true;
+            EdHost_CommitEdit(h);
+        }
+        y += cpSz + 4 * sc;
+
+        // Fog range sliders.
+        float oldFogStart = atm->fogStart, oldFogEnd = atm->fogEnd;
+        Eng_UiText("Fog start", X, y + 1 * sc, 12, ENG_UI_TEXT);
+        char fsBuf[32]; snprintf(fsBuf, sizeof fsBuf, "%.1f", atm->fogStart);
+        GuiSlider((Rectangle){ X + 80 * sc, y, W - 120 * sc, 16 * sc }, "", fsBuf, &atm->fogStart, 0, 500);
+        y += 22 * sc;
+        Eng_UiText("Fog end", X, y + 1 * sc, 12, ENG_UI_TEXT);
+        char feBuf[32]; snprintf(feBuf, sizeof feBuf, "%.1f", atm->fogEnd);
+        GuiSlider((Rectangle){ X + 80 * sc, y, W - 120 * sc, 16 * sc }, "", feBuf, &atm->fogEnd, 0, 2000);
+        y += 22 * sc;
+        if (atm->fogStart != oldFogStart || atm->fogEnd != oldFogEnd) {
+            atm->present = true;
+            EdHost_CommitEdit(h);
+        }
+
+        // Sky tint (only shown when hasSkyTint or to enable it).
+        y += 4 * sc;
+        Eng_UiText("Sky tint", X, y + 1 * sc, 12, ENG_UI_TEXT);
+        GuiCheckBox((Rectangle){ X + 80 * sc, y, 14 * sc, 14 * sc }, " enable", &atm->hasSkyTint);
+        y += 20 * sc;
+        if (atm->hasSkyTint) {
+            Color skyCol    = { (unsigned char)atm->skyR, (unsigned char)atm->skyG,
+                                (unsigned char)atm->skyB, 255 };
+            Color newSkyCol = skyCol;
+            GuiColorPicker((Rectangle){ X + 80 * sc, y, cpSz, cpSz }, NULL, &newSkyCol);
+            if (newSkyCol.r != skyCol.r || newSkyCol.g != skyCol.g || newSkyCol.b != skyCol.b) {
+                atm->skyR = (float)newSkyCol.r;
+                atm->skyG = (float)newSkyCol.g;
+                atm->skyB = (float)newSkyCol.b;
+                atm->present = true;
+                EdHost_CommitEdit(h);
+            }
+            y += cpSz + 4 * sc;
+        }
+
+        // ---- Textures (read-only display) ------------------------------------
+        MapDocTextures *tex = &s->doc.textures;
+        if (tex->present) {
+            y += 4 * sc;
+            Eng_UiText("TEXTURES", X, y, 13, (Color){ 200, 205, 215, 255 }); y += 18 * sc;
+            const struct { const char *lbl; const char *val; } slots[] = {
+                { "floor",    tex->floor    },
+                { "ground",   tex->ground   },
+                { "wall_ext", tex->wall_ext },
+                { "wall_int", tex->wall_int },
+                { "ceiling",  tex->ceiling  },
+            };
+            for (int i = 0; i < 5; i++) {
+                Eng_UiText(TextFormat("%s: %s", slots[i].lbl,
+                           slots[i].val[0] ? slots[i].val : "(default)"),
+                           X, y, 11, ENG_UI_DIM);
+                y += 15 * sc;
+            }
+        }
+        return;
+    }
+
+    // ---- Feature 1: Editable inspector for selected entity -----------------
+    EngMapEntKind k;
+    EngMapEnt_Ptr(&s->doc, EngMapEnt_Find(&s->doc, s->selectedId), &k);
+    Eng_UiText(TextFormat("#%d  %s", s->selectedId, EdScene_KindName(k)), X, y, 13, ENG_UI_GOLD);
+    y += 22 * sc;
+
+    // Position x, z — all kinds.
+    float px = 0, pz = 0;
+    if (Eng_GetPos(&s->doc, s->selectedId, &px, &pz)) {
+        float newX = px, newZ = pz;
+        bool cx = InspFloatBox(X, W, &y, sc, "pos x", &newX, 0);
+        bool cz = InspFloatBox(X, W, &y, sc, "pos z", &newZ, 1);
+        if (cx || cz) {
+            Eng_SetPos(&s->doc, s->selectedId, newX, newZ);
+            EdHost_CommitEdit(h);
+        }
+        y += 2 * sc;
+    }
+
+    // Kind-specific fields.
+    if (k == ENGMAPENT_SPAWN) {
+        // Spawn mob text field.
+        char mob[MAPDOC_SPAWN_MOB_LEN];
+        Eng_GetSpawnMob(&s->doc, s->selectedId, mob, sizeof mob);
+
+        Eng_UiText("mob", X, y + 1 * sc, 12, ENG_UI_TEXT);
+        static char g_spawnMobBuf[MAPDOC_SPAWN_MOB_LEN] = "";
+        static bool g_spawnMobEdit = false;
+        static int  g_spawnMobLastId = -1;
+        if (g_spawnMobLastId != s->selectedId) {
+            g_spawnMobLastId  = s->selectedId;
+            snprintf(g_spawnMobBuf, sizeof g_spawnMobBuf, "%s", mob);
+            g_spawnMobEdit = false;
+        }
+        bool wasMobEdit = g_spawnMobEdit;
+        if (GuiTextBox((Rectangle){ X + 60 * sc, y, W - 60 * sc, 18 * sc },
+                       g_spawnMobBuf, sizeof g_spawnMobBuf, wasMobEdit)) {
+            g_spawnMobEdit = !wasMobEdit;
+            if (wasMobEdit && strcmp(g_spawnMobBuf, mob) != 0) {
+                Eng_SetSpawnMob(&s->doc, s->selectedId, g_spawnMobBuf);
+                EdHost_CommitEdit(h);
+            }
+        }
+        y += 22 * sc;
+
+        // Quick-toggle PLAYER / ZOMBIE buttons.
+        float bw = (W - 8 * sc) / 2.0f;
+        bool isPlayer = (strcmp(mob, "PLAYER") == 0);
+        bool isZombie = (strcmp(mob, "ZOMBIE") == 0);
+        if (GuiButton((Rectangle){ X, y, bw, 20 * sc }, isPlayer ? "[PLAYER]" : "PLAYER")) {
+            if (!isPlayer) {
+                Eng_SetSpawnMob(&s->doc, s->selectedId, "PLAYER");
+                snprintf(g_spawnMobBuf, sizeof g_spawnMobBuf, "PLAYER");
+                EdHost_CommitEdit(h);
+            }
+        }
+        if (GuiButton((Rectangle){ X + bw + 8 * sc, y, bw, 20 * sc }, isZombie ? "[ZOMBIE]" : "ZOMBIE")) {
+            if (!isZombie) {
+                Eng_SetSpawnMob(&s->doc, s->selectedId, "ZOMBIE");
+                snprintf(g_spawnMobBuf, sizeof g_spawnMobBuf, "ZOMBIE");
+                EdHost_CommitEdit(h);
+            }
+        }
+        y += 26 * sc;
+
+    } else if (k == ENGMAPENT_WINDOW) {
+        // Window facing toggle group.
+        char dir[4]; Eng_GetWindowDir(&s->doc, s->selectedId, dir, sizeof dir);
+        const char *dirs[4] = { "+x", "+z", "-x", "-z" };
+        int di = 0;
+        for (int i = 0; i < 4; i++) if (strcmp(dir, dirs[i]) == 0) { di = i; break; }
+        Eng_UiText("facing", X, y + 1 * sc, 12, ENG_UI_TEXT); y += 16 * sc;
+        int newDi = di;
+        GuiToggleGroup((Rectangle){ X, y, (W - 12 * sc) / 4.0f, 20 * sc }, "+x;+z;-x;-z", &newDi);
+        if (newDi != di) {
+            Eng_SetWindowDir(&s->doc, s->selectedId, dirs[newDi]);
+            EdHost_CommitEdit(h);
+        }
+        y += 26 * sc;
+
+    } else if (k == ENGMAPENT_PROP) {
+        // Prop yaw + uniform scale sliders.
+        float yawDeg = 0, scale = 1;
+        Eng_GetYaw(&s->doc, s->selectedId, &yawDeg);
+        Eng_GetScale(&s->doc, s->selectedId, &scale);
+        float newYaw = yawDeg, newScale = scale;
+        if (InspSlider(X, W, &y, sc, "yaw",   &newYaw,   0,   360)) {
+            Eng_SetYaw(&s->doc, s->selectedId, newYaw);
+            EdHost_CommitEdit(h);
+        }
+        if (InspSlider(X, W, &y, sc, "scale", &newScale, 0.1f, 5)) {
+            Eng_SetScale(&s->doc, s->selectedId, newScale);
+            EdHost_CommitEdit(h);
+        }
+
+    } else if (k == ENGMAPENT_OBSTACLE) {
+        // Obstacle sx / sz / h.
+        float sx = 1, sz = 1, oh = 1;
+        Eng_GetObstacleSize(&s->doc, s->selectedId, &sx, &sz, &oh);
+        float nsx = sx, nsz = sz, noh = oh;
+        bool csx = InspFloatBox(X, W, &y, sc, "size x", &nsx, 0);
+        bool csz = InspFloatBox(X, W, &y, sc, "size z", &nsz, 1);
+        bool coh = InspFloatBox(X, W, &y, sc, "height", &noh, 2);
+        if (csx || csz || coh) {
+            Eng_SetObstacleSize(&s->doc, s->selectedId, nsx, nsz, noh);
+            EdHost_CommitEdit(h);
+        }
+
+    } else if (k == ENGMAPENT_SECTOR) {
+        // Sector sx / sz + yLow / yHigh.
+        float sx = 10, sz = 10, yLow = 0, yHigh = 0;
+        Eng_GetSectorSize(&s->doc, s->selectedId, &sx, &sz);
+        Eng_GetSectorHeights(&s->doc, s->selectedId, &yLow, &yHigh);
+        float nsx = sx, nsz = sz, nyLow = yLow, nyHigh = yHigh;
+        bool csx   = InspFloatBox(X, W, &y, sc, "size x", &nsx,   0);
+        bool csz   = InspFloatBox(X, W, &y, sc, "size z", &nsz,   1);
+        bool cyLow = InspFloatBox(X, W, &y, sc, "y low",  &nyLow, 2);
+        bool cyHi  = InspFloatBox(X, W, &y, sc, "y high", &nyHigh,3);
+        if (csx || csz) {
+            Eng_SetSectorSize(&s->doc, s->selectedId, nsx, nsz);
+            EdHost_CommitEdit(h);
+        }
+        if (cyLow || cyHi) {
+            Eng_SetSectorHeights(&s->doc, s->selectedId, nyLow, nyHigh);
+            EdHost_CommitEdit(h);
+        }
+    }
+}
+
+// ---- Console ---------------------------------------------------------------
+static void PanelConsole(EdHost *h, Rectangle c, void *u) {
+    (void)u;
+    float sc = EdHost_UiScale(h);
+    float rowH = 14 * sc;
+    int   total = EdHost_LogCount(h);
+    int   fit = (int)(c.height / rowH);
+    int   start = total - fit; if (start < 0) start = 0;
+
+    BeginScissorMode((int)c.x, (int)c.y, (int)c.width, (int)c.height);
+    float y = c.y;
+    for (int i = start; i < total; i++) {
+        EdLogLevel lvl; const char *line = EdHost_LogLine(h, i, &lvl);
+        Color col = lvl == ED_LOG_ERROR ? (Color){ 235, 110, 110, 255 }
+                  : lvl == ED_LOG_WARN  ? ENG_UI_GOLD : ENG_UI_TEXT;
+        Eng_UiText(line, c.x + 2 * sc, y, 11, col);
+        y += rowH;
+    }
+    EndScissorMode();
+}
+
+static void RegisterPanels(EdHost *h) {
+    EdHost_AddPanel(h, &(EdPanel){ .id="tools",     .title="TOOLS",     .zone=ED_DOCK_LEFT,   .draw=PanelTools, .prefH=256 });
+    EdHost_AddPanel(h, &(EdPanel){ .id="hierarchy", .title="HIERARCHY", .zone=ED_DOCK_LEFT,   .draw=PanelHierarchy });
+    EdHost_AddPanel(h, &(EdPanel){ .id="inspector", .title="INSPECTOR", .zone=ED_DOCK_RIGHT,  .draw=PanelInspector });
+    EdHost_AddPanel(h, &(EdPanel){ .id="console",   .title="CONSOLE",   .zone=ED_DOCK_BOTTOM, .draw=PanelConsole });
+}
+
+// ============================================================================
+//  Map tools: Tools menu (Settings dialog + Validate map)
+// ============================================================================
+
+static void OvSlider(float X, float W, float *y, float s, const char *label,
+                     float *v, float lo, float hi, const char *valfmt) {
+    Eng_UiText(label, X, *y + 1 * s, 13, (Color){ 200, 205, 215, 255 });
+    char buf[32]; snprintf(buf, sizeof buf, valfmt, *v);
+    GuiSlider((Rectangle){ X + 130 * s, *y, W - 175 * s, 16 * s }, "", buf, v, lo, hi);
+    *y += 24 * s;
+}
+static void OvCheck(float X, float *y, float s, const char *label, bool *v) {
+    GuiCheckBox((Rectangle){ X, *y, 16 * s, 16 * s }, label, v); *y += 24 * s;
+}
+static void OvSection(float X, float W, float *y, float s, const char *label) {
+    GuiLabel((Rectangle){ X, *y, W, 16 * s }, label); *y += 18 * s;
+}
+
+static void SettingsModal(EdHost *h, Rectangle area, void *u) {
+    (void)u; EdScene *s = EdHost_Scene(h);
+    float sc = EdHost_UiScale(h);
+    Eng_UiSetScale(sc); Eng_UiApplyFont(13);
+    float pw = 420 * sc, ph = 552 * sc;
+    float px = (area.width - pw) / 2.0f, py = (area.height - ph) / 2.0f; if (py < 6 * sc) py = 6 * sc;
+    Eng_UiPanelBg((Rectangle){ px - 2, py - 2, pw + 4, ph + 4 }, (Color){ 60, 66, 80, 255 });
+    Eng_UiPanelBg((Rectangle){ px, py, pw, ph },                 (Color){ 24, 27, 34, 255 });
+    float X = px + 16 * sc, W = pw - 32 * sc, y = py + 12 * sc;
+    Eng_UiText("EDITOR SETTINGS", X, y, 18, ENG_UI_GOLD); y += 28 * sc;
+
+    OvSection(X, W, &y, sc, "CAMERA");
+    OvSlider(X, W, &y, sc, "Fly speed",  &s->camFlySpeed,  2, 60,         "%.0f");
+    OvSlider(X, W, &y, sc, "Fly boost",  &s->camFlyBoost,  10, 120,       "%.0f");
+    OvSlider(X, W, &y, sc, "Look sens",  &s->camLookSens,  0.0005f, 0.01f,"%.4f");
+    OvSlider(X, W, &y, sc, "Orbit sens", &s->camOrbitSens, 0.001f, 0.02f, "%.3f");
+    OvSlider(X, W, &y, sc, "Zoom speed", &s->camZoomSpeed, 0.02f, 0.3f,   "%.2f");
+
+    OvSection(X, W, &y, sc, "VIEW");
+    Eng_UiText("Default view", X, y + 1 * sc, 13, (Color){ 200, 205, 215, 255 });
+    int vd = (int)s->viewDefault;
+    GuiToggleGroup((Rectangle){ X + 130 * sc, y, (W - 132 * sc) / 3.0f, 18 * sc }, "Fly;Iso;Top", &vd);
+    s->viewDefault = (EdViewMode)vd; y += 26 * sc;
+    OvSlider(X, W, &y, sc, "FOV",          &s->viewFov,    45, 100, "%.0f");
+    OvSlider(X, W, &y, sc, "Default zoom", &s->viewOrthoH, 5, 200,  "%.0f");
+
+    OvSection(X, W, &y, sc, "GRID / SNAP");
+    OvSlider(X, W, &y, sc, "Grid spacing", &s->gridSpacing, 0.25f, 10, "%.2f");
+    float slices = (float)s->gridSlices;
+    OvSlider(X, W, &y, sc, "Grid extent",  &slices, 10, 400, "%.0f"); s->gridSlices = (int)slices;
+    OvCheck(X, &y, sc, " Snap to grid", &s->snapEnabled);
+    OvSlider(X, W, &y, sc, "Snap step",    &s->snapStep, 0.1f, 10, "%.2f");
+
+    OvSection(X, W, &y, sc, "EDITING");
+    OvCheck(X, &y, sc, " Barricade auto-spawn ZOMBIE", &s->barricadeAutoSpawn);
+    float depth = (float)s->undoDepth;
+    OvSlider(X, W, &y, sc, "Undo depth*", &depth, 16, 256, "%.0f"); s->undoDepth = (int)depth;
+
+    OvSection(X, W, &y, sc, "DISPLAY   (* applies on restart)");
+    OvCheck(X, &y, sc, " VSync*", &s->vsync);
+    float fps = (float)s->fpsCap;
+    OvSlider(X, W, &y, sc, "FPS cap*", &fps, 0, 240, "%.0f"); s->fpsCap = (int)fps;
+
+    float by = py + ph - 32 * sc, hw = (W - 8 * sc) / 2.0f;
+    if (GuiButton((Rectangle){ X, by, hw, 24 * sc }, "Save")) {
+        EdScene_SaveSettings(s, s->cfg);
+        EdHost_Log(h, ED_LOG_INFO, "settings saved to editor.cfg");
+    }
+    if (GuiButton((Rectangle){ X + hw + 8 * sc, by, hw, 24 * sc }, "Close")) EdHost_SetModal(h, NULL, NULL);
+}
+
+static void a_settings(EdHost *h, void *u) { (void)u; EdHost_SetModal(h, SettingsModal, NULL); }
+
+static void a_validate(EdHost *h, void *u) {
+    (void)u; EdScene *s = EdHost_Scene(h);
+    MapDocIssue issues[64];
+    int n = MapDoc_Validate(&s->doc, issues, 64);
+    if (n == 0) { EdHost_Log(h, ED_LOG_INFO, "validate: OK — no problems found"); return; }
+    EdHost_Log(h, ED_LOG_WARN, "validate: %d issue(s):", n);
+    for (int i = 0; i < n && i < 64; i++)
+        EdHost_Log(h, issues[i].severity == MAPDOC_ERROR ? ED_LOG_ERROR : ED_LOG_WARN,
+                   "  %s %s", issues[i].severity == MAPDOC_ERROR ? "[E]" : "[w]", issues[i].msg);
+}
+
+static void RegisterMapTools(EdHost *h) {
+    EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="Tools", .label="Settings...",  .onClick=a_settings });
+    EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="Tools", .label="Validate map", .onClick=a_validate });
+}
+
+// ============================================================================
+//  Status bar
+// ============================================================================
+
+static void st_map(EdHost *h, char *out, int cap, void *u) {
+    (void)u; EdScene *s = EdHost_Scene(h);
+    snprintf(out, cap, "%s%s", GetFileName(s->path), s->dirty ? " *" : "");
+}
+static void st_count(EdHost *h, char *out, int cap, void *u) {
+    (void)u; snprintf(out, cap, "%d ents", EdHost_Scene(h)->proxyCount);
+}
+static void st_view(EdHost *h, char *out, int cap, void *u) {
+    (void)u; EdScene *s = EdHost_Scene(h);
+    const char *v = s->view == ED_VIEW_FLY ? "fly" : s->view == ED_VIEW_ORBIT ? "iso" : "top";
+    snprintf(out, cap, "view: %s%s", v, s->snapEnabled ? "  snap" : "");
+}
+static void st_sel(EdHost *h, char *out, int cap, void *u) {
+    (void)u; EdScene *s = EdHost_Scene(h);
+    if (s->selectedId < 0) { snprintf(out, cap, "no selection"); return; }
+    EngMapEntKind k; EngMapEnt_Ptr(&s->doc, EngMapEnt_Find(&s->doc, s->selectedId), &k);
+    snprintf(out, cap, "sel #%d %s", s->selectedId, EdScene_KindName(k));
+}
+
+static void RegisterStatusBar(EdHost *h) {
+    EdHost_AddStatusItem(h, st_map,   NULL);
+    EdHost_AddStatusItem(h, st_count, NULL);
+    EdHost_AddStatusItem(h, st_view,  NULL);
+    EdHost_AddStatusItem(h, st_sel,   NULL);
+}
+
+// ============================================================================
+//  Descriptors
+// ============================================================================
+
+const EdPluginDesc *EdBuiltin_Menus(void) {
+    static const EdPluginDesc d = { "menus", ED_PLUGIN_ABI, RegisterMenus }; return &d;
+}
+const EdPluginDesc *EdBuiltin_Panels(void) {
+    static const EdPluginDesc d = { "panels", ED_PLUGIN_ABI, RegisterPanels }; return &d;
+}
+const EdPluginDesc *EdBuiltin_MapTools(void) {
+    static const EdPluginDesc d = { "maptools", ED_PLUGIN_ABI, RegisterMapTools }; return &d;
+}
+const EdPluginDesc *EdBuiltin_StatusBar(void) {
+    static const EdPluginDesc d = { "statusbar", ED_PLUGIN_ABI, RegisterStatusBar }; return &d;
+}

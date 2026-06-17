@@ -102,14 +102,49 @@ target_link_libraries(shooter PRIVATE engine)
 
 # ---- editor executable (src/editor/ — the scene/map builder) ----------------
 # A SIBLING application to the game: its own GameModule on the engine, linking
-# libengine.a and NOTHING from src/game/. The map editor built on the toolkit
-# (MapDoc + pick/gizmo/mapedit/debugdraw). See docs/scene-builder.md.
+# libengine.a and NOTHING from src/game/. The map editor is an IDE-style shell
+# (edhost) hosting a scene/viewport (edscene) filled by first-party plugins
+# (builtins). See docs/scene-builder.md.
+#
+# ENABLE_EXPORTS gives the editor binary a dynamic symbol table (-rdynamic), so
+# dlopen'd plugins in ./plugins resolve the EdHost_*/Eng_* symbols they call.
 add_executable(editor
     src/editor/editor_main.c
+    src/editor/edscene.c
+    src/editor/edhost.c
+    src/editor/builtins.c
+    src/editor/edfiledialog.c
+    src/editor/vendor/tinyfiledialogs.c
 )
-target_link_libraries(editor PRIVATE engine)
+target_include_directories(editor PRIVATE src/editor/vendor)
+target_link_libraries(editor PRIVATE engine ${CMAKE_DL_LIBS})
+set_target_properties(editor PROPERTIES ENABLE_EXPORTS ON)
+# Suppress warnings for the vendored tinyfiledialogs; our own files are wall-clean.
+set_source_files_properties(src/editor/vendor/tinyfiledialogs.c PROPERTIES
+    COMPILE_FLAGS "-w")
 if(NOT MSVC)
     target_compile_options(editor PRIVATE -Wall -Wextra -Wno-unused-parameter)
+endif()
+
+# ---- example dynamic plugin (proves the .so plugin seam) --------------------
+# Builds build/plugins/example_plugin.so. A third-party plugin is written just
+# like this: implement ed_plugin_main() returning an EdPluginDesc, link nothing
+# (host symbols resolve at dlopen via the editor's exported table), drop the .so
+# in the ./plugins folder beside the working directory.
+add_library(editor_example_plugin MODULE
+    src/editor/plugins/example_plugin.c
+)
+target_include_directories(editor_example_plugin PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/editor
+    ${CMAKE_SOURCE_DIR}/src/engine
+    ${raylib_SOURCE_DIR}/src
+    ${raygui_SOURCE_DIR}/src
+)
+set_target_properties(editor_example_plugin PROPERTIES
+    PREFIX "" OUTPUT_NAME "example_plugin"
+    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/plugins)
+if(NOT MSVC)
+    target_compile_options(editor_example_plugin PRIVATE -Wall -Wextra -Wno-unused-parameter)
 endif()
 
 # ---- warning flags (our code only, not FetchContent deps) ------------------

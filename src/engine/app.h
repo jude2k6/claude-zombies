@@ -60,4 +60,10 @@ typedef struct {
 // Returns when the window is closed.
 void Eng_Run(const EngConfig *cfg, GameModule game);
 
+// Ask the frame loop to exit after the current frame (the programmatic
+// equivalent of clicking the window's close box). Use this for an in-app
+// "Quit" / "Exit" command — the engine disables the ESC-to-quit key, so this
+// is the only way for a module to end Eng_Run from inside a callback.
+void Eng_RequestClose(void);
+
 #endif // SHOOTER_APP_H

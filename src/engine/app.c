@@ -9,6 +9,10 @@
 #include "audio.h"   // engine audio mixer
 #include "stats.h"   // per-frame instrumentation
 
+// Set by Eng_RequestClose() to break the frame loop from inside a callback.
+static bool g_engCloseRequested = false;
+void Eng_RequestClose(void) { g_engCloseRequested = true; }
+
 void Eng_Run(const EngConfig *cfg, GameModule game) {
     unsigned int flags = 0;
     if (cfg->msaa4x)     flags |= FLAG_MSAA_4X_HINT;
@@ -31,7 +35,7 @@ void Eng_Run(const EngConfig *cfg, GameModule game) {
     float simAccum = 0.0f;
     const float MAX_ACCUM = 0.25f;   // at most ~15 fixed steps after one stall
 
-    while (!WindowShouldClose()) {
+    while (!WindowShouldClose() && !g_engCloseRequested) {
         float dt = GetFrameTime();
         int   sw = GetScreenWidth();
         int   sh = GetScreenHeight();

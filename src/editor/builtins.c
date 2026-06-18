@@ -46,9 +46,6 @@ static void MapsStartDir(char *buf, int cap) {
     snprintf(buf, cap, "games/shooter/maps");
 }
 
-#define ED_UI_MIN 0.7f
-#define ED_UI_MAX 3.0f
-
 // ============================================================================
 //  Recent files — persisted in editor.cfg as recent.0 .. recent.7
 // ============================================================================
@@ -621,85 +618,110 @@ static void RegisterMenus(EdHost *h) {
 // ============================================================================
 
 // ---- Tools palette ---------------------------------------------------------
+// Is a row at [y, y+hh] at least partly inside the panel rect c? Used to skip
+// drawing AND input-processing widgets scrolled out of the panel, so a button
+// parked off-panel can't be clicked through the menu bar above it.
+static bool ToolRowVisible(Rectangle c, float y, float hh) {
+    return (y + hh > c.y) && (y < c.y + c.height);
+}
+
+// The placement palette — and ONLY the placement palette. Application display
+// (UI scale), transient interaction modes (view camera F1-F3, gizmo mode 1-3)
+// and the barricade auto-spawn editing preference used to live here too; they
+// were duplicates of the menu/keyboard/Settings surfaces and have been removed
+// (see docs/editor-layout-audit.md P0-A..C). The palette grows with the mob
+// catalog, so it scrolls within the panel scissor rather than clipping (P0-D).
+static float g_toolsScroll = 0;
+
 static void PanelTools(EdHost *h, Rectangle c, void *u) {
     (void)u; EdScene *s = EdHost_Scene(h);
     float sc = EdHost_UiScale(h);
-    float X = c.x, W = c.width, y = c.y;
+    float X = c.x, W = c.width;
+    float rowH = 22 * sc, gap = 25 * sc;   // button height + inter-row stride
 
-    GuiSlider((Rectangle){ X + 18 * sc, y, W - 56 * sc, 16 * sc }, "UI",
-              TextFormat("%.0f%%", s->uiScale * 100.0f), &s->uiScale, ED_UI_MIN, ED_UI_MAX);
-    y += 24 * sc;
+    // Wheel over the panel scrolls the palette; clamp to the measured content
+    // height from last frame (immediate-mode: layout and measure are the same).
+    if (CheckCollisionPointRec(GetMousePosition(), c))
+        g_toolsScroll -= GetMouseWheelMove() * gap * 3.0f;
+    static float prevTotal = 0;
+    float maxScroll = prevTotal - c.height; if (maxScroll < 0) maxScroll = 0;
+    if (g_toolsScroll < 0) g_toolsScroll = 0;
+    if (g_toolsScroll > maxScroll) g_toolsScroll = maxScroll;
 
-    GuiLabel((Rectangle){ X, y, W, 14 * sc }, "VIEW"); y += 16 * sc;
-    int v = (int)s->view;
-    GuiToggleGroup((Rectangle){ X, y, (W - 8 * sc) / 3.0f, 22 * sc }, "Fly;Iso;Top", &v);
-    if (v != (int)s->view) EdScene_SwitchView(s, (EdViewMode)v);
-    y += 30 * sc;
+    BeginScissorMode((int)c.x, (int)c.y, (int)c.width, (int)c.height);
+    float y = c.y - g_toolsScroll;   // running cursor in screen space
 
-    GuiLabel((Rectangle){ X, y, W, 14 * sc }, "GIZMO (move drag only)"); y += 16 * sc;
-    int g = (int)s->mode;
-    GuiToggleGroup((Rectangle){ X, y, (W - 8 * sc) / 3.0f, 22 * sc }, "Move;Rot;Scale", &g);
-    s->mode = (EngGizmoMode)g;
-    y += 30 * sc;
-
-    GuiLabel((Rectangle){ X, y, W, 14 * sc }, "PLACE"); y += 16 * sc;
     // Select / move is always first.
-    if (Eng_UiToolButton((Rectangle){ X, y, W, 22 * sc }, "Select / move", s->placeTool == ED_PLACE_NONE))
+    if (ToolRowVisible(c, y, rowH) &&
+        Eng_UiToolButton((Rectangle){ X, y, W, rowH }, "Select / move", s->placeTool == ED_PLACE_NONE))
         s->placeTool = ED_PLACE_NONE;
-    y += 25 * sc;
+    y += gap;
 
     // ---- Spawns ------------------------------------------------------------
-    GuiLabel((Rectangle){ X, y, W, 12 * sc }, "Spawns"); y += 14 * sc;
-    if (Eng_UiToolButton((Rectangle){ X, y, W, 22 * sc }, "Player spawn", s->placeTool == ED_PLACE_PLAYER))
+    if (ToolRowVisible(c, y, 12 * sc)) GuiLabel((Rectangle){ X, y, W, 12 * sc }, "Spawns");
+    y += 14 * sc;
+    if (ToolRowVisible(c, y, rowH) &&
+        Eng_UiToolButton((Rectangle){ X, y, W, rowH }, "Player spawn", s->placeTool == ED_PLACE_PLAYER))
         s->placeTool = ED_PLACE_PLAYER;
-    y += 25 * sc;
+    y += gap;
     // One button per mob from the data/mobs catalog (data-driven; see
     // EdScene_ScanMobs). Clicking arms ED_PLACE_MOB with that mob's tag.
     for (int i = 0; i < s->mobDefCount; i++) {
         const EdMobDef *m = &s->mobDefs[i];
         bool active = (s->placeTool == ED_PLACE_MOB && strcmp(s->placeMobId, m->id) == 0);
-        if (Eng_UiToolButton((Rectangle){ X, y, W, 22 * sc }, m->name, active)) {
+        if (ToolRowVisible(c, y, rowH) &&
+            Eng_UiToolButton((Rectangle){ X, y, W, rowH }, m->name, active)) {
             s->placeTool = ED_PLACE_MOB;
             snprintf(s->placeMobId, sizeof s->placeMobId, "%s", m->id);
         }
-        y += 25 * sc;
+        y += gap;
     }
 
     // ---- Geometry ----------------------------------------------------------
-    GuiLabel((Rectangle){ X, y, W, 12 * sc }, "Geometry"); y += 14 * sc;
-    if (Eng_UiToolButton((Rectangle){ X, y, W, 22 * sc }, "Barricade", s->placeTool == ED_PLACE_BARRICADE))
+    if (ToolRowVisible(c, y, 12 * sc)) GuiLabel((Rectangle){ X, y, W, 12 * sc }, "Geometry");
+    y += 14 * sc;
+    if (ToolRowVisible(c, y, rowH) &&
+        Eng_UiToolButton((Rectangle){ X, y, W, rowH }, "Barricade", s->placeTool == ED_PLACE_BARRICADE))
         s->placeTool = ED_PLACE_BARRICADE;
-    y += 25 * sc;
-    GuiCheckBox((Rectangle){ X, y, 16 * sc, 16 * sc }, " auto-spawn ZOMBIE", &s->barricadeAutoSpawn);
-    y += 22 * sc;
+    y += gap;
     {
         // Wall: label shows "(click 2)" cue when first endpoint is pending.
         const char *wallLabel = (s->placeTool == ED_PLACE_WALL && s->wallPending)
                                 ? "Wall  (click 2)" : "Wall  (2-click)";
-        if (Eng_UiToolButton((Rectangle){ X, y, W, 22 * sc }, wallLabel, s->placeTool == ED_PLACE_WALL)) {
+        if (ToolRowVisible(c, y, rowH) &&
+            Eng_UiToolButton((Rectangle){ X, y, W, rowH }, wallLabel, s->placeTool == ED_PLACE_WALL)) {
             s->placeTool = ED_PLACE_WALL;
             s->wallPending = false;   // reset on re-arm so a stale start is cleared
         }
     }
-    y += 25 * sc;
-    if (Eng_UiToolButton((Rectangle){ X, y, W, 22 * sc }, "Obstacle", s->placeTool == ED_PLACE_OBSTACLE))
+    y += gap;
+    if (ToolRowVisible(c, y, rowH) &&
+        Eng_UiToolButton((Rectangle){ X, y, W, rowH }, "Obstacle", s->placeTool == ED_PLACE_OBSTACLE))
         s->placeTool = ED_PLACE_OBSTACLE;
-    y += 25 * sc;
-    if (Eng_UiToolButton((Rectangle){ X, y, W, 22 * sc }, "Prop", s->placeTool == ED_PLACE_PROP))
+    y += gap;
+    if (ToolRowVisible(c, y, rowH) &&
+        Eng_UiToolButton((Rectangle){ X, y, W, rowH }, "Prop", s->placeTool == ED_PLACE_PROP))
         s->placeTool = ED_PLACE_PROP;
-    y += 25 * sc;
-    if (Eng_UiToolButton((Rectangle){ X, y, W, 22 * sc }, "Sector (20x20)", s->placeTool == ED_PLACE_SECTOR))
+    y += gap;
+    if (ToolRowVisible(c, y, rowH) &&
+        Eng_UiToolButton((Rectangle){ X, y, W, rowH }, "Sector (20x20)", s->placeTool == ED_PLACE_SECTOR))
         s->placeTool = ED_PLACE_SECTOR;
-    y += 25 * sc;
+    y += gap;
 
     // ---- Buyables ----------------------------------------------------------
-    GuiLabel((Rectangle){ X, y, W, 12 * sc }, "Buyables"); y += 14 * sc;
-    if (Eng_UiToolButton((Rectangle){ X, y, W, 22 * sc }, "Wallbuy", s->placeTool == ED_PLACE_WALLBUY))
+    if (ToolRowVisible(c, y, 12 * sc)) GuiLabel((Rectangle){ X, y, W, 12 * sc }, "Buyables");
+    y += 14 * sc;
+    if (ToolRowVisible(c, y, rowH) &&
+        Eng_UiToolButton((Rectangle){ X, y, W, rowH }, "Wallbuy", s->placeTool == ED_PLACE_WALLBUY))
         s->placeTool = ED_PLACE_WALLBUY;
-    y += 25 * sc;
-    if (Eng_UiToolButton((Rectangle){ X, y, W, 22 * sc }, "Perk machine", s->placeTool == ED_PLACE_PERK))
+    y += gap;
+    if (ToolRowVisible(c, y, rowH) &&
+        Eng_UiToolButton((Rectangle){ X, y, W, rowH }, "Perk machine", s->placeTool == ED_PLACE_PERK))
         s->placeTool = ED_PLACE_PERK;
-    y += 25 * sc;
+    y += gap;
+
+    EndScissorMode();
+    prevTotal = (y + g_toolsScroll) - c.y;   // total content height for next frame's clamp
 }
 
 // ---- Hierarchy — Feature 2: filter input -----------------------------------
@@ -1200,7 +1222,11 @@ static void st_count(EdHost *h, char *out, int cap, void *u) {
 static void st_view(EdHost *h, char *out, int cap, void *u) {
     (void)u; EdScene *s = EdHost_Scene(h);
     const char *v = s->view == ED_VIEW_FLY ? "fly" : s->view == ED_VIEW_ORBIT ? "iso" : "top";
-    snprintf(out, cap, "view: %s%s", v, s->snapEnabled ? "  snap" : "");
+    // Gizmo mode moved out of the Tools panel (audit P0-B); surface it read-only
+    // here so the active transform mode (keys 1/2/3) stays discoverable.
+    const char *g = s->mode == ENG_GIZMO_TRANSLATE ? "move"
+                  : s->mode == ENG_GIZMO_ROTATE    ? "rotate" : "scale";
+    snprintf(out, cap, "view: %s  %s%s", v, g, s->snapEnabled ? "  snap" : "");
 }
 static void st_sel(EdHost *h, char *out, int cap, void *u) {
     (void)u; EdScene *s = EdHost_Scene(h);

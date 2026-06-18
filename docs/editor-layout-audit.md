@@ -12,6 +12,23 @@ source code alone — the code is the ground truth.
 
 ---
 
+## Resolution log
+
+- **2026-06-18 — P0-A/B/C/D + P2-C done.** `PanelTools` is now placement-only:
+  the UI-scale slider (P0-A), the VIEW + GIZMO toggle groups (P0-B), and the
+  barricade auto-spawn checkbox (P0-C) are removed — UI scale stays on `Ctrl+=/−`,
+  view on F1-F3 + the View menu, gizmo on 1/2/3, auto-spawn in Settings. Gizmo
+  mode is now shown read-only in the status-bar `view:` segment so it stays
+  discoverable. The palette scrolls within its panel scissor (mouse wheel) and
+  gates off-panel widgets, so it no longer clips as the mob catalog grows (P0-D);
+  the dead `ED_UI_MIN/MAX` defines went with the slider. Separately, splitter
+  handles now show a resize cursor on hover/drag (P2-C). **Still open:** P1-* and
+  the rest of P2 (incl. the recommended viewport toolbar / Inspector tabs / menu
+  reshuffle). Visual confirmation of the scrolled palette is pending a hands-on
+  run — `--shot` capture is blocked in the sandbox.
+
+---
+
 ## Blunt Verdict
 
 The Tools panel is a junk drawer. It staples together five completely unrelated

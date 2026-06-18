@@ -51,6 +51,15 @@ void EdScene_LoadSettings(EdScene *s, EngCfg *cfg) {
 }
 
 void EdScene_SaveSettings(EdScene *s, EngCfg *cfg) {
+    // The recents lists (recent.* maps, game.* games) live in the same
+    // editor.cfg but are owned by the panels plugin / launcher, not the scene.
+    // BeginSave truncates the file, so snapshot those keys from disk FIRST and
+    // re-emit them below — otherwise a clean exit would wipe the recents (and
+    // the launcher's Recent Games list would be empty next launch).
+    EngCfg disk;
+    const char *paths[] = { cfg->path };
+    EngCfg_Load(&disk, paths, 1);
+
     FILE *f = EngCfg_BeginSave(cfg, "Claude Zombies map editor settings");
     if (!f) return;
     EngCfg_PutFloat(f, "cam.flySpeed",  s->camFlySpeed);
@@ -72,6 +81,12 @@ void EdScene_SaveSettings(EdScene *s, EngCfg *cfg) {
     EngCfg_PutInt  (f, "win.height",    s->winH);
     EngCfg_PutBool (f, "win.vsync",     s->vsync);
     EngCfg_PutInt  (f, "win.fpsCap",    s->fpsCap);
+    // Preserve the recents owned by other modules (see note above).
+    for (int i = 0; i < disk.count; i++) {
+        const char *k = disk.pairs[i].key;
+        if (strncmp(k, "recent.", 7) == 0 || strncmp(k, "game.", 5) == 0)
+            EngCfg_PutStr(f, k, disk.pairs[i].val);
+    }
     EngCfg_EndSave(f);
 }
 

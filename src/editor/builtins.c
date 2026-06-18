@@ -180,6 +180,12 @@ static void GameRecents_Push(EdScene *s, const char *dir) {
     Recents_Save(s);  // full rewrite that also calls GameRecents_WriteKeys
 }
 
+// Public wrapper so the launcher (editor_main) can record a game it opened
+// without reaching into builtins' static recents list. See builtins.h.
+void EdBuiltins_RememberGame(EdHost *h, const char *dir) {
+    GameRecents_Push(EdHost_Scene(h), dir);
+}
+
 // ============================================================================
 //  Unsaved-changes guard — Feature 4
 // ============================================================================

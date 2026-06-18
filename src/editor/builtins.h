@@ -16,4 +16,9 @@ const EdPluginDesc *EdBuiltin_Panels(void);     // Tools palette, Hierarchy, Ins
 const EdPluginDesc *EdBuiltin_MapTools(void);   // Tools menu: Settings… + Validate
 const EdPluginDesc *EdBuiltin_StatusBar(void);  // status segments
 
+// Push a game dir to the front of the recent-games list (dedup + persist to
+// editor.cfg), exactly as File ▸ Open Game does. Called by the launcher so a
+// launcher-opened game lands in recents like any in-editor open.
+void EdBuiltins_RememberGame(EdHost *h, const char *dir);
+
 #endif

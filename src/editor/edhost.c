@@ -272,6 +272,18 @@ static void UpdateSplitters(EdHost *h, const EdLayout *L, int W, int H) {
     if (h->splitterDrag == 1) h->leftW   = m.x / s;
     if (h->splitterDrag == 2) h->rightW  = (W - m.x) / s;
     if (h->splitterDrag == 3) h->bottomH = (H - (ED_STATUS_H * s) - m.y) / s;
+
+    // Cursor hint: EW on vertical splitters (left/right), NS on the bottom one.
+    // Checked against drag state first so the hint persists while dragging even
+    // if the cursor drifts slightly off the handle rect.
+    if (h->splitterDrag == 1 || h->splitterDrag == 2 ||
+        (h->splitterDrag == 0 && (CheckCollisionPointRec(m, sl) || CheckCollisionPointRec(m, sr))))
+        SetMouseCursor(MOUSE_CURSOR_RESIZE_EW);
+    else if (h->splitterDrag == 3 ||
+             (h->splitterDrag == 0 && CheckCollisionPointRec(m, sb)))
+        SetMouseCursor(MOUSE_CURSOR_RESIZE_NS);
+    else
+        SetMouseCursor(MOUSE_CURSOR_DEFAULT);
 }
 
 // ---- menu bar (interaction is folded into the draw; runs first, on top) ----

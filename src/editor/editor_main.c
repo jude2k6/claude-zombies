@@ -23,6 +23,8 @@
 #include "edscene.h"
 #include "edhost.h"
 #include "builtins.h"
+#include "edlauncher.h"
+#include "edproject.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -33,16 +35,25 @@ static EdScene s_scene;
 static EdHost *s_host;
 static EngCfg  s_cfg;
 
+// App has two modes: the start screen (launcher) and the editor proper. We open
+// on the launcher unless an explicit map arg / --shot was given (CLI + CI must
+// drop straight into the editor). s_editing flips true once the editor is
+// entered; s_host stays NULL until then. See docs/editor-launcher-plan.md.
+static EdLauncher s_launcher;
+static bool       s_editing = false;
+
 // --shot <file>: capture one frame after the UI settles, then quit (a headed
 // smoke/verify hook, the analogue of the game's --screenshot-* dev modes).
 static int  s_shotAt = -1;     // frame to capture on; -1 = normal interactive run
 static int  s_frame  = 0;
 static char s_shotPath[256];
 
-static void EdInit(void) {
-    EdScene_Init(&s_scene);
-    if (s_scene.uiScale <= 0.0f) s_scene.uiScale = Eng_UiRecommendedScale();  // 0 = absent in cfg
-    Eng_UiApplyTheme();
+// Build the IDE shell for the map at s_scene.path (already set by the caller).
+// Factored out so it can run either at startup (explicit map / --shot) or in
+// response to a launcher action. Flips s_editing so the draw/shutdown steps
+// switch from the launcher to the editor proper.
+static void EnterEditor(void) {
+    EdScene_Init(&s_scene);   // parses s_scene.path into the document
 
     s_host = EdHost_Create(&s_scene);
     EdHost_RegisterBuiltin(s_host, EdBuiltin_Menus());
@@ -55,9 +66,58 @@ static void EdInit(void) {
     int dyn = EdHost_LoadDynamicPlugins(s_host, "plugins");
     EdHost_Log(s_host, ED_LOG_INFO, "Scene Builder ready — %s (%d plugin(s) from ./plugins)",
                GetFileName(s_scene.path), dyn);
+    s_editing = true;
+}
+
+// A launcher OPEN_GAME / NEW_GAME resolved to `gameDir` (already EdProject_Open'd
+// by the caller): resolve its default map, enter the editor on it, and record it
+// in recents — the same end state as File ▸ Open Game.
+static void EnterEditorForGame(const char *gameDir) {
+    EdProject proj;
+    const char *mapRel = "maps/default.map";
+    if (EdProject_Read(gameDir, &proj) && proj.default_map[0]) mapRel = proj.default_map;
+
+    char mapBuf[sizeof s_scene.path];   // dest is path[512]; no point going wider
+    snprintf(mapBuf, sizeof mapBuf, "%s/%s", gameDir, mapRel);
+    if (FileExists(mapBuf)) snprintf(s_scene.path, sizeof s_scene.path, "%s", mapBuf);
+    // else: keep the default-resolved path already in s_scene.path as a fallback.
+
+    EnterEditor();
+    EdBuiltins_RememberGame(s_host, gameDir);
+}
+
+static void EdInit(void) {
+    if (s_scene.uiScale <= 0.0f) s_scene.uiScale = Eng_UiRecommendedScale();  // 0 = absent in cfg
+    Eng_UiApplyTheme();
+
+    if (s_editing) EnterEditor();                              // explicit map / --shot
+    else           EdLauncher_Init(&s_launcher, &s_cfg, s_scene.uiScale);
 }
 
 static void EdDraw(int w, int h) {
+    if (!s_editing) {
+        EdLauncherResult r = EdLauncher_Draw(&s_launcher, w, h);
+        switch (r.action) {
+        case EDL_OPEN_GAME:
+            if (EdProject_Open(r.gameDir)) EnterEditorForGame(r.gameDir);
+            break;
+        case EDL_NEW_GAME:
+            if (EdProject_New(r.gameDir, r.templateName, r.gameName) &&
+                EdProject_Open(r.gameDir)) EnterEditorForGame(r.gameDir);
+            break;
+        case EDL_OPEN_MAP:
+            snprintf(s_scene.path, sizeof s_scene.path, "%s", r.path);
+            EnterEditor();
+            break;
+        case EDL_QUIT:
+            Eng_RequestClose();
+            break;
+        case EDL_NONE:
+            break;
+        }
+        return;
+    }
+
     EdHost_Frame(s_host, w, h);
     if (s_shotAt >= 0 && ++s_frame >= s_shotAt) {
         TakeScreenshot(s_shotPath);
@@ -66,6 +126,7 @@ static void EdDraw(int w, int h) {
 }
 
 static void EdShutdown(void) {
+    if (!s_editing || !s_host) return;   // quit straight from the launcher: nothing to persist
     EdScene_SaveSettings(&s_scene, &s_cfg);   // persist tweaks made this session
     EdHost_Destroy(s_host);
     EdScene_Shutdown(&s_scene);
@@ -116,6 +177,7 @@ int main(int argc, char **argv) {
     const char *path = Eng_ResolveAssetPath("maps/default.map", s_defaultMapBuf, sizeof s_defaultMapBuf);
     if (!path) path = "games/shooter/maps/default.map";  // last-resort fallback
     bool check = false;
+    bool hasMapArg = false;  // explicit map path on the CLI → skip the launcher
     int viewOverride = -1;  // -1 = no override; otherwise EdViewMode value
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--check") == 0) check = true;
@@ -132,11 +194,15 @@ int main(int argc, char **argv) {
             else if (strcmp(argv[i], "iso") == 0) viewOverride = (int)ED_VIEW_ORBIT;
             else if (strcmp(argv[i], "top") == 0) viewOverride = (int)ED_VIEW_TOP;
         }
-        else path = argv[i];   // last non-flag arg = map path
+        else { path = argv[i]; hasMapArg = true; }   // last non-flag arg = map path
     }
     snprintf(s_scene.path, sizeof s_scene.path, "%s", path);
 
     if (check) return RunCheck();
+
+    // Start straight in the editor for an explicit map or a --shot (CLI + CI);
+    // otherwise open on the launcher and let the user pick a game/map.
+    s_editing = hasMapArg || (s_shotAt >= 0);
 
     EdScene_LoadSettings(&s_scene, &s_cfg);   // before the window: win/vsync/fps + default view
     if (viewOverride >= 0) s_scene.viewDefault = (EdViewMode)viewOverride;

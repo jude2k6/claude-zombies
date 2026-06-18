@@ -122,6 +122,7 @@ add_executable(editor
     src/editor/builtins.c
     src/editor/edfiledialog.c
     src/editor/edproject.c
+    src/editor/edlauncher.c
     src/editor/vendor/tinyfiledialogs.c
 )
 target_include_directories(editor PRIVATE src/editor/vendor)

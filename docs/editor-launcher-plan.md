@@ -7,9 +7,10 @@ window, and the entry point for the games-as-projects model
 ([game-projects.md](game-projects.md) §8). It supersedes nothing — the in-editor
 File ▸ New/Open Game items stay; this is just the launch-time front door.
 
-> **Status: WIP — launcher screen built, NOT yet wired into the editor loop.**
-> The repo builds (the new `edlauncher.c` is not in CMake yet, so it's an inert
-> orphan). Finish the four wiring steps below to make it live.
+> **Status: LIVE (2026-06-18).** The launcher is wired into the editor loop and
+> in CMake. `./build/editor` with no args opens the start screen; an explicit map
+> arg, `--shot`, and `--check` bypass it straight into the editor (CLI + CI
+> preserved). The four wiring steps below are done — kept as a record.
 
 ## Built so far
 
@@ -29,40 +30,46 @@ File ▸ New/Open Game items stay; this is just the launch-time front door.
   cause: two modules write the same cfg via truncating `BeginSave` with different
   key sets — the launcher work just made the bug matter.)
 
-## Remaining wiring (to make it live)
+## Wiring (done — how it landed)
 
-1. **`editor_main.c` app state machine.** Add `static EdLauncher s_launcher;` and
-   a `bool s_editing`. In `main()` decide the start mode: **launcher** when no
-   explicit map arg was passed; **straight to editor** for `editor <map>`,
-   `--check`, `--shot` (preserve CLI + CI). Factor the current `EdInit` body
-   (`EdScene_Init` + `EdHost_Create` + register builtins + load plugins) into an
-   `EnterEditor()` called either at init (explicit map) or on a launcher action.
-   `EdDraw`: if `!s_editing`, `EdLauncher_Draw` and dispatch its action; else
-   `EdHost_Frame`. `EdShutdown`: guard `s_host` (may be NULL if quit from the
-   launcher) and only `EdScene_SaveSettings`/`EdScene_Shutdown` once the editor
-   was entered.
-2. **CMake.** Add `src/editor/edlauncher.c` to the `editor` target's sources.
-3. **`builtins` recents wrapper.** `GameRecents_Push(EdScene*, dir)` is static in
-   `builtins.c`. Expose `void EdBuiltins_RememberGame(EdHost *h, const char *dir);`
-   (wrapping it via `EdHost_Scene`) in `builtins.h`, and call it after
-   `EnterEditor()` in the launcher's OPEN_GAME / NEW_GAME paths so a
-   launcher-opened game lands in recents exactly like File ▸ Open Game.
-4. **Action handlers** in `editor_main.c`:
-   - **OPEN_GAME**: `EdProject_Open(dir)`; resolve the game's `default_map`
+1. **`editor_main.c` app state machine.** `static EdLauncher s_launcher;` +
+   `static bool s_editing`. `main()` sets `s_editing = hasMapArg || (s_shotAt >= 0)`
+   so an explicit map arg and `--shot` go straight to the editor while a bare
+   launch opens the start screen (`--check` still returns before the window). The
+   old `EdInit` body (`EdScene_Init` + `EdHost_Create` + register builtins + load
+   plugins) is factored into `EnterEditor()`, which also flips `s_editing` true.
+   `EdInit` applies the theme/UI scale once, then either `EnterEditor()` or
+   `EdLauncher_Init`. `EdDraw`: when `!s_editing`, `EdLauncher_Draw` + dispatch the
+   action; else `EdHost_Frame` (+ the `--shot` capture). `EdShutdown` early-returns
+   unless the editor was actually entered (`s_host` may be NULL on launcher quit).
+2. **CMake.** `src/editor/edlauncher.c` added to the `editor` target.
+3. **`builtins` recents wrapper.** `void EdBuiltins_RememberGame(EdHost *h, const
+   char *dir)` (in `builtins.h`/`builtins.c`) wraps the static `GameRecents_Push`
+   via `EdHost_Scene`. Called after `EnterEditor()` in the OPEN_GAME / NEW_GAME
+   paths, so a launcher-opened game lands in recents like File ▸ Open Game. (Order
+   matters: the panels plugin's `Recents_Load` runs inside `EnterEditor`, before
+   this push.)
+4. **Action handlers** in `editor_main.c` (`EnterEditorForGame()` shared by the
+   first two):
+   - **OPEN_GAME**: `EdProject_Open(dir)` → resolve `default_map`
      (`EdProject_Read` → `<dir>/<default_map>`, fallback `maps/default.map`) into
-     `s_scene.path`; `EnterEditor()`; `EdBuiltins_RememberGame`.
+     `s_scene.path` → `EnterEditor()` → `EdBuiltins_RememberGame`.
    - **NEW_GAME**: `EdProject_New(dir, "empty", name)` → `EdProject_Open(dir)` →
      same as OPEN_GAME.
    - **OPEN_MAP**: `s_scene.path = path` → `EnterEditor()`.
    - **QUIT**: `Eng_RequestClose()`.
 
-## Verify when wired
+## Verify
 
-`cmake --build build -j --target editor`, then `./build/editor` (no args) should
-show the launcher; opening/creating a game drops into the IDE on its default map;
-`./build/editor games/shooter/maps/nacht.map` and `--check` must still bypass the
-launcher (CI depends on `--check`). Confirm a created game persists in Recent
-Games across an editor restart (the `EdScene_SaveSettings` fix).
+Done (2026-06-18): `cmake --build build -j --target editor` is warning-clean;
+`./build/editor` (no args) starts in the launcher (window stays up, no crash);
+`./build/editor games/shooter/maps/nacht.map` and `--shot` start in the editor;
+`--check games/shooter/maps/nacht.map` validates and exits without a window. Start
+mode was confirmed per-invocation via a temporary `EDITOR_START_MODE=` stderr
+breadcrumb (since removed). **Still hands-on to confirm:** opening/creating a game
+from the launcher drops into the IDE on the game's default map, and a created game
+persists in Recent Games across a restart (the `EdScene_SaveSettings` fix) — needs
+a real interactive session with the file pickers.
 
 ## Related: editor layout audit
 

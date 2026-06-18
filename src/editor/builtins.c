@@ -642,8 +642,8 @@ static bool ToolRowVisible(Rectangle c, float y, float hh) {
 // (UI scale), transient interaction modes (view camera F1-F3, gizmo mode 1-3)
 // and the barricade auto-spawn editing preference used to live here too; they
 // were duplicates of the menu/keyboard/Settings surfaces and have been removed
-// (see docs/editor-layout-audit.md P0-A..C). The palette grows with the mob
-// catalog, so it scrolls within the panel scissor rather than clipping (P0-D).
+// (see docs/scene-builder.md §"IDE frame"). The palette grows with the content
+// catalogs, so it scrolls within the panel scissor rather than clipping.
 static float g_toolsScroll = 0;
 
 static void PanelTools(EdHost *h, Rectangle c, void *u) {

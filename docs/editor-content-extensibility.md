@@ -146,7 +146,7 @@ attack_range    1.2
 - **Editor** scans the same folder; each `.mob` becomes a **spawn entity-def** in the
   palette ("Shambler", "Hellhound"). Placing one writes `SPAWN MOB <id>`. The editor uses
   `model`/`tint` to draw the marker (or the real model once textured rendering lands —
-  [editor-textured-rendering-plan.md](editor-textured-rendering-plan.md)) and shows the
+  [scene-builder.md](scene-builder.md) §5.7) and shows the
   stats read-only in the Inspector. **The editor never reads `behaviour`** — that's
   game-only — it just carries the tag. Seam stays clean.
 
@@ -296,9 +296,8 @@ A parallel registry. The editor **scans `data/` for models (`.glb`) and textures
 an **asset browser / picker**; adding an asset = drop a file in the folder. A def with
 `kind=PROP` either hard-codes its `asset` (one-click "Barrel") or leaves it blank so placing
 it opens the picker, whose choice is written into `prop.name`. Rendering those assets in the
-viewport uses engine asset-load APIs — see
-[editor-textured-rendering-plan.md](editor-textured-rendering-plan.md). This and game-accurate
-rendering converge on the same asset path.
+viewport uses engine asset-load APIs — see [scene-builder.md](scene-builder.md) §5.7. This
+and game-accurate rendering converge on the same asset path.
 
 ## 7. Implementation order
 

@@ -14,19 +14,27 @@ Everything visible is contributed through a **plugin API** — the built-in tool
 themselves first-party plugins, and third-party plugins (compiled-in *or* dynamically
 loaded `.so` files in `./plugins`) extend it through the identical surface. See §3.
 
-> **Status: working IDE shell (map *save* now wired).** Builds the `editor` binary: the
-> menu/dock/status frame, fly/iso/top cameras in a confined viewport, place / select /
-> move entities (translate **+ rotate/scale** gizmo), undo/redo, grid snapping, a
-> Hierarchy list with a search filter, an **editable Inspector** (with a map-metadata
-> view when nothing is selected), live **inline validation** (red outlines on bad
-> entities), **focus-on-selection** (`F`), an **unsaved-changes guard**, a Console, a
+> **Status: working IDE shell.** Builds the `editor` binary: a **start screen**
+> (recent games + New/Open Game/Map), then the menu/dock/status frame, fly/iso/top
+> cameras in a confined viewport, place / select / move entities (translate **+
+> rotate/scale** gizmo), undo/redo, grid snapping, a Hierarchy list with a search
+> filter, an **editable Inspector** (map-properties view when nothing is selected),
+> live **inline validation** (red outlines on bad entities), **focus-on-selection**
+> (`F`), an **unsaved-changes guard**, a Console (with clear + severity filter), a
 > persisted settings dialog (`editor.cfg`), and `MapDoc_Validate` map-checking — plus
 > `File ▸ Save` (`MapDoc_Save`), **New Game / Open Game** (game-folder scaffolding +
-> overlay), **place tools for every entity kind**, and a dynamic plugin loader. Not yet:
-> game-accurate textured rendering in the viewport (entities still draw as proxy boxes —
-> though the shared engine draw helpers it needs now exist, see
-> [editor-textured-rendering-plan.md](editor-textured-rendering-plan.md)), and the
+> overlay), **data-driven place palettes for every entity kind** (Spawns/Props/
+> Wallbuys/Perks scanned from content catalogs), submenu support, and a dynamic plugin
+> loader. Not yet: game-accurate textured rendering in the viewport (entities still
+> draw as proxy boxes — the shared engine draw helpers exist, §5.7), and the
 > asset-browser import surface. See §5.
+
+> **Related docs.** This is the canonical reference for how the editor works today.
+> For *where it's going*: [editor-content-extensibility.md](editor-content-extensibility.md)
+> (the `.mob`/`.prop`/`.perk` catalog + behaviour-registry design) and
+> [editor-feature-ideas.md](editor-feature-ideas.md) (the backlog, incl. remaining
+> layout polish). The content-overlay architecture the editor's game projects sit on is
+> [game-projects.md](game-projects.md).
 
 ## 1. What it is (and is not)
 
@@ -127,11 +135,22 @@ segment), built to `build/plugins/example_plugin.so`.
 
 ```
 cmake --build build --target editor editor_example_plugin
-build/editor                       # opens the IDE on data/maps/default.map
-build/editor data/maps/foo.map     # open a specific map
+build/editor                       # opens the START SCREEN (recent games + New/Open)
+build/editor games/shooter/maps/foo.map   # skip the start screen, open a map directly
 build/editor --check [map]         # headless: parse, build proxies, print counts, exit
 build/editor --shot out.png [map]  # headed: render a frame, screenshot to out.png, quit
 ```
+
+### Start screen (launcher)
+
+Launched with **no map argument**, the editor opens on an IDE-style **welcome
+screen** (`edlauncher.{c,h}`): **Recent Games** on the right (from `game.*` in
+`editor.cfg`), and **New Game / Open Game / Open Map / Quit** on the left. Picking
+one resolves the game's content overlay (`Eng_SetGameRoot`) and its default map, then
+drops into the editor proper — the same `EnterEditor()` path an explicit-map launch
+takes. An explicit map arg, `--shot`, and `--check` all **bypass** the launcher so the
+CLI and CI go straight to the editor. `editor_main.c` is the two-mode state machine
+(`s_editing` flips once the editor is entered).
 
 `--check` is the editor's CI/smoke hook (the analogue of the game's `--validate`): it
 loads a map and reports entity counts without opening a window, so the editor stays
@@ -197,11 +216,13 @@ The shell wraps the viewport in a Unity-style frame, all built by the `menus` / 
 `statusbar` / `maptools` built-in plugins:
 
 - **Menu bar** (top): **File** (New, Open… `Ctrl+O`, Save `Ctrl+S`, Save As…, recent
-  files, Reload, Exit — see below), **Edit** (Undo/Redo/Delete, enabled-state aware),
-  **View** (Fly/Iso/Top with a check on the active one, Snap to grid), **Tools**
-  (Settings…, Validate map), **Help** (Controls, About — they print to the Console). Click
-  a title to open; hover-switches between open menus; click an item or click away to
-  close. While a menu is open the viewport ignores clicks.
+  maps, a **Game project ▸** flyout with New/Open Game, Reload, Exit — see below), **Edit**
+  (Undo/Redo/Delete, enabled-state aware, **Preferences…**), **View** (Fly/Iso/Top with a
+  check on the active one, Snap to grid, a **Gizmo mode ▸** flyout: Move/Rotate/Scale),
+  **Tools** (Validate map), **Help** (Controls, About — they print to the Console). Click
+  a title to open; hover-switches between open menus; hovering a **`▸` item** opens its
+  flyout submenu; click an item or click away to close. While a menu is open the viewport
+  ignores clicks. (Submenus are an `EdMenuItem.submenu` group — see `edhost.h`.)
 
 #### File menu (open / save / recents)
 
@@ -220,18 +241,27 @@ through a small **dynamic-menu** hook the shell grew for exactly this — a menu
 an `EdMenuDynFn` provider (`EdHost_SetMenuDynamic`) that emits items each frame the menu is
 open, drawn after the static items with an automatic separator. (Static menu items are
 registered once; recents change at runtime, hence the hook.)
-- **Left zone**: **TOOLS** (UI-scale slider, view + gizmo toggles, place-tool buttons, the
-  *auto-spawn ZOMBIE* checkbox) over **HIERARCHY** (a scrollable list of every entity by
-  `#id kind`, with a **search box** at the top that filters rows by id/kind/mob substring;
-  click a row to select — it mirrors the viewport selection).
+- **Left zone**: **TOOLS** — a scrollable **placement palette only** (Spawns / Geometry /
+  Props / Wallbuys / Perks), one button per tool. The Spawns, Props, Wallbuys and Perks
+  sections are **data-driven**, scanned from content catalogs (`mobs/*.mob`, `props/*.prop`,
+  `weapons/*.weapon`, `perks/*.perk`) — a new file is a new button, no rebuild (see
+  [editor-content-extensibility.md](editor-content-extensibility.md)). It sits over
+  **HIERARCHY** (a scrollable list of every entity by `#id kind`, with a **search box** that
+  filters rows by id/kind/mob substring; click a row to select — it mirrors the viewport).
+  *(Transient state — UI scale, view camera, gizmo mode, barricade auto-spawn — used to
+  clutter this panel; it now lives where it belongs: keyboard shortcuts, the View/Edit menus,
+  and the Settings dialog.)*
 - **Right zone**: **INSPECTOR** — **editable** fields for the selection: position (all
   kinds), spawn mob, window facing, prop yaw/scale, obstacle size, sector size/heights —
   each wired through `mapedit.h` and pushing one undo step per change. When **nothing** is
-  selected it shows a **map-metadata** view instead (map name + atmosphere fog/sky via
-  text fields and colour pickers, writing straight into the `MapDoc`).
-- **Bottom zone**: **CONSOLE** — log output (plugin loads, save/validate results, Help).
-- **Status bar** (bottom): map name + dirty flag, entity count, view mode + snap, and the
-  selection — each a registered status segment.
+  selected it shows a **MAP PROPERTIES** view instead (map name + atmosphere fog/sky via
+  text fields and colour pickers, writing straight into the `MapDoc`); a *Map properties…*
+  button in the entity view deselects to reach it.
+- **Bottom zone**: **CONSOLE** — log output (plugin loads, save/validate results, Help),
+  with a **Clear** button and a severity filter (all / warnings+ / errors).
+- **Status bar** (bottom): map name + dirty flag, entity count, view mode + gizmo mode +
+  snap, and the selection (empty when nothing is selected) — each a registered status
+  segment. The open map + dirty marker is also the OS window title.
 
 Zones resize by dragging the **splitters** between them and the viewport. Panels stack
 within a zone; a panel may request a fixed height (`prefH`) — TOOLS does, so it keeps its
@@ -240,7 +270,7 @@ equivalent and vice-versa.
 
 **UI scale.** The whole frame's font and layout scale together by one factor, seeded from
 the display: ~1.0 at 720p, ~1.5 at 1080p, up to 3.0 on a 4K monitor. Adjust it live with
-the **UI** slider in TOOLS or **Ctrl + `=` / `-`** (range 70 %–300 %).
+**Ctrl + `=` / `-`** (range 70 %–300 %).
 
 > Chrome is **raygui** styled through the `Eng_Ui*` facade (`ui.h`); raygui `Gui*` is
 > called directly for sliders/toggles/checkboxes. The IDE frame itself (menu bar, dock
@@ -307,12 +337,18 @@ Small, independently shippable steps; none blocks the game.
 6. ~~**Rotate / scale** drag~~ **Done** — gizmo modes 2/3 drag PROPs via
    `Eng_SetYaw` / `Eng_SetScale` (using the gizmo's `rotateRadians` / per-axis `scale`),
    coalesced under a drag tag like translate.
-7. **Real scene rendering** — draw actual sector/wall/prop geometry (optionally share the
-   game's look via the content registry) instead of proxy boxes. **Foundation landed:**
-   `Eng_DrawTexturedBoxV` / `Eng_DrawTexturedFloorV` now live in the engine (`gfx.{c,h}`),
-   lifted out of the game's `render.c` so the editor can reuse them
-   ([editor-textured-rendering-plan.md](editor-textured-rendering-plan.md) Phase 1, step 1);
-   the editor-side `M` toggle that calls them is the remaining work.
+7. **Real scene rendering** — draw actual sector/wall/prop geometry instead of proxy
+   boxes, behind an additive `M` "material mode" toggle (the proxy path stays the
+   default). **Foundation landed:** `Eng_DrawTexturedBoxV` / `Eng_DrawTexturedFloorV`
+   were lifted out of the game's `render.c` into the engine (`gfx.{c,h}`), taking a raw
+   `Texture2D*` + explicit `tileSize` so neither engine nor editor includes `assets.h`
+   (the game's helpers are now thin shims; verified identical via `--screenshot-map`).
+   **Remaining:** the editor-side toggle in `edscene.c` that loads map textures via
+   `Eng_LoadTextureByName` and calls these helpers (floors → `doc.textures.floor`, walls/
+   obstacles → proxy-box sized, props → `Eng_LoadModel`), wrapped in
+   `Eng_RenderBeginWorld`/`EndWorld` for the game's fog/sun shader. A later
+   `libgame_edbridge.so` plugin could register game-specific draws (perk machines,
+   wallbuys) for full parity without touching the editor binary.
 8. **Docking polish** — tabbed panels + drag-to-rearrange + saved layouts (today's zones
    are fixed-position, splitter-resizable).
 9. **Packaging** — keep the standalone `editor` binary; later, optionally embed the same

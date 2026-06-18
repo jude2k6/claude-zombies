@@ -38,7 +38,7 @@ static EngCfg  s_cfg;
 // App has two modes: the start screen (launcher) and the editor proper. We open
 // on the launcher unless an explicit map arg / --shot was given (CLI + CI must
 // drop straight into the editor). s_editing flips true once the editor is
-// entered; s_host stays NULL until then. See docs/editor-launcher-plan.md.
+// entered; s_host stays NULL until then. See docs/scene-builder.md §4.
 static EdLauncher s_launcher;
 static bool       s_editing = false;
 

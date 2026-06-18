@@ -19,8 +19,7 @@
 > **3.1 Place All Entity Kinds** (the PLACE palette now covers every `EngMapEntKind`,
 > grouped Spawns / Geometry / Buyables; walls are two-click, the rest drop-and-snap).
 > On the engine side the **2.4** textured-render foundation (`Eng_DrawTexturedBoxV` /
-> `…FloorV`) also landed — see
-> [editor-textured-rendering-plan.md](editor-textured-rendering-plan.md). Still open from
+> `…FloorV`) also landed — see [scene-builder.md](scene-builder.md) §5.7. Still open from
 > the Top 5: **5.1 Play-Test Launch**. (Beyond the editor backlog, the games-as-projects
 > **New/Open Game** UI also shipped — see [game-projects.md](game-projects.md) §8 / §10.)
 
@@ -445,6 +444,32 @@ already used for gizmos.
 
 **Seam:** Validation logic is already in `mapdoc.h` (engine side). The draw call
 (`Eng_DebugDrawBox` or similar in `debugdraw.h`) is also engine-side. No constraint.
+
+---
+
+### 4.x Residual layout polish (from the 2026-06-18 layout audit)
+
+The layout audit's P0/P1 findings were fixed (placement-only Tools panel, menu
+reshuffle + submenus, status-bar/window-title cleanup, Console clear/filter, the
+launcher); these **P2 polish** items and a couple of deferred ideas remain — folded
+here so the audit file could be retired (full audit + resolution log is in git):
+
+- **Place-tool feedback in the viewport** — armed tool shows no cursor change / ghost
+  preview; only the highlighted palette button. Add a viewport overlay ("PLACING: …")
+  or a ghost entity. *(P2-A)*
+- **Hierarchy rows** — show `KIND (descriptor)` (e.g. `SPAWN (ZOMBIE)`) not just
+  `#id KIND`; optional drag-to-reorder. *(P2-B)*
+- **Settings dialog** — separate restart-required settings (VSync/FPS/window) into a
+  banner-marked section instead of a `*` in the label. *(P2-D)*
+- **Wall 2-click state** — surface "click 2 of 2" in the viewport, not only the palette
+  button label. *(P2-E)*
+- **Help ▸ Controls** — a modal/overlay instead of dumping to the Console (scrolls away).
+  *(P2-F)*
+- **Viewport top-bar** (recommended-layout idea) — a thin strip over the viewport showing
+  active view / gizmo / place-tool badges; would also host the place-tool feedback above.
+- **Validation error badge** — a `[3E 1W]` count in the status bar (red/gold) when
+  `Validate map` finds issues (deferred P1-F; needs validation results plumbed to the
+  status segment).
 
 ---
 

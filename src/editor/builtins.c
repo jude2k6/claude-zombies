@@ -435,11 +435,14 @@ static void PanelTools(EdHost *h, Rectangle c, void *u) {
     s->mode = (EngGizmoMode)g;
     y += 30 * sc;
 
-    GuiLabel((Rectangle){ X, y, W, 14 * sc }, "PLACE (click ground)"); y += 16 * sc;
-    // Static tools first.
+    GuiLabel((Rectangle){ X, y, W, 14 * sc }, "PLACE"); y += 16 * sc;
+    // Select / move is always first.
     if (Eng_UiToolButton((Rectangle){ X, y, W, 22 * sc }, "Select / move", s->placeTool == ED_PLACE_NONE))
         s->placeTool = ED_PLACE_NONE;
     y += 25 * sc;
+
+    // ---- Spawns ------------------------------------------------------------
+    GuiLabel((Rectangle){ X, y, W, 12 * sc }, "Spawns"); y += 14 * sc;
     if (Eng_UiToolButton((Rectangle){ X, y, W, 22 * sc }, "Player spawn", s->placeTool == ED_PLACE_PLAYER))
         s->placeTool = ED_PLACE_PLAYER;
     y += 25 * sc;
@@ -454,10 +457,42 @@ static void PanelTools(EdHost *h, Rectangle c, void *u) {
         }
         y += 25 * sc;
     }
+
+    // ---- Geometry ----------------------------------------------------------
+    GuiLabel((Rectangle){ X, y, W, 12 * sc }, "Geometry"); y += 14 * sc;
     if (Eng_UiToolButton((Rectangle){ X, y, W, 22 * sc }, "Barricade", s->placeTool == ED_PLACE_BARRICADE))
         s->placeTool = ED_PLACE_BARRICADE;
     y += 25 * sc;
     GuiCheckBox((Rectangle){ X, y, 16 * sc, 16 * sc }, " auto-spawn ZOMBIE", &s->barricadeAutoSpawn);
+    y += 22 * sc;
+    {
+        // Wall: label shows "(click 2)" cue when first endpoint is pending.
+        const char *wallLabel = (s->placeTool == ED_PLACE_WALL && s->wallPending)
+                                ? "Wall  (click 2)" : "Wall  (2-click)";
+        if (Eng_UiToolButton((Rectangle){ X, y, W, 22 * sc }, wallLabel, s->placeTool == ED_PLACE_WALL)) {
+            s->placeTool = ED_PLACE_WALL;
+            s->wallPending = false;   // reset on re-arm so a stale start is cleared
+        }
+    }
+    y += 25 * sc;
+    if (Eng_UiToolButton((Rectangle){ X, y, W, 22 * sc }, "Obstacle", s->placeTool == ED_PLACE_OBSTACLE))
+        s->placeTool = ED_PLACE_OBSTACLE;
+    y += 25 * sc;
+    if (Eng_UiToolButton((Rectangle){ X, y, W, 22 * sc }, "Prop", s->placeTool == ED_PLACE_PROP))
+        s->placeTool = ED_PLACE_PROP;
+    y += 25 * sc;
+    if (Eng_UiToolButton((Rectangle){ X, y, W, 22 * sc }, "Sector (20x20)", s->placeTool == ED_PLACE_SECTOR))
+        s->placeTool = ED_PLACE_SECTOR;
+    y += 25 * sc;
+
+    // ---- Buyables ----------------------------------------------------------
+    GuiLabel((Rectangle){ X, y, W, 12 * sc }, "Buyables"); y += 14 * sc;
+    if (Eng_UiToolButton((Rectangle){ X, y, W, 22 * sc }, "Wallbuy", s->placeTool == ED_PLACE_WALLBUY))
+        s->placeTool = ED_PLACE_WALLBUY;
+    y += 25 * sc;
+    if (Eng_UiToolButton((Rectangle){ X, y, W, 22 * sc }, "Perk machine", s->placeTool == ED_PLACE_PERK))
+        s->placeTool = ED_PLACE_PERK;
+    y += 25 * sc;
 }
 
 // ---- Hierarchy — Feature 2: filter input -----------------------------------

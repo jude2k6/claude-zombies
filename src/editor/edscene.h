@@ -34,8 +34,23 @@ typedef enum { ED_VIEW_FLY = 0, ED_VIEW_ORBIT, ED_VIEW_TOP } EdViewMode;
 // Placement tool: what a ground-click drops. NONE = click selects instead.
 // ED_PLACE_MOB drops a SPAWN whose mob tag is `placeMobId` — the data-driven
 // path fed by the data/mobs/ catalog scan (replaces a hardcoded ZOMBIE tool).
-typedef enum { ED_PLACE_NONE = 0, ED_PLACE_PLAYER, ED_PLACE_MOB,
-               ED_PLACE_BARRICADE, ED_PLACE_COUNT } EdPlaceTool;
+// ED_PLACE_WALL is two-click: first click sets wallStart, second click places.
+typedef enum {
+    ED_PLACE_NONE      = 0,
+    // Spawns
+    ED_PLACE_PLAYER,
+    ED_PLACE_MOB,
+    // Geometry
+    ED_PLACE_BARRICADE,
+    ED_PLACE_WALL,
+    ED_PLACE_OBSTACLE,
+    ED_PLACE_PROP,
+    ED_PLACE_SECTOR,
+    // Buyables
+    ED_PLACE_WALLBUY,
+    ED_PLACE_PERK,
+    ED_PLACE_COUNT
+} EdPlaceTool;
 
 // A mob the editor can place, scanned from data/mobs/*/*.mob via the engine's
 // shared deffile reader. The editor only needs the placeable identity (id +
@@ -76,6 +91,11 @@ typedef struct EdScene {
     EngGizmoMode  mode;             // current gizmo mode
     EdPlaceTool   placeTool;        // active placement tool (NONE = select mode)
     char          placeMobId[ED_MOBID_LEN];  // ED_PLACE_MOB: which mob tag to drop
+
+    // ED_PLACE_WALL two-click state: first click stores wallPending = true and
+    // wallStart{x,z}; second click completes the wall segment.
+    bool          wallPending;      // true = first click done, awaiting second
+    float         wallStartX, wallStartZ;  // world position of first wall click
 
     // ---- mob catalog (scanned from data/mobs/) -----------------------------
     EdMobDef      mobDefs[ED_MAX_MOBDEFS];

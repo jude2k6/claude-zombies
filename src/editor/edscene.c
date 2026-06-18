@@ -385,6 +385,105 @@ static void PlaceAt(EdScene *s, Vector3 p) {
             EdScene_Commit(s);
             break;
         }
+        case ED_PLACE_WALL: {
+            // Two-click flow: first click stores start; second click places.
+            if (!s->wallPending) {
+                s->wallPending  = true;
+                s->wallStartX   = p.x;
+                s->wallStartZ   = p.z;
+                // Nothing committed yet — show pending visually via wallPending flag.
+            } else {
+                int wid = EngMapEnt_Add(&s->doc, ENGMAPENT_WALL);
+                if (wid < 0) { s->wallPending = false; return; }
+                // Set wall endpoints directly via the typed pointer.
+                EngMapEntHandle h = EngMapEnt_Find(&s->doc, wid);
+                MapDocWall *w = (MapDocWall *)EngMapEnt_Ptr(&s->doc, h, NULL);
+                if (w) {
+                    w->x1 = s->wallStartX; w->z1 = s->wallStartZ;
+                    w->x2 = p.x;           w->z2 = p.z;
+                }
+                // Assign to the sector under the midpoint.
+                float midX = (s->wallStartX + p.x) * 0.5f;
+                float midZ = (s->wallStartZ + p.z) * 0.5f;
+                Eng_SetSector(&s->doc, wid, SectorAt(s, midX, midZ));
+                s->selectedId  = wid;
+                s->wallPending = false;
+                EdScene_Commit(s);
+            }
+            break;
+        }
+        case ED_PLACE_OBSTACLE: {
+            int oid = EngMapEnt_Add(&s->doc, ENGMAPENT_OBSTACLE);
+            if (oid < 0) return;
+            Eng_SetPos(&s->doc, oid, p.x, p.z);
+            Eng_SetObstacleSize(&s->doc, oid, 4.0f, 4.0f, 3.0f);
+            Eng_SetSector(&s->doc, oid, SectorAt(s, p.x, p.z));
+            s->selectedId = oid;
+            EdScene_Commit(s);
+            break;
+        }
+        case ED_PLACE_PROP: {
+            int pid = EngMapEnt_Add(&s->doc, ENGMAPENT_PROP);
+            if (pid < 0) return;
+            Eng_SetPos(&s->doc, pid, p.x, p.z);
+            Eng_SetYaw(&s->doc, pid, 0.0f);
+            Eng_SetScale(&s->doc, pid, 1.0f);
+            // Set a placeholder prop name directly on the typed pointer.
+            {
+                EngMapEntHandle h = EngMapEnt_Find(&s->doc, pid);
+                MapDocProp *prop = (MapDocProp *)EngMapEnt_Ptr(&s->doc, h, NULL);
+                if (prop) snprintf(prop->name, sizeof prop->name, "barrel");
+            }
+            Eng_SetSector(&s->doc, pid, SectorAt(s, p.x, p.z));
+            s->selectedId = pid;
+            EdScene_Commit(s);
+            break;
+        }
+        case ED_PLACE_SECTOR: {
+            int sid = EngMapEnt_Add(&s->doc, ENGMAPENT_SECTOR);
+            if (sid < 0) return;
+            Eng_SetPos(&s->doc, sid, p.x, p.z);
+            Eng_SetSectorSize(&s->doc, sid, 20.0f, 20.0f);
+            Eng_SetSectorHeights(&s->doc, sid, 0.0f, 0.0f);
+            // Sectors are not owned by another sector; no Eng_SetSector call needed.
+            s->selectedId = sid;
+            EdScene_Commit(s);
+            break;
+        }
+        case ED_PLACE_WALLBUY: {
+            int wid = EngMapEnt_Add(&s->doc, ENGMAPENT_WALLBUY);
+            if (wid < 0) return;
+            Eng_SetPos(&s->doc, wid, p.x, p.z);
+            // Set default weapon string directly on the typed pointer.
+            {
+                EngMapEntHandle h = EngMapEnt_Find(&s->doc, wid);
+                MapDocWallbuy *wb = (MapDocWallbuy *)EngMapEnt_Ptr(&s->doc, h, NULL);
+                if (wb) {
+                    snprintf(wb->weapon, sizeof wb->weapon, "PISTOL");
+                    // Default facing: point away from the origin (toward nearest wall).
+                    snprintf(wb->dir, sizeof wb->dir, "%s", FacingToward(p));
+                }
+            }
+            Eng_SetSector(&s->doc, wid, SectorAt(s, p.x, p.z));
+            s->selectedId = wid;
+            EdScene_Commit(s);
+            break;
+        }
+        case ED_PLACE_PERK: {
+            int kid = EngMapEnt_Add(&s->doc, ENGMAPENT_PERK);
+            if (kid < 0) return;
+            Eng_SetPos(&s->doc, kid, p.x, p.z);
+            // Set default perk string directly on the typed pointer.
+            {
+                EngMapEntHandle h = EngMapEnt_Find(&s->doc, kid);
+                MapDocPerk *pk = (MapDocPerk *)EngMapEnt_Ptr(&s->doc, h, NULL);
+                if (pk) snprintf(pk->perk, sizeof pk->perk, "JUG");
+            }
+            Eng_SetSector(&s->doc, kid, SectorAt(s, p.x, p.z));
+            s->selectedId = kid;
+            EdScene_Commit(s);
+            break;
+        }
         default: break;
     }
 }
@@ -580,6 +679,7 @@ void EdScene_Init(EdScene *s) {
     s->selectedId = -1;
     s->mode = ENG_GIZMO_TRANSLATE;
     s->placeTool = ED_PLACE_NONE;
+    s->wallPending = false;
     EdScene_ScanMobs(s);
     s->dirty = false;
 }
@@ -652,7 +752,11 @@ void EdScene_UpdateViewport(EdScene *s, Rectangle vp, bool inputAllowed) {
         if (IsKeyPressed(KEY_TWO))   s->mode = ENG_GIZMO_ROTATE;
         if (IsKeyPressed(KEY_THREE)) s->mode = ENG_GIZMO_SCALE;
 
-        if (IsKeyPressed(KEY_P)) s->placeTool = (s->placeTool + 1) % ED_PLACE_COUNT;
+        if (IsKeyPressed(KEY_P)) {
+            // Cancel any pending two-click wall when cycling away from WALL.
+            s->wallPending = false;
+            s->placeTool = (s->placeTool + 1) % ED_PLACE_COUNT;
+        }
         if (IsKeyPressed(KEY_O)) s->barricadeAutoSpawn = !s->barricadeAutoSpawn;
         if (IsKeyPressed(KEY_R)) EdScene_CycleSelected(s);
         if (IsKeyPressed(KEY_X)) EdScene_DeleteSelected(s);
@@ -673,6 +777,9 @@ void EdScene_UpdateViewport(EdScene *s, Rectangle vp, bool inputAllowed) {
         // Lost focus mid-mouselook: show cursor again so the OS pointer is visible.
         s->looking = false; ShowCursor();
     }
+
+    // Cancel a pending wall first-click whenever the tool is switched away.
+    if (s->wallPending && s->placeTool != ED_PLACE_WALL) s->wallPending = false;
 
     bool camBusy = s->looking || IsMouseButtonDown(MOUSE_BUTTON_RIGHT) ||
                    IsMouseButtonDown(MOUSE_BUTTON_MIDDLE);
@@ -731,6 +838,12 @@ void EdScene_DrawViewport(EdScene *s, Rectangle vp) {
             if (ep) Eng_DebugBox(ep->box, RED);
         }
     }
+
+    // Two-click wall placement: draw a sphere at the pending start point while
+    // the user is choosing the second endpoint.
+    if (s->wallPending)
+        Eng_DebugSphere((Vector3){ s->wallStartX, 0.0f, s->wallStartZ },
+                        ED_MARKER, (Color){ 255, 220, 60, 255 });
 
     Eng_DebugDraw3D(s->cam);
     Eng_GfxEndMode3D();

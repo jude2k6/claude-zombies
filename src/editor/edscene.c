@@ -443,11 +443,15 @@ static void PlaceAt(EdScene *s, Vector3 p) {
             Eng_SetPos(&s->doc, pid, p.x, p.z);
             Eng_SetYaw(&s->doc, pid, 0.0f);
             Eng_SetScale(&s->doc, pid, 1.0f);
-            // Set a placeholder prop name directly on the typed pointer.
+            // Stamp the active prop id (from the catalog) directly on the typed
+            // pointer; falls back to the first known prop if none is armed.
             {
                 EngMapEntHandle h = EngMapEnt_Find(&s->doc, pid);
                 MapDocProp *prop = (MapDocProp *)EngMapEnt_Ptr(&s->doc, h, NULL);
-                if (prop) snprintf(prop->name, sizeof prop->name, "barrel");
+                if (prop) {
+                    const char *id = s->placePropId[0] ? s->placePropId : "obstacle_barrel";
+                    snprintf(prop->name, sizeof prop->name, "%s", id);
+                }
             }
             Eng_SetSector(&s->doc, pid, SectorAt(s, p.x, p.z));
             s->selectedId = pid;
@@ -675,6 +679,65 @@ void EdScene_ScanMobs(EdScene *s) {
     snprintf(s->placeMobId, sizeof s->placeMobId, "%s", s->mobDefs[0].id);
 }
 
+// ---- prop catalog ----------------------------------------------------------
+// Mirrors EdScene_ScanMobs over props/*/*.prop. We only read the placeable
+// identity (id + display name); the game owns model/collision (the seam).
+typedef struct { EdPropDef def; bool sawId; } EdPropParse;
+
+static void EdPropLineCb(int lineNo, int n, char **toks, void *user) {
+    (void)lineNo;
+    EdPropParse *pp = (EdPropParse *)user;
+    const char *k = toks[0];
+    if (strcmp(k, "id") == 0 && n >= 2) {
+        snprintf(pp->def.id, sizeof pp->def.id, "%s", toks[1]);
+        pp->sawId = true;
+    } else if (strcmp(k, "name") == 0 && n >= 2) {
+        // Join the remaining tokens so multi-word labels ("Sandbag stack") survive.
+        size_t cap = sizeof pp->def.name, off = 0;
+        for (int t = 1; t < n && off < cap - 1; t++) {
+            int w = snprintf(pp->def.name + off, cap - off, "%s%s", t > 1 ? " " : "", toks[t]);
+            if (w < 0) break;
+            off += (size_t)w;
+        }
+    }
+    // model / collide_half / foot_y are game-only — the editor never reads them.
+}
+
+void EdScene_ScanProps(EdScene *s) {
+    s->propDefCount = 0;
+
+    char dirs[4][512];
+    int nDirs = Eng_ContentDirs("props", dirs, 4);
+
+    char seen[ED_MAX_PROPDEFS][ED_PROPID_LEN];
+    int  nSeen = 0;
+
+    for (int d = 0; d < nDirs && s->propDefCount < ED_MAX_PROPDEFS; d++) {
+        if (!DirectoryExists(dirs[d])) continue;
+        FilePathList files = LoadDirectoryFilesEx(dirs[d], ".prop", true);
+        for (unsigned i = 0; i < files.count && s->propDefCount < ED_MAX_PROPDEFS; i++) {
+            char *text = LoadFileText(files.paths[i]);
+            if (!text) continue;
+            EdPropParse pp = { .def = { .name = "" }, .sawId = false };
+            Eng_DefForEachLine(text, EdPropLineCb, &pp);
+            UnloadFileText(text);
+            if (!pp.sawId) continue;
+            bool dup = false;
+            for (int k = 0; k < nSeen; k++)
+                if (strcmp(seen[k], pp.def.id) == 0) { dup = true; break; }
+            if (dup) continue;   // game prop shadows a same-id library prop
+            if (!pp.def.name[0]) snprintf(pp.def.name, sizeof pp.def.name, "%s", pp.def.id);
+            s->propDefs[s->propDefCount++] = pp.def;
+            if (nSeen < ED_MAX_PROPDEFS) snprintf(seen[nSeen++], ED_PROPID_LEN, "%s", pp.def.id);
+        }
+        UnloadDirectoryFiles(files);
+    }
+
+    // Default the active prop tool to the first scanned prop (if any).
+    if (s->propDefCount > 0)
+        snprintf(s->placePropId, sizeof s->placePropId, "%s", s->propDefs[0].id);
+}
+
 // ---- lifecycle -------------------------------------------------------------
 
 void EdScene_Init(EdScene *s) {
@@ -696,6 +759,7 @@ void EdScene_Init(EdScene *s) {
     s->placeTool = ED_PLACE_NONE;
     s->wallPending = false;
     EdScene_ScanMobs(s);
+    EdScene_ScanProps(s);
     s->dirty = false;
 }
 

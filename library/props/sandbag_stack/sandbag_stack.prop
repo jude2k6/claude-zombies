@@ -1,0 +1,14 @@
+# Sandbag stack — a placeable cover prop. See obstacle_barrel.prop for the format.
+
+id              sandbag_stack
+name            Sandbag stack
+category        prop
+
+# ---- render ----
+model           sandbag_stack.obj
+model_scale     1.0
+tint            120 125 80 255
+
+# ---- collision ----
+collide_half    0.75 0.40 0.30
+foot_y          0.40

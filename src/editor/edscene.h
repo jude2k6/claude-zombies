@@ -64,6 +64,16 @@ typedef struct {
     Color tint;               // marker colour
 } EdMobDef;
 
+// A prop the editor can place, scanned from props/*/*.prop the same way mobs
+// are. The editor only needs the placeable identity (id written to the map's
+// PROP <id> + a label); collision/model fields are game-only (same seam).
+#define ED_MAX_PROPDEFS 32
+#define ED_PROPID_LEN   32
+typedef struct {
+    char  id[ED_PROPID_LEN];  // PROP <id> written on placement (MapDocProp.name)
+    char  name[48];           // palette label
+} EdPropDef;
+
 // A draw/pick proxy: one selectable box per MapDoc entity, tagged by stable id.
 typedef struct {
     int           id;
@@ -90,7 +100,8 @@ typedef struct EdScene {
     int           selectedId;       // -1 = nothing selected
     EngGizmoMode  mode;             // current gizmo mode
     EdPlaceTool   placeTool;        // active placement tool (NONE = select mode)
-    char          placeMobId[ED_MOBID_LEN];  // ED_PLACE_MOB: which mob tag to drop
+    char          placeMobId[ED_MOBID_LEN];   // ED_PLACE_MOB: which mob tag to drop
+    char          placePropId[ED_PROPID_LEN]; // ED_PLACE_PROP: which prop id to drop
 
     // ED_PLACE_WALL two-click state: first click stores wallPending = true and
     // wallStart{x,z}; second click completes the wall segment.
@@ -100,6 +111,8 @@ typedef struct EdScene {
     // ---- mob catalog (scanned from data/mobs/) -----------------------------
     EdMobDef      mobDefs[ED_MAX_MOBDEFS];
     int           mobDefCount;
+    EdPropDef     propDefs[ED_MAX_PROPDEFS];   // scanned from props/*/*.prop
+    int           propDefCount;
 
     bool          dragging;
     EngGizmoDrag  drag;
@@ -156,6 +169,11 @@ void EdScene_Shutdown(EdScene *s);   // frees history + viewport texture
 // to a single built-in "ZOMBIE" entry when no catalog is found, so the place
 // palette always has at least one mob tool.
 void EdScene_ScanMobs(EdScene *s);
+
+// Scan props/*/*.prop into s->propDefs (called by EdScene_Init). When no catalog
+// is found the prop palette is simply empty — props are pure content, so there
+// is no built-in fallback (unlike mobs, which always offer ZOMBIE).
+void EdScene_ScanProps(EdScene *s);
 
 // Rebuild the proxy list from the document (cheap; called each frame).
 void EdScene_RebuildProxies(EdScene *s);

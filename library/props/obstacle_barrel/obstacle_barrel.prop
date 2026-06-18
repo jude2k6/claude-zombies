@@ -1,0 +1,16 @@
+# Barrel — a placeable obstacle prop. `id` is what a map's `PROP <id> x z`
+# stores (MapDocProp.name), shared by the editor palette and the game loader.
+
+id              obstacle_barrel
+name            Barrel
+category        prop
+
+# ---- render ----
+model           obstacle_barrel.obj
+model_scale     1.0
+tint            150 130 90 255
+
+# ---- collision: half-extents (x y z) + foot offset (model origin -> collider
+#      centre Y). The game reads these; the editor ignores them.
+collide_half    0.35 0.55 0.35
+foot_y          0.55

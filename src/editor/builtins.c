@@ -713,13 +713,28 @@ static void PanelTools(EdHost *h, Rectangle c, void *u) {
         s->placeTool = ED_PLACE_OBSTACLE;
     y += gap;
     if (ToolRowVisible(c, y, rowH) &&
-        Eng_UiToolButton((Rectangle){ X, y, W, rowH }, "Prop", s->placeTool == ED_PLACE_PROP))
-        s->placeTool = ED_PLACE_PROP;
-    y += gap;
-    if (ToolRowVisible(c, y, rowH) &&
         Eng_UiToolButton((Rectangle){ X, y, W, rowH }, "Sector (20x20)", s->placeTool == ED_PLACE_SECTOR))
         s->placeTool = ED_PLACE_SECTOR;
     y += gap;
+
+    // ---- Props (data-driven from props/*.prop, like Spawns) ----------------
+    if (ToolRowVisible(c, y, 12 * sc)) GuiLabel((Rectangle){ X, y, W, 12 * sc }, "Props");
+    y += 14 * sc;
+    if (s->propDefCount == 0) {
+        if (ToolRowVisible(c, y, rowH))
+            GuiLabel((Rectangle){ X, y, W, rowH }, "  (no props/ catalog)");
+        y += gap;
+    }
+    for (int i = 0; i < s->propDefCount; i++) {
+        const EdPropDef *pd = &s->propDefs[i];
+        bool active = (s->placeTool == ED_PLACE_PROP && strcmp(s->placePropId, pd->id) == 0);
+        if (ToolRowVisible(c, y, rowH) &&
+            Eng_UiToolButton((Rectangle){ X, y, W, rowH }, pd->name, active)) {
+            s->placeTool = ED_PLACE_PROP;
+            snprintf(s->placePropId, sizeof s->placePropId, "%s", pd->id);
+        }
+        y += gap;
+    }
 
     // ---- Buyables ----------------------------------------------------------
     if (ToolRowVisible(c, y, 12 * sc)) GuiLabel((Rectangle){ X, y, W, 12 * sc }, "Buyables");

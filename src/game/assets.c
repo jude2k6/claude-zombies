@@ -1,4 +1,5 @@
 #include "assets.h"
+#include "props.h"   // placeable-prop catalog (loaded alongside the prop models)
 #include "content.h" // engine content registry: Eng_LoadModel/Texture/Shader
 #include "eng_render.h"  // engine render module: world/skinned/postfx shader ownership
 #include "gfx.h"     // Eng_GfxDefaultShaderId — low-level GL stays engine-side
@@ -141,6 +142,10 @@ void Assets_Load(void) {
         }
     }
 
+    // Placeable-prop catalog (props/*.prop) — loaded after the prop models so
+    // its own models exist before the world shader is applied below.
+    Props_Load();
+
     Assets_ApplyWorldShader();
 }
 
@@ -162,6 +167,7 @@ void Assets_ApplyWorldShader(void) {
             propModels[i].materials[m].shader = ws;
         }
     }
+    Props_ApplyWorldShader(ws);   // catalog (props/*.prop) models too
 }
 
 void Assets_Unload(void) {
@@ -173,6 +179,7 @@ void Assets_Unload(void) {
     for (int i = 0; i < PROP_COUNT; i++) {
         propModelLoaded[i] = false;
     }
+    Props_Unload();   // clear the placeable-prop catalog (GL freed by the flush below)
     for (int i = 0; i < TEX_COUNT; i++) {
         textureLoaded[i] = false;
     }

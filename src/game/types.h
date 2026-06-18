@@ -428,10 +428,10 @@ typedef struct {
 } Door;
 
 // Authored props placed via map file (PROP lines).  Distinct from
-// OBSTACLE: props get rendered as models and use a per-prop collider
-// looked up by name in PROP_DEFS[].
+// OBSTACLE: props get rendered as models and use a per-prop collider, both
+// resolved from the props/*.prop catalog (props.h) by name at load time.
 typedef struct {
-    int     propId;     // PropId from assets.h
+    int     propCat;    // index into the prop catalog (Props_At); -1 = unknown
     Vector3 pos;
     float   yawDeg;
     float   scale;

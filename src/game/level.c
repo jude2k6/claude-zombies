@@ -1,6 +1,7 @@
 #include "level.h"
 #include "mapdoc.h"
 #include "assets.h"
+#include "props.h"     // placeable-prop catalog (name → collider, replaces PROP_DEFS)
 #include "decals.h"
 #include "particles.h"
 #include "content.h"   // Eng_ResolveAssetPath — root-stack path probing
@@ -263,29 +264,9 @@ static void ClearLevel(void) {
     fogColor = (Color){ 10, 12, 22, 255 };
 }
 
-// ---- prop registry -----------------------------------------------------
-// Maps PROP names (used in map files) to engine PropId + a hand-tuned
-// collider half-extent.  When a map adds `PROP <name> x z`, the
-// instantiator looks up the name here.
-typedef struct {
-    const char *name;
-    int         propId;
-    Vector3     halfExtent;  // collision half-size (radius equivalent)
-    float       footYOffset; // model origin to centre of collider Y
-} PropDef;
-
-static const PropDef PROP_DEFS[] = {
-    { "sandbag_stack",   PROP_SANDBAG_STACK,   { 0.75f, 0.40f, 0.30f }, 0.40f },
-    { "obstacle_crate",  PROP_OBSTACLE_CRATE,  { 0.50f, 0.50f, 0.50f }, 0.50f },
-    { "obstacle_barrel", PROP_OBSTACLE_BARREL, { 0.35f, 0.55f, 0.35f }, 0.55f },
-};
-static const int PROP_DEF_COUNT = (int)(sizeof PROP_DEFS / sizeof PROP_DEFS[0]);
-
-static const PropDef *PropDefByName(const char *name) {
-    for (int i = 0; i < PROP_DEF_COUNT; i++)
-        if (strcmp(PROP_DEFS[i].name, name) == 0) return &PROP_DEFS[i];
-    return NULL;
-}
+// Prop name → collider + model now live in the props/*.prop catalog (props.h),
+// loaded by Assets_Load and shared with the editor palette. The instantiator
+// below resolves `PROP <name> x z` against it via Props_IndexByName.
 
 // ---- dir string -> Vector3 normal ------------------------------------------
 static Vector3 DirToNormal(const char dir[4]) {
@@ -676,7 +657,8 @@ void Level_InstantiateDoc(const MapDoc *doc) {
             break;
         }
         const MapDocProp *pr = &doc->props[i];
-        const PropDef *def = PropDefByName(pr->name);
+        int catIdx = Props_IndexByName(pr->name);
+        const GamePropDef *def = Props_At(catIdx);
         if (!def) {
             fprintf(stderr, "map: warning: unknown prop '%s' — skipping\n", pr->name);
             continue;
@@ -685,12 +667,12 @@ void Level_InstantiateDoc(const MapDoc *doc) {
         float   sc = pr->scale;
         float   py = DocSectorY(doc, pr->sectorId, pr->x, pr->z);
         mapProps[mapPropCount++] = (MapProp){
-            .propId = def->propId,
+            .propCat = catIdx,
             .pos    = (Vector3){ pr->x, py, pr->z },
             .yawDeg = pr->yawDeg,
             .scale  = sc,
             .collider = (Box){
-                { pr->x, py + def->footYOffset * sc, pr->z },
+                { pr->x, py + def->footY * sc, pr->z },
                 { he.x * 2 * sc, he.y * 2 * sc, he.z * 2 * sc },
             },
         };

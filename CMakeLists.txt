@@ -97,6 +97,7 @@ add_executable(shooter
     src/game/audio_director.c
     src/game/settings.c
     src/game/assets.c
+    src/game/props.c
 )
 target_include_directories(shooter PRIVATE
     ${CMAKE_SOURCE_DIR}/src/game

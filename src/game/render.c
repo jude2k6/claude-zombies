@@ -8,6 +8,7 @@
 #include "entities.h"
 #include "interact.h"
 #include "assets.h"
+#include "props.h"
 #include "mobs.h"
 #include "decals.h"
 #include "particles.h"
@@ -277,11 +278,13 @@ static void DrawArena(void) {
 static void DrawMapProps(void) {
     for (int i = 0; i < mapPropCount; i++) {
         MapProp *mp = &mapProps[i];
-        if (propModelLoaded[mp->propId]) {
-            DrawPropEx(mp->propId, mp->pos, mp->yawDeg,
-                       (Vector3){mp->scale, mp->scale, mp->scale}, WHITE);
+        const GamePropDef *def = Props_At(mp->propCat);
+        if (def && def->loaded) {
+            float s = mp->scale * def->modelScale;
+            Eng_GfxDrawModelEx(def->model, mp->pos, (Vector3){0, 1, 0}, mp->yawDeg,
+                               (Vector3){s, s, s}, WHITE);
         } else {
-            // Show the collider so authors can position even with no OBJ.
+            // Show the collider so authors can position even with no model.
             Eng_GfxDrawCubeV(mp->collider.center, mp->collider.size, (Color){140,110,80,255});
             Eng_GfxDrawCubeWiresV(mp->collider.center, mp->collider.size, BLACK);
         }

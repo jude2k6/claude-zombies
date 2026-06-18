@@ -327,6 +327,16 @@ rendering converge on the same asset path.
 5. **Partly done** — `data/mobs/dog/dog.mob` proves data-only reuse (reuses `chaser`); the
    Tier-2 `.so` no-rebuild path is wired and ready to validate with a sample plugin.
    **Asset browser + picker** is still open.
+6. ~~**Prop catalog (the second def slice, after mobs)**~~ **Done** — `props/<id>/<id>.prop`
+   files (deffile format: `id`, `name`, `model`, `model_scale`, `collide_half`, `foot_y`)
+   are the shared catalog for placeable props, replacing the hardcoded `barrel` placeholder
+   and the game's static `PROP_DEFS[]`. The editor reads id/name (`EdScene_ScanProps` → the
+   PLACE palette's data-driven **Props** section); the game reads model + collision
+   (`src/game/props.{c,h}`, loaded in `Assets_Load`, resolved by `Level_InstantiateDoc` via
+   `Props_IndexByName`, rendered from the catalog model). A new `.prop` + model is placeable
+   AND renderable with no recompile — the first end-to-end proof of the §2 registry beyond
+   mobs. The `PropId` enum/`PROP_FILES[]` now only own the game's *non-placeable* internal
+   models (player, zombie, perk machines, …).
 
 ### Divergences from the design above (worth knowing)
 

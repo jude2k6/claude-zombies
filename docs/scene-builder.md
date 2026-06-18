@@ -25,9 +25,10 @@ loaded `.so` files in `./plugins`) extend it through the identical surface. See 
 > `File ▸ Save` (`MapDoc_Save`), **New Game / Open Game** (game-folder scaffolding +
 > overlay), **data-driven place palettes for every entity kind** (Spawns/Props/
 > Wallbuys/Perks scanned from content catalogs), submenu support, and a dynamic plugin
-> loader, and an **ASSETS browser** (maps/models/textures scanned from the content
-> overlay, with model thumbnails — click a map to open it, click a model to place
-> it as a prop). Not yet: game-accurate textured rendering in the viewport
+> loader, plus an **ASSETS panel** that hosts both those placement tools and an asset
+> browser (maps/models/textures scanned from the content overlay, with model thumbnails —
+> click a map to open it, click a model to place it as a prop); the left column is now just
+> the HIERARCHY. Not yet: game-accurate textured rendering in the viewport
 > (entities still draw as proxy boxes — the shared engine draw helpers exist,
 > §5.7), and copy-on-import of stock library assets into the game folder. See §5.
 
@@ -80,7 +81,7 @@ The editor is **three layers + plugins**, all in `src/editor/`:
 |---|---|
 | `edscene.{c,h}` | **The document + 3D view.** `EdScene` owns the open `MapDoc`, its `EngMapHistory`, the camera (fly/iso/top), selection, the gizmo drag, placement tools, and the persisted settings. Knows nothing about menus or panels. |
 | `edhost.{c,h}`  | **The shell** (the IDE frame). Owns layout (menu bar, dock zones, splitters, status bar), input routing, and the **plugin registration API**. Owns no editing logic — it hosts a viewport rect and calls into the scene. |
-| `builtins.c`    | **First-party plugins** — the default IDE (menus, the Tools/Hierarchy/Inspector/Console panels, the Settings dialog + Validate, the status segments), each written against the same `EdHost_*` API a third-party plugin uses. |
+| `builtins.c`    | **First-party plugins** — the default IDE (menus, the Hierarchy/Inspector/Assets/Console panels, the Settings dialog + Validate, the status segments), each written against the same `EdHost_*` API a third-party plugin uses. The ASSETS panel hosts the placement tools (`DrawPlaceTools`) + asset browser (`edassets`/`edthumb`). |
 | `editor_main.c` | **Wiring.** `main()` loads settings, opens the window, builds the host, registers the built-ins, loads dynamic plugins, runs `Eng_Run`. |
 | `edassets.{c,h}` | **Asset index.** Scans the content overlay (`Eng_ContentDirs`) for maps/models/textures into a de-duped `EdAssetIndex` (held on `EdScene`) for the ASSETS panel. Pure file listing — no parse, no load. |
 | `edthumb.{c,h}` | **Model thumbnails.** Lazily renders a `.glb` to a cached off-screen `RenderTexture`, framed by its bounds; the ASSETS panel shows it per model row. Engine-clean (raylib + `content.h` loaders). |
@@ -245,27 +246,31 @@ through a small **dynamic-menu** hook the shell grew for exactly this — a menu
 an `EdMenuDynFn` provider (`EdHost_SetMenuDynamic`) that emits items each frame the menu is
 open, drawn after the static items with an automatic separator. (Static menu items are
 registered once; recents change at runtime, hence the hook.)
-- **Left zone**: **TOOLS** — a scrollable **placement palette only** (Spawns / Geometry /
-  Props / Wallbuys / Perks), one button per tool. The Spawns, Props, Wallbuys and Perks
-  sections are **data-driven**, scanned from content catalogs (`mobs/*.mob`, `props/*.prop`,
-  `weapons/*.weapon`, `perks/*.perk`) — a new file is a new button, no rebuild (see
-  [editor-content-extensibility.md](editor-content-extensibility.md)). It sits over
-  **HIERARCHY** (a scrollable list of every entity by `#id kind`, with a **search box** that
-  filters rows by id/kind/mob substring; click a row to select — it mirrors the viewport).
-  *(Transient state — UI scale, view camera, gizmo mode, barricade auto-spawn — used to
-  clutter this panel; it now lives where it belongs: keyboard shortcuts, the View/Edit menus,
-  and the Settings dialog.)*
+- **Left zone**: **HIERARCHY** — a scrollable list of every entity by `#id kind`, with a
+  **search box** that filters rows by id/kind/mob substring; click a row to select — it
+  mirrors the viewport. (This is the whole left column now; placement moved to the ASSETS
+  panel — see below.)
 - **Right zone**: **INSPECTOR** — **editable** fields for the selection: position (all
   kinds), spawn mob, window facing, prop yaw/scale, obstacle size, sector size/heights —
   each wired through `mapedit.h` and pushing one undo step per change. When **nothing** is
   selected it shows a **MAP PROPERTIES** view instead (map name + atmosphere fog/sky via
   text fields and colour pickers, writing straight into the `MapDoc`); a *Map properties…*
-  button in the entity view deselects to reach it. Below it, the **ASSETS** browser lists
-  the content overlay's maps / models / textures (scanned at load into `EdScene.assets` by
-  `edassets.{c,h}`, de-duped game-over-library): a filter box, **click a map to open it**
-  (through the same unsaved-changes guard as `File ▸ Open`), **click a model to arm prop
-  placement** with that model's name, and a thumbnail per model rendered off-screen by
-  `edthumb.{c,h}` (textures preview-only for now).
+  button in the entity view deselects to reach it. Below it, the **ASSETS** panel is the
+  editor's single content surface — placement tools on top, the asset browser below:
+  - **Placement tools** (`DrawPlaceTools`): Select / move, then the data-driven **Spawns /
+    Geometry / Props / Wallbuys / Perks** sections (one button per tool, scanned from the
+    content catalogs `mobs/*.mob`, `props/*.prop`, `weapons/*.weapon`, `perks/*.perk` — a
+    new file is a new button, no rebuild; see
+    [editor-content-extensibility.md](editor-content-extensibility.md)). *(Transient state —
+    UI scale, view camera, gizmo mode, barricade auto-spawn — lives in keyboard shortcuts,
+    the View/Edit menus, and the Settings dialog, never here.)*
+  - **Asset browser**: the content overlay's maps / models / textures (scanned at load into
+    `EdScene.assets` by `edassets.{c,h}`, de-duped game-over-library) — **click a map to open
+    it** (through the same unsaved-changes guard as `File ▸ Open`), **click a model to arm
+    prop placement** with that model's name, with a thumbnail per model rendered off-screen
+    by `edthumb.{c,h}` (textures preview-only for now).
+  - The **filter box** at the top is a global asset search: while it has text the placement
+    tools are hidden and the maps/models/textures lists narrow to matches.
 - **Bottom zone**: **CONSOLE** — log output (plugin loads, save/validate results, Help),
   with a **Clear** button and a severity filter (all / warnings+ / errors).
 - **Status bar** (bottom): map name + dirty flag, entity count, view mode + gizmo mode +
@@ -273,9 +278,9 @@ registered once; recents change at runtime, hence the hook.)
   segment. The open map + dirty marker is also the OS window title.
 
 Zones resize by dragging the **splitters** between them and the viewport. Panels stack
-within a zone; a panel may request a fixed height (`prefH`) — TOOLS does, so it keeps its
-slot while HIERARCHY/CONSOLE flex to fill the rest. Every menu/panel action has a hotkey
-equivalent and vice-versa.
+within a zone; a panel may request a fixed height (`prefH`) and otherwise flexes to share
+the leftover space (INSPECTOR/ASSETS split the right zone; HIERARCHY/CONSOLE fill theirs).
+Every menu/panel action has a hotkey equivalent and vice-versa.
 
 **UI scale.** The whole frame's font and layout scale together by one factor, seeded from
 the display: ~1.0 at 720p, ~1.5 at 1080p, up to 3.0 on a 4K monitor. Adjust it live with

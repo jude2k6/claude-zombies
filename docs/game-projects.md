@@ -1,6 +1,10 @@
 # Games as Projects — self-contained game folders + a read-only engine library
 
-> **Status: design, NOT yet implemented.** Captures the architecture Jude wants:
+> **Status: PARTIALLY IMPLEMENTED (2026-06-18).** The overlay foundation is
+> built and committed; the filesystem split and the game-management UI are not.
+> See the [Implementation progress](#implementation-progress-2026-06-18) section
+> appended to §10 for the exact done/remaining breakdown. Original design intent:
+> Captures the architecture Jude wants:
 > the editor (and the runtime) operate on a **game** — a self-contained folder
 > holding that game's *skeleton code*, content, and a manifest — that links the
 > engine. "shooter" (the current zombies game) is one such folder; a "csgo-style"
@@ -292,6 +296,72 @@ Per [[no-backwards-compat]] we can restructure freely.
    wire behaviour/`.so` scans to the game roots.
 6. **Polish:** origin sidecars + "reset to library" / "show changes"; a second
    sample game (the csgo-style template) to prove independence.
+
+### Implementation progress (2026-06-18)
+
+Built and committed in this order; each commit builds wall-clean and the
+headless smoke tests (`--list-mobs`, `--validate`, `--map-roundtrip`) pass.
+
+**✅ Step 1 — Resolver is root-driven** (commit `eeeb43a`).
+`src/engine/content.{c,h}` now owns the overlay:
+- `Eng_SetGameRoot(dir)` / `Eng_SetLibraryRoot(dir)` / `Eng_GetGameRoot()` /
+  `Eng_GetLibraryRoot()` — set/clear the two roots (NULL/"" clears).
+- The internal root stack is **game → library → legacy `data/` dev fallbacks**
+  (`data`, `../data`, `./data`). Both roots default to unset, so with nothing
+  configured only the `data/` fallbacks apply — behaviour is byte-identical to
+  before (pure plumbing).
+- All asset loaders (`Eng_LoadModel`/`Texture`/`Shader`/`AnimModel`) and
+  `Eng_ResolveAssetPath` probe the stack; a full `data/...`/absolute path is
+  still honoured as-is first, so legacy callers keep working.
+- New `int Eng_ContentDirs(relSubdir, dirs[][512], maxDirs)` — the two-pass
+  directory-scan primitive (§3): returns the existing dirs for a content subdir
+  (`"maps"`, `"mobs"`, …), game-root first, for callers to union + de-dup.
+
+**✅ Step 2 — Loaders unified onto the resolver** (commit `a4288be`).
+Deleted every private `data/<x>` prefix list; each loader/scan now routes
+through the resolver:
+- `mobs.c`, `menu.c`, `audio_director.c`: `Eng_ContentDirs` union scans with
+  de-dup (by mob id / map basename; the first = game root shadows library).
+- `mobs.c` ModelResolves, `level.c` default-map, `weapons.c` weapon-dir scan,
+  `mob_ai.c` behaviour-`.so` scan, engine `anim.c` + `audio.c`: route through
+  `Eng_ResolveAssetPath` / `Eng_ContentDirs`.
+
+**🟡 Step 4 — Editor: PARTIAL** (the scan half, committed in `a4288be`).
+- Editor content scans are root-aware: `edscene.c` `EdScene_ScanMobs` union +
+  de-dup, `builtins.c` map-dialog start dirs (new `MapsStartDir` helper),
+  `editor_main.c` default map via the resolver.
+- `edfiledialog`: added `EdFileDialog_SelectFolder` (native folder picker) ready
+  for Open/New Game.
+- **NOT yet done:** File ▸ New Game… / Open Game… actions, `game.project`
+  read/write + scaffolding, recents-as-games, asset-browser import action.
+
+#### Remaining work
+
+- **Step 3 — Split `data/` → `library/` + `games/shooter/`** (NOT started). The
+  filesystem reorg: `git mv` stock content (models, textures, shaders, base
+  mobs/weapons) into `library/`; move the zombies game's maps into
+  `games/shooter/maps/` with a `game.project`; update the CMake post-build copy
+  (currently copies `data/` next to the binary — must copy `library/` + the
+  game). This is the step the resolver was built to enable. **Blocked on nothing
+  now** — Steps 1–2 made every path root-relative, so the move won't break
+  hardcoded `data/...` references.
+- **Step 5 — Runtime `engine <gamedir>`** (NOT started). `src/game/main.c`:
+  set `Eng_SetLibraryRoot("library")` + `Eng_SetGameRoot(<gamedir>)` (default
+  `games/shooter`, optional positional arg override) **before**
+  `Devtools_HandleCLI`/`Eng_Run`; mirror the root wiring in `editor_main.c`
+  startup. Trivial once Step 3 lands.
+- **Step 4 remainder** — the New/Open Game UI described above (the
+  `EdFileDialog_SelectFolder` primitive is already in place to build on).
+- **Step 6 — Polish** — `.import` origin sidecars + reset-to-library/show-changes
+  UI; a second sample game to prove independence.
+
+> Integration note: Steps 1, 2, and the Step-4 scans were built as one wave —
+> Phase 1 by hand (the API contract), Phases 2 + 4-scans by two parallel
+> sub-agents on disjoint file sets (game loaders vs editor), then integrated,
+> de-warned, and committed from the main session. The remaining structural
+> Steps 3 + 5 are deliberately downstream: they depend on the now-complete
+> root-relative conversion and are best done as a single coherent edit
+> (filesystem move + CMake + main wiring) rather than in parallel.
 
 ## 11. Decisions (all settled — 2026-06-18)
 

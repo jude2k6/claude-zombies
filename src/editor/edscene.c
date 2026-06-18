@@ -478,7 +478,8 @@ static void PlaceAt(EdScene *s, Vector3 p) {
                 EngMapEntHandle h = EngMapEnt_Find(&s->doc, wid);
                 MapDocWallbuy *wb = (MapDocWallbuy *)EngMapEnt_Ptr(&s->doc, h, NULL);
                 if (wb) {
-                    snprintf(wb->weapon, sizeof wb->weapon, "PISTOL");
+                    const char *wid = s->placeWeaponId[0] ? s->placeWeaponId : "PISTOL";
+                    snprintf(wb->weapon, sizeof wb->weapon, "%.*s", (int)(sizeof wb->weapon - 1), wid);
                     // Default facing: point away from the origin (toward nearest wall).
                     snprintf(wb->dir, sizeof wb->dir, "%s", FacingToward(p));
                 }
@@ -496,7 +497,10 @@ static void PlaceAt(EdScene *s, Vector3 p) {
             {
                 EngMapEntHandle h = EngMapEnt_Find(&s->doc, kid);
                 MapDocPerk *pk = (MapDocPerk *)EngMapEnt_Ptr(&s->doc, h, NULL);
-                if (pk) snprintf(pk->perk, sizeof pk->perk, "JUG");
+                if (pk) {
+                    const char *kid = s->placePerkId[0] ? s->placePerkId : "JUG";
+                    snprintf(pk->perk, sizeof pk->perk, "%.*s", (int)(sizeof pk->perk - 1), kid);
+                }
             }
             Eng_SetSector(&s->doc, kid, SectorAt(s, p.x, p.z));
             s->selectedId = kid;
@@ -679,9 +683,11 @@ void EdScene_ScanMobs(EdScene *s) {
     snprintf(s->placeMobId, sizeof s->placeMobId, "%s", s->mobDefs[0].id);
 }
 
-// ---- prop catalog ----------------------------------------------------------
-// Mirrors EdScene_ScanMobs over props/*/*.prop. We only read the placeable
-// identity (id + display name); the game owns model/collision (the seam).
+// ---- id+name catalogs (props / perks / wallbuy weapons) --------------------
+// All three are the editor's view of a content catalog: read the placeable
+// identity (id + display name) and ignore the game-only rest (model/collision/
+// effect/stats) — the seam. One generic scanner serves all three; only the
+// subdir + extension differ.
 typedef struct { EdPropDef def; bool sawId; } EdPropParse;
 
 static void EdPropLineCb(int lineNo, int n, char **toks, void *user) {
@@ -700,22 +706,25 @@ static void EdPropLineCb(int lineNo, int n, char **toks, void *user) {
             off += (size_t)w;
         }
     }
-    // model / collide_half / foot_y are game-only — the editor never reads them.
+    // everything else (model / collide_half / cost / stats) is game-only.
 }
 
-void EdScene_ScanProps(EdScene *s) {
-    s->propDefCount = 0;
-
+// Scan <subdir>/*<ext> across the content roots into out[] (id + label), de-dup
+// by id (game shadows library). Returns the count written. `placeId` (if non-
+// NULL) is seeded with the first def's id as the default armed tool.
+static int EdScanIdNameCatalog(const char *subdir, const char *ext,
+                               EdPropDef out[], int max,
+                               char *placeId, int placeCap) {
+    int count = 0;
     char dirs[4][512];
-    int nDirs = Eng_ContentDirs("props", dirs, 4);
-
+    int nDirs = Eng_ContentDirs(subdir, dirs, 4);
     char seen[ED_MAX_PROPDEFS][ED_PROPID_LEN];
     int  nSeen = 0;
 
-    for (int d = 0; d < nDirs && s->propDefCount < ED_MAX_PROPDEFS; d++) {
+    for (int d = 0; d < nDirs && count < max; d++) {
         if (!DirectoryExists(dirs[d])) continue;
-        FilePathList files = LoadDirectoryFilesEx(dirs[d], ".prop", true);
-        for (unsigned i = 0; i < files.count && s->propDefCount < ED_MAX_PROPDEFS; i++) {
+        FilePathList files = LoadDirectoryFilesEx(dirs[d], ext, true);
+        for (unsigned i = 0; i < files.count && count < max; i++) {
             char *text = LoadFileText(files.paths[i]);
             if (!text) continue;
             EdPropParse pp = { .def = { .name = "" }, .sawId = false };
@@ -723,19 +732,30 @@ void EdScene_ScanProps(EdScene *s) {
             UnloadFileText(text);
             if (!pp.sawId) continue;
             bool dup = false;
-            for (int k = 0; k < nSeen; k++)
+            for (int k = 0; k < nSeen && k < ED_MAX_PROPDEFS; k++)
                 if (strcmp(seen[k], pp.def.id) == 0) { dup = true; break; }
-            if (dup) continue;   // game prop shadows a same-id library prop
+            if (dup) continue;
             if (!pp.def.name[0]) snprintf(pp.def.name, sizeof pp.def.name, "%s", pp.def.id);
-            s->propDefs[s->propDefCount++] = pp.def;
+            out[count++] = pp.def;
             if (nSeen < ED_MAX_PROPDEFS) snprintf(seen[nSeen++], ED_PROPID_LEN, "%s", pp.def.id);
         }
         UnloadDirectoryFiles(files);
     }
+    if (placeId && count > 0) snprintf(placeId, placeCap, "%s", out[0].id);
+    return count;
+}
 
-    // Default the active prop tool to the first scanned prop (if any).
-    if (s->propDefCount > 0)
-        snprintf(s->placePropId, sizeof s->placePropId, "%s", s->propDefs[0].id);
+void EdScene_ScanProps(EdScene *s) {
+    s->propDefCount = EdScanIdNameCatalog("props", ".prop", s->propDefs,
+                                          ED_MAX_PROPDEFS, s->placePropId, sizeof s->placePropId);
+}
+void EdScene_ScanPerks(EdScene *s) {
+    s->perkDefCount = EdScanIdNameCatalog("perks", ".perk", s->perkDefs,
+                                          ED_MAX_BUYDEFS, s->placePerkId, sizeof s->placePerkId);
+}
+void EdScene_ScanWeapons(EdScene *s) {
+    s->weaponDefCount = EdScanIdNameCatalog("weapons", ".weapon", s->weaponDefs,
+                                            ED_MAX_BUYDEFS, s->placeWeaponId, sizeof s->placeWeaponId);
 }
 
 // ---- lifecycle -------------------------------------------------------------
@@ -760,6 +780,8 @@ void EdScene_Init(EdScene *s) {
     s->wallPending = false;
     EdScene_ScanMobs(s);
     EdScene_ScanProps(s);
+    EdScene_ScanPerks(s);
+    EdScene_ScanWeapons(s);
     s->dirty = false;
 }
 

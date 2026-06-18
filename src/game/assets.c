@@ -1,5 +1,6 @@
 #include "assets.h"
 #include "props.h"   // placeable-prop catalog (loaded alongside the prop models)
+#include "perks.h"   // perk data catalog (Perks_Load overlays PERKS[])
 #include "content.h" // engine content registry: Eng_LoadModel/Texture/Shader
 #include "eng_render.h"  // engine render module: world/skinned/postfx shader ownership
 #include "gfx.h"     // Eng_GfxDefaultShaderId — low-level GL stays engine-side
@@ -35,11 +36,9 @@ static const char *PROP_FILES[PROP_COUNT] = {
     [PROP_ZOMBIE]          = "zombie.obj",
     [PROP_MYSTERY_BOX]     = "mystery_box.obj",
     [PROP_BOARD]           = "board.obj",
-    [PROP_SANDBAG_STACK]   = "sandbag_stack.obj",
     [PROP_DOOR]            = "door.obj",
     [PROP_DOOR_FRAME]      = "door_frame.obj",
     [PROP_OBSTACLE_CRATE]  = "obstacle_crate.obj",
-    [PROP_OBSTACLE_BARREL] = "obstacle_barrel.obj",
     [PROP_PERK_JUG]        = "perk_juggernog.obj",
     [PROP_PERK_SPEED]      = "perk_speed_cola.obj",
     [PROP_PERK_DTAP]       = "perk_double_tap.obj",
@@ -145,6 +144,8 @@ void Assets_Load(void) {
     // Placeable-prop catalog (props/*.prop) — loaded after the prop models so
     // its own models exist before the world shader is applied below.
     Props_Load();
+    // Perk data catalog (perks/*.perk) — overlays name/cost/tint onto PERKS[].
+    Perks_Load();
 
     Assets_ApplyWorldShader();
 }

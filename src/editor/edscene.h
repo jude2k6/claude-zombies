@@ -64,13 +64,15 @@ typedef struct {
     Color tint;               // marker colour
 } EdMobDef;
 
-// A prop the editor can place, scanned from props/*/*.prop the same way mobs
-// are. The editor only needs the placeable identity (id written to the map's
-// PROP <id> + a label); collision/model fields are game-only (same seam).
+// A placeable definition scanned from a content catalog — the editor's view of
+// a prop (props/*.prop), perk (perks/*.perk), or wallbuy weapon (weapons/
+// *.weapon). Only the placeable identity (id written to the map + a label); the
+// game owns the rest (model/collision/effect/stats) — the seam.
 #define ED_MAX_PROPDEFS 32
+#define ED_MAX_BUYDEFS  16   // perks / wallbuy weapons
 #define ED_PROPID_LEN   32
 typedef struct {
-    char  id[ED_PROPID_LEN];  // PROP <id> written on placement (MapDocProp.name)
+    char  id[ED_PROPID_LEN];  // id written on placement (e.g. MapDocProp.name)
     char  name[48];           // palette label
 } EdPropDef;
 
@@ -100,8 +102,10 @@ typedef struct EdScene {
     int           selectedId;       // -1 = nothing selected
     EngGizmoMode  mode;             // current gizmo mode
     EdPlaceTool   placeTool;        // active placement tool (NONE = select mode)
-    char          placeMobId[ED_MOBID_LEN];   // ED_PLACE_MOB: which mob tag to drop
-    char          placePropId[ED_PROPID_LEN]; // ED_PLACE_PROP: which prop id to drop
+    char          placeMobId[ED_MOBID_LEN];    // ED_PLACE_MOB: which mob tag to drop
+    char          placePropId[ED_PROPID_LEN];  // ED_PLACE_PROP: which prop id to drop
+    char          placePerkId[ED_PROPID_LEN];  // ED_PLACE_PERK: which perk id to drop
+    char          placeWeaponId[ED_PROPID_LEN];// ED_PLACE_WALLBUY: which weapon id
 
     // ED_PLACE_WALL two-click state: first click stores wallPending = true and
     // wallStart{x,z}; second click completes the wall segment.
@@ -113,6 +117,10 @@ typedef struct EdScene {
     int           mobDefCount;
     EdPropDef     propDefs[ED_MAX_PROPDEFS];   // scanned from props/*/*.prop
     int           propDefCount;
+    EdPropDef     perkDefs[ED_MAX_BUYDEFS];    // scanned from perks/*/*.perk
+    int           perkDefCount;
+    EdPropDef     weaponDefs[ED_MAX_BUYDEFS];  // scanned from weapons/*/*.weapon
+    int           weaponDefCount;
 
     bool          dragging;
     EngGizmoDrag  drag;
@@ -170,10 +178,11 @@ void EdScene_Shutdown(EdScene *s);   // frees history + viewport texture
 // palette always has at least one mob tool.
 void EdScene_ScanMobs(EdScene *s);
 
-// Scan props/*/*.prop into s->propDefs (called by EdScene_Init). When no catalog
-// is found the prop palette is simply empty — props are pure content, so there
-// is no built-in fallback (unlike mobs, which always offer ZOMBIE).
-void EdScene_ScanProps(EdScene *s);
+// Scan content catalogs into the matching def lists (all called by EdScene_Init).
+// Props/perks have no built-in fallback — an empty catalog = an empty section.
+void EdScene_ScanProps(EdScene *s);    // props/*.prop   → propDefs
+void EdScene_ScanPerks(EdScene *s);    // perks/*.perk   → perkDefs
+void EdScene_ScanWeapons(EdScene *s);  // weapons/*.weapon → weaponDefs (wallbuys)
 
 // Rebuild the proxy list from the document (cheap; called each frame).
 void EdScene_RebuildProxies(EdScene *s);

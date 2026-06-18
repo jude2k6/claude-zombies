@@ -1,0 +1,9 @@
+# Double Tap — faster fire rate. See juggernog.perk for the format.
+
+id        DTAP
+name      Double Tap
+category  perk
+
+cost      2000
+tint      240 180 40 255
+model     perk_double_tap.obj

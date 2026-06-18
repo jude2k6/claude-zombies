@@ -20,11 +20,9 @@ typedef enum {
     PROP_ZOMBIE = 0,
     PROP_MYSTERY_BOX,
     PROP_BOARD,
-    PROP_SANDBAG_STACK,
     PROP_DOOR,
     PROP_DOOR_FRAME,
-    PROP_OBSTACLE_CRATE,
-    PROP_OBSTACLE_BARREL,
+    PROP_OBSTACLE_CRATE,   // obstacle-box decoration (not a placeable prop)
     PROP_PERK_JUG,
     PROP_PERK_SPEED,
     PROP_PERK_DTAP,

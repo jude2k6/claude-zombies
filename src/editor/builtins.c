@@ -736,17 +736,41 @@ static void PanelTools(EdHost *h, Rectangle c, void *u) {
         y += gap;
     }
 
-    // ---- Buyables ----------------------------------------------------------
-    if (ToolRowVisible(c, y, 12 * sc)) GuiLabel((Rectangle){ X, y, W, 12 * sc }, "Buyables");
+    // ---- Wallbuys (data-driven from the weapons/*.weapon catalog) ----------
+    if (ToolRowVisible(c, y, 12 * sc)) GuiLabel((Rectangle){ X, y, W, 12 * sc }, "Wallbuys");
     y += 14 * sc;
-    if (ToolRowVisible(c, y, rowH) &&
-        Eng_UiToolButton((Rectangle){ X, y, W, rowH }, "Wallbuy", s->placeTool == ED_PLACE_WALLBUY))
-        s->placeTool = ED_PLACE_WALLBUY;
-    y += gap;
-    if (ToolRowVisible(c, y, rowH) &&
-        Eng_UiToolButton((Rectangle){ X, y, W, rowH }, "Perk machine", s->placeTool == ED_PLACE_PERK))
-        s->placeTool = ED_PLACE_PERK;
-    y += gap;
+    if (s->weaponDefCount == 0) {
+        if (ToolRowVisible(c, y, rowH)) GuiLabel((Rectangle){ X, y, W, rowH }, "  (no weapons/ catalog)");
+        y += gap;
+    }
+    for (int i = 0; i < s->weaponDefCount; i++) {
+        const EdPropDef *wd = &s->weaponDefs[i];
+        bool active = (s->placeTool == ED_PLACE_WALLBUY && strcmp(s->placeWeaponId, wd->id) == 0);
+        if (ToolRowVisible(c, y, rowH) &&
+            Eng_UiToolButton((Rectangle){ X, y, W, rowH }, wd->name, active)) {
+            s->placeTool = ED_PLACE_WALLBUY;
+            snprintf(s->placeWeaponId, sizeof s->placeWeaponId, "%s", wd->id);
+        }
+        y += gap;
+    }
+
+    // ---- Perks (data-driven from the perks/*.perk catalog) -----------------
+    if (ToolRowVisible(c, y, 12 * sc)) GuiLabel((Rectangle){ X, y, W, 12 * sc }, "Perks");
+    y += 14 * sc;
+    if (s->perkDefCount == 0) {
+        if (ToolRowVisible(c, y, rowH)) GuiLabel((Rectangle){ X, y, W, rowH }, "  (no perks/ catalog)");
+        y += gap;
+    }
+    for (int i = 0; i < s->perkDefCount; i++) {
+        const EdPropDef *kd = &s->perkDefs[i];
+        bool active = (s->placeTool == ED_PLACE_PERK && strcmp(s->placePerkId, kd->id) == 0);
+        if (ToolRowVisible(c, y, rowH) &&
+            Eng_UiToolButton((Rectangle){ X, y, W, rowH }, kd->name, active)) {
+            s->placeTool = ED_PLACE_PERK;
+            snprintf(s->placePerkId, sizeof s->placePerkId, "%s", kd->id);
+        }
+        y += gap;
+    }
 
     EndScissorMode();
     prevTotal = (y + g_toolsScroll) - c.y;   // total content height for next frame's clamp

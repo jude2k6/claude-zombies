@@ -224,7 +224,7 @@ typedef struct {
 enum { PERK_JUG = 0, PERK_SPEED, PERK_DTAP, PERK_STAMIN, PERK_COUNT };
 
 typedef struct {
-    const char *name;
+    char   name[32];   // loaded from perks/*.perk (Perks_Load); default below
     int    cost;
     Color  tint;
 } PerkDef;

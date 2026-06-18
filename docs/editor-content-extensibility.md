@@ -335,8 +335,20 @@ rendering converge on the same asset path.
    (`src/game/props.{c,h}`, loaded in `Assets_Load`, resolved by `Level_InstantiateDoc` via
    `Props_IndexByName`, rendered from the catalog model). A new `.prop` + model is placeable
    AND renderable with no recompile — the first end-to-end proof of the §2 registry beyond
-   mobs. The `PropId` enum/`PROP_FILES[]` now only own the game's *non-placeable* internal
-   models (player, zombie, perk machines, …).
+   mobs. `PROP_SANDBAG_STACK`/`PROP_OBSTACLE_BARREL` were pruned from the `PropId`
+   enum/`PROP_FILES[]`, which now only own the game's *non-placeable* internal models
+   (player, zombie, perk machines, the obstacle-decoration crate, …).
+7. ~~**Perks + wallbuys as catalogs**~~ **Done** — the palette's single hardcoded "Perk
+   machine" / "Wallbuy" buttons became data-driven **Perks** / **Wallbuys** sections, one
+   button per definition. Wallbuys reuse the existing `weapons/*.weapon` catalog directly
+   (the game was already weapon-tag-driven — editor-only change); perks get new
+   `perks/<id>/<id>.perk` files (`id`, `name`, `cost`, `tint`, `model`). The editor scans
+   both via one generic `EdScanIdNameCatalog` (props/perks/weapons all share the `id`+`name`
+   deffile shape); placement stamps the chosen `MapDocPerk.perk` / `MapDocWallbuy.weapon`
+   tag. Game side: `Perks_Load` (in `Assets_Load`) overlays `name`/`cost`/`tint` onto
+   `PERKS[]` from the catalog, with the static initialiser as fallback — so perk *data* is
+   now file-driven (and price-tunable) while each perk's *effect* stays code, keyed by
+   `PerkId` (the §4 primitives-vs-policy split, same as mob behaviours).
 
 ### Divergences from the design above (worth knowing)
 

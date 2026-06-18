@@ -1,0 +1,9 @@
+# Speed Cola — faster reloads. See juggernog.perk for the format.
+
+id        SPEED
+name      Speed Cola
+category  perk
+
+cost      3000
+tint      40 180 80 255
+model     perk_speed_cola.obj

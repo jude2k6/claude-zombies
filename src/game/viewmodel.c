@@ -67,9 +67,9 @@ void Viewmodel_LoadCombinedRigs(void) {
         if (!id) continue;
         char relpath[128];
         snprintf(relpath, sizeof relpath, "weapons/%s/%s_vm.glb", id, id);
-        // Anim_Load searches data/models/ and data/ prefixes; weapons/ lives
-        // under data/ so passing "weapons/<id>/<id>_vm.glb" hits the
-        // "data/" prefix automatically.
+        // Anim_Load probes "models/<file>" then the raw root-relative path, so a
+        // category-prefixed "weapons/<id>/<id>_vm.glb" resolves under a content
+        // root (game over library). Missing rig -> skip (the arms+bolt fallback).
         if (!Anim_Load(&crigVM[wi], relpath)) continue;
         if (Eng_RenderWorldSkinnedShaderLoaded())
             Anim_ApplyShader(&crigVM[wi], Eng_RenderWorldSkinnedShader());

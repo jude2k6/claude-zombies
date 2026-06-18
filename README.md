@@ -166,13 +166,21 @@ src/game/             rules + content; links libengine.a
   render viewmodel hud menu assets audio_director      presentation
   protocol            snapshot (de)serialization (the wire schema)
   settings devtools   bindings persistence + dev/debug CLI modes
-data/maps/*.map       map definitions (compact text grammar)
-data/models/          props + rigged glTF models (+ ASSETS.md spec)
-data/weapons/<name>/  per-weapon .weapon defs + models (single source of
-                      truth — stats, sfx, haptics, box odds, viewmodel grip
-                      are all file keys; no stats are compiled in)
-data/shaders/         world (lit + fog), world_skinned (GPU skinning), sky, postfx
+library/              read-only stock content the engine ships with (overlay base)
+  models/             props + rigged glTF models (+ ASSETS.md spec)
+  textures/  shaders/ surfaces + world (lit+fog) / world_skinned / sky / postfx
+  weapons/<name>/     per-weapon .weapon defs + models (single source of truth —
+                      stats, sfx, haptics, box odds, viewmodel grip are file keys)
+  mobs/<id>/          data-driven .mob catalog (zombie, dog)
+  templates/          New-Game skeleton templates (empty / fps)
+games/shooter/        the bundled game: game.project manifest + its own maps/
+  game.project        deffile manifest (id, name, default_map)
+  maps/*.map          map definitions (compact text grammar)
 ```
+
+Content resolves **game-over-library**: a lookup tries `games/<game>/` first,
+then `library/`, so a game overrides stock by importing (copying) an asset into
+its own folder. See `docs/game-projects.md`.
 
 A deeper map for contributors lives in `HANDOFF.md` (architecture table,
 conventions, gotchas) and `TODO.md` (live punch list). To build *on* the engine
@@ -182,7 +190,7 @@ documented in `docs/scene-builder.md`.
 
 ## Maps
 
-Maps live in `data/maps/*.map` (`default`, `nacht`, `factory`, `multifloor`).
+Maps live in `games/shooter/maps/*.map` (`default`, `nacht`, `factory`, `multifloor`).
 The format is a compact text grammar — one entry per line, `#` comments. A map
 is a set of **sectors** (flat floor areas at a height) joined by **ramps**;
 every placed entity lives inside a sector and takes its floor height from it,
@@ -210,20 +218,20 @@ END
 Validate a map without launching the game (line-numbered errors, exit 0/1):
 
 ```bash
-./build/shooter --validate data/maps/nacht.map
+./build/shooter --validate games/shooter/maps/nacht.map
 ```
 
-The build copies `data/` next to the executable, so the game finds it when
-launched from `build/`. Failing that it falls back to a hardcoded default
-layout so the binary always runs.
+The build copies `library/` + `games/` next to the executable, so the game
+finds them when launched from `build/`. Failing that it falls back to a
+hardcoded default layout so the binary always runs.
 
 ### Assets
 
 3D models and animations have their own specs:
 
-- `data/models/ASSETS.md` — static low-poly mesh conventions (scale, axes,
+- `library/models/ASSETS.md` — static low-poly mesh conventions (scale, axes,
   palette, tri budget).
-- `data/ANIMATIONS.md` — the rigging-first mandate and per-weapon/entity
+- `library/ANIMATIONS.md` — the rigging-first mandate and per-weapon/entity
   animation clip lists for the glTF skeletal-animation pipeline.
 
 Other dev CLI modes: `--screenshot-viewmodels` (renders each weapon's

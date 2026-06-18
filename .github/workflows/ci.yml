@@ -31,7 +31,7 @@ jobs:
       - name: Validate every shipped map
         run: |
           status=0
-          for m in data/maps/*.map; do
+          for m in games/shooter/maps/*.map; do
             echo "== validating $m =="
             ./build/shooter --validate "$m" || status=1
           done
@@ -41,7 +41,7 @@ jobs:
           # xvfb not needed: --sim-tick opens no window. Proves the sim is
           # renderer-independent (§15 litmus).
           status=0
-          for m in data/maps/*.map; do
+          for m in games/shooter/maps/*.map; do
             ./build/shooter --sim-tick "$m" 600 || status=1
           done
           exit $status

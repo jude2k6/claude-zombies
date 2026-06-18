@@ -27,17 +27,26 @@ Repo: `git@github.com:jude2k6/claude-zombies.git` · branch: `main`.
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
 ./build/shooter
-./build/shooter --validate data/maps/nacht.map  # game-side map check
-./build/editor data/maps/nacht.map              # map editor (GUI)
-./build/editor --check data/maps/nacht.map      # headless parse + validate
+./build/shooter --validate games/shooter/maps/nacht.map  # game-side map check
+./build/editor games/shooter/maps/nacht.map              # map editor (GUI)
+./build/editor --check games/shooter/maps/nacht.map      # headless parse + validate
 ```
 
+Content lives in two overlay roots (see `docs/game-projects.md`): the read-only
+stock **`library/`** (models, textures, shaders, stock mobs/weapons, templates)
+and the bundled game **`games/shooter/`** (its `game.project` + `maps/`). Both
+`main.c` and `editor_main.c` wire the roots at startup via `Eng_LocateRoot`
+("near the exe, with a dev-tree fallback") before anything loads; lookups
+resolve game-over-library.
+
 First Linux build needs X11 dev headers — see `README.md`. The CMake
-target has a `POST_BUILD` step that copies `data/` next to the
+target has a `POST_BUILD` step that copies `library/` + `games/` next to the
 executable. **It only fires when the `shooter` target rebuilds** — if
 you only changed a `.map`, a texture, a shader, or a model with no code
-changes, the copy doesn't run; manually `cp -r data/ build/` or touch a
-source.
+changes, the copy doesn't run; manually `cp -r library/ games/ build/` or touch
+a source. (A stale `build/data/` from before the overlay split can mask game
+content via the resolver's dev fallbacks — `rm -rf build/data` if you see
+`[data/...]` load paths.)
 
 `settings.cfg` lives next to the binary (i.e. inside `build/` when run
 from the build dir). On first run with no file, defaults are written.
@@ -77,26 +86,34 @@ and hosts the `GameModule` vtable. Engine modules (zero game knowledge):
 | `audio_director.{c,h}` | Game-side audio event detection (snapshot-delta diff + timers); fires `Audio_*` calls. The mixer itself is `src/engine/audio.{c,h}` (pure, positional). |
 | `fx.{c,h}`        | Camera shake (no real particle system yet)             |
 
-Data layout under `data/`:
+Content layout — two overlay roots (game-over-library, `docs/game-projects.md`).
+The bundled game (`games/shooter/`) holds only its `game.project` + `maps/`;
+everything else is stock in `library/` and resolves from there unless a game
+imports (copies) it:
 
 ```
-data/
-├── audio/                       # (nothing here yet; ATMOSPHERE music: parses but isn't loaded)
-├── maps/*.map                   # new format; --validate to check
+library/                         # READ-ONLY stock — the overlay base
+├── ANIMATIONS.md                # rigging-first mandate + clip lists
 ├── models/                      # props/decor (OBJ) + rigged characters (glTF)
 │   ├── ASSETS.md                # spec for every prop + texture + shader
 │   ├── *.obj/*.mtl              # static props (mystery box, doors, perks, …)
 │   ├── zombie.glb               # rigged enemy (walk/attack_a/death)
 │   ├── player.glb               # rigged co-op third-person soldier
 │   └── arms_vm.glb              # shared first-person arms — fallback for guns lacking a combined rig
+├── mobs/{zombie,dog}/<id>.mob   # data-driven mob catalog
 ├── weapons/                     # per-folder weapon defs + assets
 │   ├── pistol/{pistol.weapon,pistol.obj,pistol.mtl,pistol_vm.legacy.glb}
 │   ├── smg/{smg.weapon,smg.obj,smg.mtl,smg_vm.glb,smg_vm.blend}   # only combined rig so far
-│   ├── shotgun/...
-│   ├── rifle/...
-│   └── raygun/...               # guns 2–5 still need <id>_vm.glb combined rigs
-├── shaders/{world,sky}.{vs,fs}
-└── textures/*.png               # 5 seamless 1024² PNGs (floor/ground/wall_ext/wall_int/ceiling)
+│   ├── shotgun/...  rifle/...  raygun/...   # guns 2–5 still need <id>_vm.glb combined rigs
+│   └──
+├── shaders/{world,world_skinned,sky,postfx}.{vs,fs}
+├── textures/*.png               # 5 seamless 1024² PNGs (floor/ground/wall_ext/wall_int/ceiling)
+└── templates/                   # New-Game skeletons (empty / fps) — placeholder until Step 4
+
+games/shooter/                   # the bundled game
+├── game.project                 # deffile manifest (id, name, default_map)
+└── maps/*.map                   # new format; --validate to check
+                                 # (audio/ ATMOSPHERE music would live here; none ships yet)
 ```
 
 ## Conventions & gotchas
@@ -408,7 +425,7 @@ viewmodel base scale (0.05) — all single-number tweaks if they feel off.
 
 1. `cmake --build build -j 2>&1 | tail -40` — most issues are
    missing-include or implicit-decl warnings.
-2. `./build/shooter --validate data/maps/<name>.map` — if a map won't
+2. `./build/shooter --validate games/shooter/maps/<name>.map` — if a map won't
    load, this prints line-numbered errors and exits 1.
 3. Run `./build/shooter` and check stdout for the
    `model: loaded …` / `texture: …` / `shader: …` /

@@ -27,7 +27,8 @@
 #include "particles.h"
 #include "assets.h"
 #include "anim.h"
-#include "app.h"   // engine host: Eng_Run + GameModule vtable
+#include "app.h"      // engine host: Eng_Run + GameModule vtable
+#include "content.h"  // Eng_LocateRoot / Eng_Set{Library,Game}Root — content overlay
 
 #include <stdio.h>
 #include <stdint.h>
@@ -520,6 +521,16 @@ static GameModule Game_Module(void) {
 }
 
 int main(int argc, char **argv) {
+    // Content overlay (docs/game-projects.md): resolve assets game-over-library.
+    // Wire the two roots before anything loads — including the CLI dev modes
+    // below, which load the mob catalog / maps through the resolver. Located
+    // next to the exe (install layout) with a dev-tree fallback; the game root
+    // defaults to the bundled "shooter" game (a positional <gamedir> override
+    // comes with Open Game).
+    char rootBuf[512];
+    if (Eng_LocateRoot("library",       rootBuf, sizeof rootBuf)) Eng_SetLibraryRoot(rootBuf);
+    if (Eng_LocateRoot("games/shooter", rootBuf, sizeof rootBuf)) Eng_SetGameRoot(rootBuf);
+
     // CLI dev modes (--validate, --screenshot-*, --anim-test, --sim-tick) are
     // handled in devtools.c. Each mode exits without opening the game window.
     int devExitCode = 0;

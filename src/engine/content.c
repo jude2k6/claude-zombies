@@ -39,6 +39,23 @@ void Eng_SetLibraryRoot(const char *dir) {
 const char *Eng_GetGameRoot(void)    { return s_gameRoot[0] ? s_gameRoot : NULL; }
 const char *Eng_GetLibraryRoot(void) { return s_libRoot [0] ? s_libRoot  : NULL; }
 
+const char *Eng_LocateRoot(const char *relName, char *buf, int bufsz) {
+    if (!relName || !buf || bufsz <= 0) return NULL;
+    // 1. Next to the executable (the install layout: bin + library/ + games/).
+    const char *appDir = GetApplicationDirectory();   // has a trailing separator
+    if (appDir && appDir[0]) {
+        snprintf(buf, (size_t)bufsz, "%s%s", appDir, relName);
+        if (DirectoryExists(buf)) return buf;
+    }
+    // 2. CWD and its parent (running from a dev/build/source tree).
+    const char *devPrefix[] = { "", "../" };
+    for (int i = 0; i < (int)(sizeof devPrefix / sizeof devPrefix[0]); i++) {
+        snprintf(buf, (size_t)bufsz, "%s%s", devPrefix[i], relName);
+        if (DirectoryExists(buf)) return buf;
+    }
+    return NULL;
+}
+
 // Build the ordered list of root directory prefixes to probe (game, library,
 // then the data/ fallbacks).  Returns the count written into `out` (sized for
 // at least 2 + NARR(DATA_FALLBACKS)).
@@ -264,6 +281,12 @@ bool Eng_ReloadModel(EngModel h) {
 
 // Internal: load from a fully resolved path, applying standard wrap/mipmap.
 static EngTexture LoadTextureFromResolved(const char *resolved) {
+    // No GL context (headless sim / CLI tools open no window): a GPU texture
+    // upload would dereference NULL GL function pointers and segfault. Honour
+    // the "never crashes; returns an invalid handle" contract (content.h) by
+    // failing gracefully — callers already treat id==0 as "missing texture".
+    if (!IsWindowReady()) return (EngTexture){0};
+
     // Dedup.
     for (int i = 0; i < s_texCount; i++) {
         if (s_textures[i].used && strcmp(s_textures[i].path, resolved) == 0) {

@@ -43,6 +43,17 @@ void        Eng_SetLibraryRoot(const char *dir);  // <library>/ (read-only)
 const char *Eng_GetGameRoot(void);                // NULL if unset
 const char *Eng_GetLibraryRoot(void);             // NULL if unset
 
+// Locate an install-relative directory next to the executable
+// (GetApplicationDirectory), falling back to the CWD and its parent for a
+// dev/build-tree checkout. Writes the first existing path into `buf` and
+// returns it, or NULL if none exist. The host wiring helper for the overlay:
+//   char b[512];
+//   if (Eng_LocateRoot("library",       b, sizeof b)) Eng_SetLibraryRoot(b);
+//   if (Eng_LocateRoot("games/shooter", b, sizeof b)) Eng_SetGameRoot(b);
+// Game-clean: it only probes a relative path near the exe, knowing nothing of
+// what the directory contains.
+const char *Eng_LocateRoot(const char *relName, char *buf, int bufsz);
+
 // Fill `dirs` with the existing directory paths for content subdir `relSubdir`
 // ("maps", "mobs", ...), game root first then library then data/ fallbacks.
 // Callers scan each in order and de-dup entry names so a game entry shadows a

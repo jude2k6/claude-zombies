@@ -1,9 +1,12 @@
 # Games as Projects — self-contained game folders + a read-only engine library
 
-> **Status: PARTIALLY IMPLEMENTED (2026-06-18).** The overlay foundation is
-> built and committed; the filesystem split and the game-management UI are not.
-> See the [Implementation progress](#implementation-progress-2026-06-18) section
-> appended to §10 for the exact done/remaining breakdown. Original design intent:
+> **Status: MOSTLY IMPLEMENTED (2026-06-18).** The overlay resolver (Steps 1–2),
+> the `data/` → `library/` + `games/shooter/` filesystem split (Step 3), and the
+> runtime root wiring (Step 5) are built and committed. Remaining: the editor's
+> New/Open-Game management UI (Step 4 remainder) and import/origin polish
+> (Step 6). See the [Implementation progress](#implementation-progress-2026-06-18)
+> section appended to §10 for the exact done/remaining breakdown. Original design
+> intent:
 > Captures the architecture Jude wants:
 > the editor (and the runtime) operate on a **game** — a self-contained folder
 > holding that game's *skeleton code*, content, and a manifest — that links the
@@ -335,33 +338,44 @@ through the resolver:
 - **NOT yet done:** File ▸ New Game… / Open Game… actions, `game.project`
   read/write + scaffolding, recents-as-games, asset-browser import action.
 
+**✅ Step 3 — Split `data/` → `library/` + `games/shooter/`** (this wave). The
+filesystem reorg landed as a single coherent edit:
+- `git mv` of all stock content into **`library/`** (`models/`, `textures/`,
+  `shaders/`, `mobs/`, `weapons/`, `ANIMATIONS.md`) + a `library/templates/`
+  placeholder for the New-Game skeletons.
+- The zombies game's maps moved to **`games/shooter/maps/`** under a
+  `games/shooter/game.project` deffile manifest (`id`/`name`/`default_map`).
+- CMake's post-build copy now mirrors **`library/` + `games/`** next to the
+  binary (was `data/`); `.gitignore`'s `*.obj` keep-exception follows to
+  `library/`/`games/`. `data/` no longer exists.
+
+**✅ Step 5 — Runtime root wiring** (this wave). Both `src/game/main.c` (before
+`Devtools_HandleCLI`) and `src/editor/editor_main.c` (before the default-map
+resolve) call the new engine helper **`Eng_LocateRoot(relName, buf, n)`** — it
+probes `<exe-dir>/relName` (the install layout) then the CWD and its parent (dev
+tree) — to set the library + `games/shooter` roots. A `<gamedir>` positional
+override is still future (arrives with Open Game). CI + README + HANDOFF map
+paths updated to `games/shooter/maps/`.
+- *Bonus fix found by the post-move smoke test:* engine `Anim_Load` only probed
+  `models/<file>`, so combined viewmodel rigs at `weapons/<id>/<id>_vm.glb`
+  (incl. the MP5) silently failed since `a4288be`. It now falls back to the raw
+  root-relative path like `Eng_LoadAnimModel`, restoring combined-rig loading.
+
 #### Remaining work
 
-- **Step 3 — Split `data/` → `library/` + `games/shooter/`** (NOT started). The
-  filesystem reorg: `git mv` stock content (models, textures, shaders, base
-  mobs/weapons) into `library/`; move the zombies game's maps into
-  `games/shooter/maps/` with a `game.project`; update the CMake post-build copy
-  (currently copies `data/` next to the binary — must copy `library/` + the
-  game). This is the step the resolver was built to enable. **Blocked on nothing
-  now** — Steps 1–2 made every path root-relative, so the move won't break
-  hardcoded `data/...` references.
-- **Step 5 — Runtime `engine <gamedir>`** (NOT started). `src/game/main.c`:
-  set `Eng_SetLibraryRoot("library")` + `Eng_SetGameRoot(<gamedir>)` (default
-  `games/shooter`, optional positional arg override) **before**
-  `Devtools_HandleCLI`/`Eng_Run`; mirror the root wiring in `editor_main.c`
-  startup. Trivial once Step 3 lands.
-- **Step 4 remainder** — the New/Open Game UI described above (the
-  `EdFileDialog_SelectFolder` primitive is already in place to build on).
+- **Step 4 remainder** — the New/Open Game UI: File ▸ New Game… / Open Game…,
+  `game.project` read/write + scaffolding from `library/templates/`,
+  recents-as-games, asset-browser import action (the `EdFileDialog_SelectFolder`
+  primitive is already in place to build on).
 - **Step 6 — Polish** — `.import` origin sidecars + reset-to-library/show-changes
   UI; a second sample game to prove independence.
 
-> Integration note: Steps 1, 2, and the Step-4 scans were built as one wave —
-> Phase 1 by hand (the API contract), Phases 2 + 4-scans by two parallel
-> sub-agents on disjoint file sets (game loaders vs editor), then integrated,
-> de-warned, and committed from the main session. The remaining structural
-> Steps 3 + 5 are deliberately downstream: they depend on the now-complete
-> root-relative conversion and are best done as a single coherent edit
-> (filesystem move + CMake + main wiring) rather than in parallel.
+> Integration note: Steps 1, 2, and the Step-4 scans were built as one wave (two
+> parallel sub-agents on disjoint file sets, integrated from the main session).
+> Steps 3 + 5 were then done together by the main session as one coherent edit
+> (filesystem move + CMake + root wiring + doc/CI sweep), exactly as flagged —
+> not parallelized, since the move touches one shared tree. The remaining Step 4
+> UI + Step 6 polish are again parallel-friendly (disjoint editor surfaces).
 
 ## 11. Decisions (all settled — 2026-06-18)
 

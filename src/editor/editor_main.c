@@ -103,12 +103,18 @@ static int RunCheck(void) {
 }
 
 int main(int argc, char **argv) {
+    // Content overlay (docs/game-projects.md): wire the two roots before
+    // resolving anything. Defaults to the bundled "shooter" game; Open Game /
+    // New Game will repoint the game root at runtime.
+    char rootBuf[512];
+    if (Eng_LocateRoot("library",       rootBuf, sizeof rootBuf)) Eng_SetLibraryRoot(rootBuf);
+    if (Eng_LocateRoot("games/shooter", rootBuf, sizeof rootBuf)) Eng_SetGameRoot(rootBuf);
+
     // Resolve the default map via the engine's root stack so that, once a game
     // root is set at runtime (Open Game / New Game), the game's default map wins.
-    // With no roots set the data/ dev fallback keeps the editor working as before.
     static char s_defaultMapBuf[512];
     const char *path = Eng_ResolveAssetPath("maps/default.map", s_defaultMapBuf, sizeof s_defaultMapBuf);
-    if (!path) path = "data/maps/default.map";  // absolute last-resort fallback
+    if (!path) path = "games/shooter/maps/default.map";  // last-resort fallback
     bool check = false;
     int viewOverride = -1;  // -1 = no override; otherwise EdViewMode value
     for (int i = 1; i < argc; i++) {

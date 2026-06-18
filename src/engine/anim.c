@@ -9,13 +9,17 @@ bool Anim_Load(AnimModel *am, const char *file) {
     am->anims = NULL;
 
     // Resolve through the engine content root stack (game root first, then
-    // library, then data/ dev fallbacks). Build a root-relative models/ path;
-    // if `file` is already an absolute or data/-prefixed path, the resolver
-    // honours it as-is (legacy callers keep working).
+    // library, then data/ dev fallbacks). Try the canonical models/ subdir
+    // first (e.g. "zombie.glb" -> "models/zombie.glb"), then fall back to the
+    // path as a raw root-relative one so callers that already carry a category
+    // prefix work too (e.g. a combined viewmodel rig at
+    // "weapons/<id>/<id>_vm.glb"). Mirrors Eng_LoadAnimModel's two-try probe;
+    // an absolute/data-prefixed path is honoured as-is by the resolver.
     char relPath[512];
     snprintf(relPath, sizeof relPath, "models/%s", file);
     char path[512] = {0};
-    if (!Eng_ResolveAssetPath(relPath, path, sizeof path)) {
+    if (!Eng_ResolveAssetPath(relPath, path, sizeof path) &&
+        !Eng_ResolveAssetPath(file, path, sizeof path)) {
         fprintf(stderr, "anim: '%s' not found in any content root\n", file);
         return false;
     }

@@ -22,8 +22,9 @@ out/
 *.lib
 *.pdb
 *.ilk
-# but keep Wavefront model files under data/
-!data/**/*.obj
+# but keep Wavefront model files under the stock library + bundled games
+!library/**/*.obj
+!games/**/*.obj
 
 # CMake leftovers
 CMakeCache.txt

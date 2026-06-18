@@ -180,13 +180,18 @@ add_custom_target(seam-check
 )
 add_dependencies(engine seam-check)
 
-# ---- data files ------------------------------------------------------------
-# Copy data/ next to the executable at build time so map files load from a
-# relative path. Re-runs whenever something under data/ changes.
+# ---- content (overlay roots) -----------------------------------------------
+# Copy the read-only stock library/ and the bundled games/ next to the
+# executable so the content overlay (game-over-library) resolves from a path
+# relative to the binary. See docs/game-projects.md. Re-runs whenever something
+# under either tree changes — but ONLY when the `shooter` target itself relinks,
+# so a content-only edit needs a touched source or a manual copy (as data/ did).
 add_custom_command(TARGET shooter POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
-        ${CMAKE_SOURCE_DIR}/data $<TARGET_FILE_DIR:shooter>/data
-    COMMENT "Copying data/ next to shooter binary"
+        ${CMAKE_SOURCE_DIR}/library $<TARGET_FILE_DIR:shooter>/library
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        ${CMAKE_SOURCE_DIR}/games $<TARGET_FILE_DIR:shooter>/games
+    COMMENT "Copying library/ + games/ next to shooter binary"
 )
 
 # ---- per-OS bits -----------------------------------------------------------

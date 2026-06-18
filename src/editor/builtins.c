@@ -42,7 +42,7 @@ static void MapsStartDir(char *buf, int cap) {
             return;
         }
     }
-    snprintf(buf, cap, "data/maps");
+    snprintf(buf, cap, "games/shooter/maps");
 }
 
 #define ED_UI_MIN 0.7f

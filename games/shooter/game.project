@@ -1,0 +1,9 @@
+# shooter — round-based CoD-style zombies survival, the engine's reference game.
+# deffile format (key value, like .mob / .weapon). The filesystem is the source
+# of truth for imports: any path here that shadows a library/ path is an override
+# (see docs/game-projects.md §5). This manifest is metadata, not a lockfile.
+
+id              shooter
+name            Claude Zombies
+engine_version  1
+default_map     maps/default.map

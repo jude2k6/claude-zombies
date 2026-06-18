@@ -98,6 +98,7 @@ typedef struct EdScene {
     bool          looking;          // fly: RMB held → mouselook
     Vector3       focus;            // orbit/top: point the view pivots around
     float         orthoH;           // orbit/top: orthographic view height (zoom)
+    bool          materialMode;     // M key toggle: draw textured geometry instead of proxy boxes
 
     // ---- selection / tools -------------------------------------------------
     int           selectedId;       // -1 = nothing selected

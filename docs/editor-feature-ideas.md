@@ -18,8 +18,9 @@
 > **4.6 Inline Validation Indicators** (red proxy outlines, live), and
 > **3.1 Place All Entity Kinds** (the PLACE palette now covers every `EngMapEntKind`,
 > grouped Spawns / Geometry / Buyables; walls are two-click, the rest drop-and-snap).
-> On the engine side the **2.4** textured-render foundation (`Eng_DrawTexturedBoxV` /
-> `…FloorV`) also landed — see [scene-builder.md](scene-builder.md) §5.7. Also shipped:
+> **2.4 Game-Accurate Textured Rendering** shipped (unlit) — the `M` "material mode"
+> toggle draws textured floors/walls/obstacles/props; see [scene-builder.md](scene-builder.md)
+> §5.7. Also shipped:
 > **5.3 Asset Browser Panel** (the ASSETS panel — maps/models/textures from the content
 > overlay, model thumbnails, click-a-map-to-open, click-a-model-to-place; `edassets.{c,h}`
 > + `edthumb.{c,h}`). Still open from the Top 5: **5.1 Play-Test Launch**. (Beyond the
@@ -208,24 +209,23 @@ around" to "one keystroke" — exactly what Krunker's community map-making workf
 
 ---
 
-### 2.4 Game-Accurate Textured Rendering
-Replace proxy boxes with actual sector floor/wall/obstacle geometry rendered with the
-game's textures — optionally, so the author can toggle between "debug boxes" and "looks
-like the game" modes. Requires a content-registry hook: the editor can't call game render
-code directly, so the engine needs a `Eng_RegisterContentRenderer` callback that the
-game sets at startup (when embedded) or that a plugin provides (standalone editor).
+### 2.4 Game-Accurate Textured Rendering — ✅ SHIPPED (unlit)
+Replace proxy boxes with actual sector floor/wall/obstacle/prop geometry rendered with the
+map's textures, behind an additive **`M` "material mode"** toggle (proxy path stays the
+default). Shipped in `EdScene_DrawViewport` — no content-registry hook was needed after all,
+because the textured-draw helpers already live engine-side (`Eng_DrawTexturedFloorV` /
+`Eng_DrawTexturedBoxV` in `gfx.h`) and take a raw `Texture2D*`; the editor resolves textures
+itself via `Eng_LoadTextureByName` from `doc.textures`, and loads prop models via
+`Eng_LoadModel`. No game header, seam intact.
 
 **Why it matters:** Placing entities relative to grey boxes is disorienting; placing them
-relative to the actual rendered floor/walls matches the player's experience. For community
-maps this is the difference between "functional" and "polished."
+relative to the actual rendered floor/walls matches the player's experience.
 
-**Effort:** L — the content-registry hook doesn't exist yet; standalone operation (without
-the game binary) would need a default fallback renderer. The sector/wall rendering math
-already lives in `gfx.h` but the textures are game-side.
-
-**Seam:** Hard seam constraint. The editor cannot `#include` game render code; the only
-clean path is a `Eng_ContentRegistry` hook (see `engine-layers.md §5`) that the game
-binary registers at embed time. Standalone editor gets a texture-free fallback.
+**Still open:** it draws **unlit** — the editor never calls `Eng_RenderSetLighting`, so the
+fog/sun world shader (`Eng_RenderBeginWorld`) would render black; pushing a default editor
+lighting state is the follow-up. And game-specific draws (perk machines, wallbuys rendered
+as their real models) would still want the `libgame_edbridge.so` plugin path for full
+parity — see [scene-builder.md](scene-builder.md) §5.7.
 
 ---
 

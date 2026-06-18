@@ -28,9 +28,9 @@ loaded `.so` files in `./plugins`) extend it through the identical surface. See 
 > loader, plus an **ASSETS panel** that hosts both those placement tools and an asset
 > browser (maps/models/textures scanned from the content overlay, with model thumbnails —
 > click a map to open it, click a model to place it as a prop); the left column is now just
-> the HIERARCHY. Not yet: game-accurate textured rendering in the viewport
-> (entities still draw as proxy boxes — the shared engine draw helpers exist,
-> §5.7), and copy-on-import of stock library assets into the game folder. See §5.
+> the HIERARCHY. There's also a **material mode** (`M`): textured floors/walls/obstacles/
+> props instead of proxy boxes (§5.7). Not yet: lighting in material mode (it draws unlit —
+> see §5.7) and copy-on-import of stock library assets into the game folder. See §5.
 
 > **Related docs.** This is the canonical reference for how the editor works today.
 > For *where it's going*: [editor-content-extensibility.md](editor-content-extensibility.md)
@@ -211,6 +211,7 @@ switches from distance-based (fly) to zoom-based (ortho).
 **Editing controls (all views):** **LMB** select or drag a gizmo handle; **1/2/3**
 switch gizmo mode — translate drags any entity, **rotate/scale drag PROPs** (the only
 kind with a yaw/scale, per `mapedit.h`); **F** focuses the view on the selection;
+**M** toggles material mode (textured geometry vs proxy boxes, §5.7);
 **Ctrl+Z / Ctrl+Y** undo / redo. Selection/drag is suppressed while a camera button
 (RMB/MMB) is held so navigation clicks don't double as edits. Rotate/scale drags
 coalesce into one undo step under a drag tag, exactly like translate.
@@ -351,18 +352,22 @@ Small, independently shippable steps; none blocks the game.
 6. ~~**Rotate / scale** drag~~ **Done** — gizmo modes 2/3 drag PROPs via
    `Eng_SetYaw` / `Eng_SetScale` (using the gizmo's `rotateRadians` / per-axis `scale`),
    coalesced under a drag tag like translate.
-7. **Real scene rendering** — draw actual sector/wall/prop geometry instead of proxy
-   boxes, behind an additive `M` "material mode" toggle (the proxy path stays the
-   default). **Foundation landed:** `Eng_DrawTexturedBoxV` / `Eng_DrawTexturedFloorV`
-   were lifted out of the game's `render.c` into the engine (`gfx.{c,h}`), taking a raw
-   `Texture2D*` + explicit `tileSize` so neither engine nor editor includes `assets.h`
-   (the game's helpers are now thin shims; verified identical via `--screenshot-map`).
-   **Remaining:** the editor-side toggle in `edscene.c` that loads map textures via
-   `Eng_LoadTextureByName` and calls these helpers (floors → `doc.textures.floor`, walls/
-   obstacles → proxy-box sized, props → `Eng_LoadModel`), wrapped in
-   `Eng_RenderBeginWorld`/`EndWorld` for the game's fog/sun shader. A later
-   `libgame_edbridge.so` plugin could register game-specific draws (perk machines,
-   wallbuys) for full parity without touching the editor binary.
+7. ~~**Real scene rendering**~~ **Done (unlit)** — an additive **`M` "material mode"**
+   (`s->materialMode`, runtime-only, default OFF, proxy path unchanged) draws actual
+   textured geometry in `EdScene_DrawViewport`: sector floors via `Eng_DrawTexturedFloorV`,
+   walls/obstacles as `Eng_DrawTexturedBoxV` sized from their proxy boxes, props via
+   `Eng_LoadModel`/`Eng_GfxDrawModelEx` (path `props/<name>/<name>.glb`, falling back to a
+   coloured box when the model is missing). Textures resolve through `Eng_LoadTextureByName`
+   from the map's `doc.textures` slots (`floor`/`wall_ext`, with stock `floor_concrete`/
+   `wall_brick` fallbacks) and per-surface `texName` overrides. The grid, selection box, and
+   validation outlines stay drawn over both modes. *(Foundation, earlier: `Eng_DrawTextured*`
+   were lifted out of the game's `render.c` into `gfx.{c,h}` taking a raw `Texture2D*` +
+   `tileSize`, so the editor needs no `assets.h`.)*
+   **Remaining:** it draws **unlit** — the editor calls `Eng_RenderLoad` but never
+   `Eng_RenderSetLighting`, so wrapping in `Eng_RenderBeginWorld`/`EndWorld` would yield
+   black geometry; pushing a default editor lighting state to get the fog/sun shader is the
+   follow-up. A later `libgame_edbridge.so` plugin could register game-specific draws (perk
+   machines, wallbuys) for full parity without touching the editor binary.
 7b. ~~**Asset browser**~~ **Done** — the **ASSETS** panel (`edassets.{c,h}` index +
    `edthumb.{c,h}` thumbnails) lists the overlay's maps/models/textures with a filter,
    opens a map on click (via the unsaved-changes guard), and arms prop placement from a

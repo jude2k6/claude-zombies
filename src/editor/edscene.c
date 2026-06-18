@@ -9,9 +9,10 @@
 #include "pick.h"
 #include "debugdraw.h"
 #include "gfx.h"
-#include "deffile.h"   // shared .mob reader (engine-side, game-clean)
-#include "content.h"   // Eng_ContentDirs, Eng_ResolveAssetPath
-#include "edthumb.h"   // asset-browser thumbnail cache (freed at shutdown)
+#include "eng_render.h"   // Eng_RenderSetLighting / Begin/EndWorld for material mode
+#include "deffile.h"      // shared .mob reader (engine-side, game-clean)
+#include "content.h"      // Eng_ContentDirs, Eng_ResolveAssetPath, Eng_LoadTexture*
+#include "edthumb.h"      // asset-browser thumbnail cache (freed at shutdown)
 
 #include <stdio.h>
 #include <string.h>
@@ -864,6 +865,7 @@ void EdScene_UpdateViewport(EdScene *s, Rectangle vp, bool inputAllowed) {
         if (IsKeyPressed(KEY_TWO))   s->mode = ENG_GIZMO_ROTATE;
         if (IsKeyPressed(KEY_THREE)) s->mode = ENG_GIZMO_SCALE;
 
+        if (IsKeyPressed(KEY_M)) s->materialMode = !s->materialMode;
         if (IsKeyPressed(KEY_P)) {
             // Cancel any pending two-click wall when cycling away from WALL.
             s->wallPending = false;
@@ -917,6 +919,117 @@ void EdScene_UpdateViewport(EdScene *s, Rectangle vp, bool inputAllowed) {
     UpdateGizmo(s, inputAllowed && !camBusy && s->placeTool == ED_PLACE_NONE);
 }
 
+// ---- material-mode helpers -------------------------------------------------
+
+// Resolve a texture slot name via Eng_LoadTextureByName.  Returns NULL when
+// the slot is empty or the asset is missing (caller falls back to a flat colour).
+static Texture2D *MatTex(const char *slotName) {
+    if (!slotName || !slotName[0]) return NULL;
+    EngTexture h = Eng_LoadTextureByName(slotName);
+    return Eng_TextureGet(h);  // NULL when handle invalid
+}
+
+// Draw floor/ceiling quads for every sector.
+static void DrawMatSectors(EdScene *s, Texture2D *floorTex) {
+    const MapDoc *d = &s->doc;
+    for (int i = 0; i < d->sectorCount; i++) {
+        const MapDocSector *sc = &d->sectors[i];
+        Vector3 floorCentre = { sc->x, sc->yLow, sc->z };
+        Eng_DrawTexturedFloorV(floorCentre, sc->sx, sc->sz,
+                               floorTex, 4.0f, WHITE, (Color){ 80, 70, 55, 255 });
+    }
+}
+
+// Draw walls as textured boxes sized from their proxy bounding boxes.
+static void DrawMatWalls(EdScene *s, Texture2D *wallTex) {
+    const MapDoc *d = &s->doc;
+    for (int i = 0; i < d->wallCount; i++) {
+        const MapDocWall *w = &d->walls[i];
+        // Per-surface TEX wins; fall back to map-slot wall_ext.
+        Texture2D *tex = wallTex;
+        if (w->texName[0]) {
+            EngTexture h = Eng_LoadTextureByName(w->texName);
+            Texture2D *t = Eng_TextureGet(h);
+            if (t) tex = t;
+        }
+        const EdProxy *ep = FindProxy(s, w->id);
+        if (!ep) continue;
+        Vector3 c  = Vector3Scale(Vector3Add(ep->box.min, ep->box.max), 0.5f);
+        Vector3 sz = Vector3Subtract(ep->box.max, ep->box.min);
+        Eng_DrawTexturedBoxV(c, sz, tex, 2.0f, WHITE, (Color){ 130, 120, 100, 255 });
+    }
+}
+
+// Draw obstacles as textured boxes sized from their proxy bounding boxes.
+static void DrawMatObstacles(EdScene *s, Texture2D *wallTex) {
+    const MapDoc *d = &s->doc;
+    for (int i = 0; i < d->obstacleCount; i++) {
+        const MapDocObstacle *o = &d->obstacles[i];
+        // Per-surface TEX wins; fall back to map-slot wall_ext.
+        Texture2D *tex = wallTex;
+        if (o->texName[0]) {
+            EngTexture h = Eng_LoadTextureByName(o->texName);
+            Texture2D *t = Eng_TextureGet(h);
+            if (t) tex = t;
+        }
+        const EdProxy *ep = FindProxy(s, o->id);
+        if (!ep) continue;
+        Vector3 c  = Vector3Scale(Vector3Add(ep->box.min, ep->box.max), 0.5f);
+        Vector3 sz = Vector3Subtract(ep->box.max, ep->box.min);
+        Eng_DrawTexturedBoxV(c, sz, tex, 2.0f, WHITE, (Color){ 110, 100, 80, 255 });
+    }
+}
+
+// Draw props: attempt to load the prop model from props/<name>/<name>.glb.
+// Falls back to a small textured box on load failure (which is fine for the
+// editor — we just need something visible at the correct position).
+static void DrawMatProps(EdScene *s) {
+    const MapDoc *d = &s->doc;
+    for (int i = 0; i < d->propCount; i++) {
+        const MapDocProp *p = &d->props[i];
+        float y = SectorFloorY(s, p->sectorId);
+        Vector3 pos = { p->x, y, p->z };
+
+        // Build props/<name>/<name>.glb path and try loading via content registry.
+        char relPath[128];
+        snprintf(relPath, sizeof relPath, "props/%s/%s.glb", p->name, p->name);
+        EngModel mh = Eng_LoadModel(relPath);
+        Model *m = Eng_ModelGet(mh);
+        if (m && m->meshCount > 0) {
+            // Yaw around Y axis (prop uses degrees).
+            Vector3 axis  = { 0.0f, 1.0f, 0.0f };
+            Vector3 scale = { p->scale, p->scale, p->scale };
+            Eng_GfxDrawModelEx(*m, pos, axis, p->yawDeg, scale, WHITE);
+        } else {
+            // No model: draw a placeholder textured box at marker size.
+            float h = ED_MARKER * p->scale;
+            Vector3 c  = { p->x, y + h, p->z };
+            Vector3 sz = { h * 2.0f, h * 2.0f, h * 2.0f };
+            Eng_DrawTexturedBoxV(c, sz, NULL, 1.0f, WHITE, (Color){ 90, 160, 110, 255 });
+        }
+    }
+}
+
+// Draw the textured world geometry (material mode). We use unlit draws (no
+// Eng_RenderBeginWorld) because the editor calls Eng_RenderLoad at startup
+// but never calls Eng_RenderSetLighting, so the shader uniform state is
+// uninitialised and would produce black geometry.  Unlit textured draws are
+// correct and readable in the editor; adding lighting is a future polish step.
+static void DrawMaterialWorld(EdScene *s) {
+    const MapDocTextures *tx = &s->doc.textures;
+
+    // Resolve map-slot textures (empty slot → NULL → flat-colour fallback).
+    Texture2D *floorTex = MatTex(tx->floor[0]   ? tx->floor    : "floor_concrete");
+    Texture2D *wallTex  = MatTex(tx->wall_ext[0] ? tx->wall_ext : "wall_brick");
+
+    DrawMatSectors(s, floorTex);
+    DrawMatWalls(s, wallTex);
+    DrawMatObstacles(s, wallTex);
+    DrawMatProps(s);
+}
+
+// ---- per-frame draw --------------------------------------------------------
+
 void EdScene_DrawViewport(EdScene *s, Rectangle vp) {
     // (Re)create the render texture when the viewport size changes.
     if (!s->vpTexValid || s->vpTex.texture.width != s->vpW || s->vpTex.texture.height != s->vpH) {
@@ -929,18 +1042,35 @@ void EdScene_DrawViewport(EdScene *s, Rectangle vp) {
     ClearBackground((Color){ 18, 20, 26, 255 });
     Eng_GfxBeginMode3D(s->cam);
     Eng_GfxDrawGrid(s->gridSlices, s->gridSpacing);
-    for (int i = 0; i < s->proxyCount; i++) {
-        EdProxy *p = &s->proxies[i];
-        Vector3 c  = Vector3Scale(Vector3Add(p->box.min, p->box.max), 0.5f);
-        Vector3 sz = Vector3Subtract(p->box.max, p->box.min);
-        bool sel = (p->id == s->selectedId);
-        Color fill = p->col; fill.a = sel ? 220 : 150;
-        Eng_GfxDrawCubeV(c, sz, fill);
-        Eng_GfxDrawCubeWiresV(c, sz, sel ? YELLOW : (Color){ 0, 0, 0, 120 });
-        if (sel) Eng_DebugBox(p->box, YELLOW);
+
+    if (s->materialMode) {
+        // Material mode: textured geometry instead of flat proxy boxes.
+        DrawMaterialWorld(s);
+        // Still draw selection gizmo box and semi-transparent proxy wires so the
+        // user knows what is selected.
+        for (int i = 0; i < s->proxyCount; i++) {
+            EdProxy *p = &s->proxies[i];
+            if (p->id != s->selectedId) continue;
+            Vector3 c  = Vector3Scale(Vector3Add(p->box.min, p->box.max), 0.5f);
+            Vector3 sz = Vector3Subtract(p->box.max, p->box.min);
+            Eng_GfxDrawCubeWiresV(c, sz, YELLOW);
+            Eng_DebugBox(p->box, YELLOW);
+        }
+    } else {
+        // Default proxy-box mode.
+        for (int i = 0; i < s->proxyCount; i++) {
+            EdProxy *p = &s->proxies[i];
+            Vector3 c  = Vector3Scale(Vector3Add(p->box.min, p->box.max), 0.5f);
+            Vector3 sz = Vector3Subtract(p->box.max, p->box.min);
+            bool sel = (p->id == s->selectedId);
+            Color fill = p->col; fill.a = sel ? 220 : 150;
+            Eng_GfxDrawCubeV(c, sz, fill);
+            Eng_GfxDrawCubeWiresV(c, sz, sel ? YELLOW : (Color){ 0, 0, 0, 120 });
+            if (sel) Eng_DebugBox(p->box, YELLOW);
+        }
     }
 
-    // Validation: outline offending entities in red.
+    // Validation: outline offending entities in red (both modes).
     {
         MapDocIssue issues[64];
         int n = MapDoc_Validate(&s->doc, issues, 64);
@@ -952,7 +1082,7 @@ void EdScene_DrawViewport(EdScene *s, Rectangle vp) {
     }
 
     // Two-click wall placement: draw a sphere at the pending start point while
-    // the user is choosing the second endpoint.
+    // the user is choosing the second endpoint (both modes).
     if (s->wallPending)
         Eng_DebugSphere((Vector3){ s->wallStartX, 0.0f, s->wallStartZ },
                         ED_MARKER, (Color){ 255, 220, 60, 255 });

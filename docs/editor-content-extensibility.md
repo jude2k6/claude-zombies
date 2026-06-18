@@ -292,12 +292,18 @@ cursor** (fallback sector 0), since `.map` has no ungrouped entities (`Eng_SetSe
 
 ## 6. Assets
 
-A parallel registry. The editor **scans `data/` for models (`.glb`) and textures** and shows
-an **asset browser / picker**; adding an asset = drop a file in the folder. A def with
-`kind=PROP` either hard-codes its `asset` (one-click "Barrel") or leaves it blank so placing
-it opens the picker, whose choice is written into `prop.name`. Rendering those assets in the
-viewport uses engine asset-load APIs — see [scene-builder.md](scene-builder.md) §5.7. This
-and game-accurate rendering converge on the same asset path.
+A parallel registry. **Shipped:** the editor **scans the content overlay for maps, models
+(`.glb`) and textures** (`edassets.{c,h}` → `EdScene.assets`, game-over-library de-duped)
+and shows an **ASSETS browser** panel; adding an asset = drop a file in the folder. Clicking
+a model arms prop placement with that model's name (written into `prop.name`); models show an
+off-screen thumbnail (`edthumb.{c,h}`); see [scene-builder.md](scene-builder.md) §"IDE frame"
++ §5.7b. Material mode (§5.7) renders those assets in the viewport via the engine asset-load
+APIs, so the browser and game-accurate rendering converge on the same asset path.
+
+**Still future** (the original wishlist this didn't fully reach): a `kind=PROP` def that
+hard-codes its `asset` for a one-click "Barrel" vs. a blank one that opens a picker whose
+choice is written into `prop.name`; texture-slot assignment from a texture click; and
+copy-on-import of stock library assets into the game folder.
 
 ## 7. Implementation order
 

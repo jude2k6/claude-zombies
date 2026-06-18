@@ -534,6 +534,14 @@ it is click-to-arm, reusing the prop tool), texture-slot assignment from a textu
 and a copy-on-import action (stock library asset → game folder, the
 [game-projects.md](game-projects.md) overlay's writable side).
 
+**Known seam gap — model-as-prop:** clicking a Models row stamps `prop.name` = the model
+file stem, but the game only renders props whose name resolves in the `.prop` catalog
+(`Props_IndexByName`); an unmatched name is **silently skipped at game load** (`level.c`:
+"unknown prop — skipping"), so a raw `.glb` with no `.prop` previews in the editor but
+vanishes in-game. Resolve by scaffolding a `.prop` on placement, restricting the Models
+section to catalog-backed models, or a game-side raw-model fallback. (The catalog **Props**
+palette section is unaffected — those always render.)
+
 **Why it matters:** Currently the only asset navigation is via the native file picker.
 An in-editor browser keeps the author's hands in the tool, is filterable/searchable, and
 is the prerequisite for drag-to-place prop authoring (the main workflow for decorating

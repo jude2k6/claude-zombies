@@ -270,6 +270,13 @@ registered once; recents change at runtime, hence the hook.)
     it** (through the same unsaved-changes guard as `File ▸ Open`), **click a model to arm
     prop placement** with that model's name, with a thumbnail per model rendered off-screen
     by `edthumb.{c,h}` (textures preview-only for now).
+    > **Caveat:** a model placed this way stamps `prop.name` = the model's file stem. The
+    > game resolves that against the `.prop` catalog (`Props_IndexByName`) at load — a prop
+    > whose name has **no matching `.prop`** is placeable + previews in the editor (and in
+    > material mode, §5.7) but is **silently skipped in the actual game** (`level.c`: "unknown
+    > prop — skipping"). Place from the **Props** palette section (catalog-backed) for props
+    > guaranteed to render in-game; resolving this seam (scaffold a `.prop`, or a game-side
+    > raw-model fallback) is open — see [editor-feature-ideas.md](editor-feature-ideas.md) §5.3.
   - The **filter box** at the top is a global asset search: while it has text the placement
     tools are hidden and the maps/models/textures lists narrow to matches.
 - **Bottom zone**: **CONSOLE** — log output (plugin loads, save/validate results, Help),
@@ -343,6 +350,10 @@ Small, independently shippable steps; none blocks the game.
    folder picker; opened games are tracked in a **Recent Games** group. The manifest
    read/write + scaffolding live in engine-clean `src/editor/edproject.{c,h}` (deffile +
    raylib FS only). This is the editor half of [game-projects.md](game-projects.md) §8.
+   Switching game mid-session (`New`/`Open`/`Open Recent` Game) re-points the overlay and
+   then calls **`EdScene_RescanContent`** — the four catalog scans (mobs/props/perks/
+   weapons) + `EdAssets_Scan` — so the placement palette and asset browser reflect the new
+   game's content without restarting (the scans otherwise run only in `EdScene_Init`).
    Still future there: the **asset-browser import** action and `.import` origin sidecars.
 5. ~~**Editable Inspector**~~ **Done** — the right panel edits position (all kinds),
    spawn mob, window facing, prop yaw/scale, obstacle size, sector size/heights through

@@ -441,11 +441,7 @@ static int RecentsDynProvider(EdHost *h, EdMenuItem *out, int max, void *user) {
 // Open an existing game folder, then load its default map.
 static void a_open_game(EdHost *h, void *u) {
     (void)u;
-    // Suggest ~/games or fall back to CWD as the starting directory.
-    char startDir[512];
-    const char *home = getenv("HOME");
-    if (home && home[0]) snprintf(startDir, sizeof startDir, "%s/games", home);
-    else                 snprintf(startDir, sizeof startDir, ".");
+    char startDir[512]; EdProject_DefaultGamesDir(startDir, sizeof startDir);
 
     char chosen[512];
     if (!EdFileDialog_SelectFolder(chosen, sizeof chosen, "Open Game folder", startDir)) return;
@@ -482,11 +478,7 @@ static void a_open_game(EdHost *h, void *u) {
 // Create a new game folder, scaffold it, then open it.
 static void a_new_game(EdHost *h, void *u) {
     (void)u;
-    // Suggest ~/games or CWD.
-    char startDir[512];
-    const char *home = getenv("HOME");
-    if (home && home[0]) snprintf(startDir, sizeof startDir, "%s/games", home);
-    else                 snprintf(startDir, sizeof startDir, ".");
+    char startDir[512]; EdProject_DefaultGamesDir(startDir, sizeof startDir);
 
     char chosen[512];
     if (!EdFileDialog_SelectFolder(chosen, sizeof chosen, "New Game — select (or create) game folder", startDir)) return;

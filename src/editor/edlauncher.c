@@ -9,7 +9,6 @@
 #include "raylib.h"
 #include "raygui.h"
 
-#include <stdlib.h>         // getenv
 #include <string.h>
 
 // ---------------------------------------------------------------------------
@@ -37,19 +36,6 @@ void EdLauncher_Init(EdLauncher *L, EngCfg *cfg, float scale) {
             snprintf(L->recentName[n], sizeof L->recentName[n], "%s", GetFileName(dir));
         L->recentCount++;
     }
-}
-
-// Default directory the pickers open in: ~/games if it exists, else the CWD.
-static const char *DefaultGamesDir(char *buf, int cap) {
-    const char *home = getenv("HOME");
-    if (home && home[0]) {
-        snprintf(buf, cap, "%s/games", home);
-        if (DirectoryExists(buf)) return buf;
-        snprintf(buf, cap, "%s", home);
-        return buf;
-    }
-    snprintf(buf, cap, ".");
-    return buf;
 }
 
 // A flat clickable row (name + dim subtitle). Returns true on a left-click.
@@ -95,7 +81,7 @@ EdLauncherResult EdLauncher_Draw(EdLauncher *L, int w, int h) {
         // Empty — the working template.
         if (LauncherRow((Rectangle){ padX, cardY, cardW, 52 * sc }, sc,
                         "Empty", "A bare GameModule (init / frame / fixed / draw + Eng_Run)")) {
-            char start[512]; DefaultGamesDir(start, sizeof start);
+            char start[512]; EdProject_DefaultGamesDir(start, sizeof start);
             char dir[512];
             if (EdFileDialog_SelectFolder(dir, sizeof dir,
                                           "New Game — choose a folder", start)) {
@@ -134,7 +120,7 @@ EdLauncherResult EdLauncher_Draw(EdLauncher *L, int w, int h) {
     }
     by += bh + 10 * sc;
     if (GuiButton((Rectangle){ leftX, by, leftW, bh }, "#1#  Open Game...")) {
-        char start[512]; DefaultGamesDir(start, sizeof start);
+        char start[512]; EdProject_DefaultGamesDir(start, sizeof start);
         char dir[512];
         if (EdFileDialog_SelectFolder(dir, sizeof dir, "Open Game — choose a folder", start)) {
             res.action = EDL_OPEN_GAME;
@@ -143,7 +129,7 @@ EdLauncherResult EdLauncher_Draw(EdLauncher *L, int w, int h) {
     }
     by += bh + 10 * sc;
     if (GuiButton((Rectangle){ leftX, by, leftW, bh }, "#12#  Open Map...")) {
-        char start[512]; DefaultGamesDir(start, sizeof start);
+        char start[512]; EdProject_DefaultGamesDir(start, sizeof start);
         char file[512];
         if (EdFileDialog_Open(file, sizeof file, start)) {
             res.action = EDL_OPEN_MAP;

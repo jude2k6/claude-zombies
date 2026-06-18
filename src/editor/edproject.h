@@ -24,6 +24,12 @@ typedef struct {
     char default_map    [EDPROJECT_MAP_LEN];  // default_map     maps/default.map
 } EdProject;
 
+// The default directory the New Game / Open Game pickers open in: the "games/"
+// root that holds the bundled games (e.g. games/shooter), resolved to an
+// absolute path. Falls back to ~/games, then ".", when that root can't be
+// located. Writes into `buf` and returns it. Creates nothing.
+const char *EdProject_DefaultGamesDir(char *buf, int cap);
+
 // Parse <gameDir>/game.project into `out`.  Returns false (and logs to stderr)
 // on I/O or parse failure.  Fields absent in the file are left at zero/empty.
 bool EdProject_Read(const char *gameDir, EdProject *out);

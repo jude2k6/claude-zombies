@@ -35,6 +35,27 @@ static int MkDir(const char *path) {
 }
 
 // ---------------------------------------------------------------------------
+// EdProject_DefaultGamesDir — where the New/Open Game pickers start.
+// ---------------------------------------------------------------------------
+const char *EdProject_DefaultGamesDir(char *buf, int cap) {
+    // A stable, user-owned home for game projects (~/games), created on first
+    // use so the pickers always open in a dedicated folder instead of the
+    // cluttered home dir. We deliberately do NOT use the bundled games/ root
+    // (Eng_LocateRoot) — at runtime that resolves to the build's copied mirror
+    // (build/games), a build artifact that's wiped on a clean and never
+    // version-controlled. Games are portable folders (games-as-projects): they
+    // default here but can be created/opened anywhere.
+    const char *home = getenv("HOME");
+    if (home && home[0]) {
+        snprintf(buf, cap, "%s/games", home);
+        if (!DirectoryExists(buf)) MkDir(buf);
+        return buf;
+    }
+    snprintf(buf, cap, ".");
+    return buf;
+}
+
+// ---------------------------------------------------------------------------
 // EdProject_Read
 // ---------------------------------------------------------------------------
 

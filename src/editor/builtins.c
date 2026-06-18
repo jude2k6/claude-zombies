@@ -11,6 +11,7 @@
 #include "builtins.h"
 #include "edscene.h"
 #include "edfiledialog.h"
+#include "edproject.h"  // EdProject_Open, EdProject_New, EdProject_Read
 
 #include "raygui.h"
 #include "ui.h"
@@ -58,7 +59,11 @@ static void MapsStartDir(char *buf, int cap) {
 static char g_recent[ED_RECENT_MAX][ED_RECENT_LEN];
 static int  g_recentCount = 0;
 
-// Load recents from the scene's cfg handle.
+// Forward declarations for the game-recents helpers defined later in this file.
+static void GameRecents_Load(EngCfg *cfg);
+static void GameRecents_WriteKeys(FILE *f);
+
+// Load recents (maps + games) from the scene's cfg handle.
 static void Recents_Load(EngCfg *cfg) {
     g_recentCount = 0;
     for (int i = 0; i < ED_RECENT_MAX; i++) {
@@ -67,6 +72,7 @@ static void Recents_Load(EngCfg *cfg) {
         if (!v || !v[0]) break;
         snprintf(g_recent[g_recentCount++], ED_RECENT_LEN, "%s", v);
     }
+    GameRecents_Load(cfg);
 }
 
 // Save recents back via the cfg BeginSave/Put/EndSave path — called after any
@@ -104,6 +110,8 @@ static void Recents_Save(EdScene *s) {
         char key[32]; snprintf(key, sizeof key, "recent.%d", i);
         EngCfg_PutStr(f, key, g_recent[i]);
     }
+    // --- recent games ---
+    GameRecents_WriteKeys(f);
     EngCfg_EndSave(f);
 }
 
@@ -124,6 +132,52 @@ static void Recents_Push(EdScene *s, const char *path) {
     g_recent[0][ED_RECENT_LEN - 1] = '\0';
     g_recentCount = (n + 1 < ED_RECENT_MAX) ? n + 1 : ED_RECENT_MAX;
     Recents_Save(s);
+}
+
+// ============================================================================
+//  Recent games — persisted in editor.cfg as game.0 .. game.7
+// ============================================================================
+
+#define ED_GAME_MAX  8
+#define ED_GAME_LEN  512
+
+static char g_games[ED_GAME_MAX][ED_GAME_LEN];
+static int  g_gameCount = 0;
+
+// Load the game recents list from the cfg handle.
+static void GameRecents_Load(EngCfg *cfg) {
+    g_gameCount = 0;
+    for (int i = 0; i < ED_GAME_MAX; i++) {
+        char key[32]; snprintf(key, sizeof key, "game.%d", i);
+        const char *v = EngCfg_Str(cfg, key, "");
+        if (!v || !v[0]) break;
+        snprintf(g_games[g_gameCount++], ED_GAME_LEN, "%s", v);
+    }
+}
+
+// Save the game recents alongside everything else (piggybacks on Recents_Save's
+// full cfg rewrite; this helper is called from inside that path).
+static void GameRecents_WriteKeys(FILE *f) {
+    for (int i = 0; i < g_gameCount; i++) {
+        char key[32]; snprintf(key, sizeof key, "game.%d", i);
+        EngCfg_PutStr(f, key, g_games[i]);
+    }
+}
+
+// Push a game dir to the front of the recent-games list (dedup, cap ED_GAME_MAX).
+static void GameRecents_Push(EdScene *s, const char *dir) {
+    if (!dir || !dir[0]) return;
+    int n = 0;
+    int keep[ED_GAME_MAX];
+    for (int i = 0; i < g_gameCount; i++) {
+        if (strcmp(g_games[i], dir) != 0) keep[n++] = i;
+    }
+    for (int i = n - 1; i >= 0 && i + 1 < ED_GAME_MAX; i--)
+        memcpy(g_games[i + 1], g_games[keep[i]], ED_GAME_LEN);
+    strncpy(g_games[0], dir, ED_GAME_LEN - 1);
+    g_games[0][ED_GAME_LEN - 1] = '\0';
+    g_gameCount = (n + 1 < ED_GAME_MAX) ? n + 1 : ED_GAME_MAX;
+    Recents_Save(s);  // full rewrite that also calls GameRecents_WriteKeys
 }
 
 // ============================================================================
@@ -332,24 +386,171 @@ static void a_open_recent(EdHost *h, void *u) {
 
 // Labels need persistent storage — we write them into a static ring each frame.
 static char g_recentLabels[ED_RECENT_MAX][256];
+// Persistent label storage for game recent entries (filled by RecentsDynProvider).
+static char g_gameLabels[ED_GAME_MAX][256];
 
+// Forward declarations for the game-menu actions defined below.
+static void a_open_recent_game(EdHost *h, void *u);
+static void a_open_game(EdHost *h, void *u);
+static void a_new_game(EdHost *h, void *u);
+
+// Combined dynamic provider: emits map-recents, then (when game recents exist) a
+// separator + game recents.  Both groups share the single File-menu dyn slot.
+// Entries beyond max are silently truncated; that is safe given typical list sizes.
 static int RecentsDynProvider(EdHost *h, EdMenuItem *out, int max, void *user) {
     (void)h; (void)user;
-    int n = g_recentCount < max ? g_recentCount : max;
-    for (int i = 0; i < n; i++) {
-        // Show just the filename in the menu, open the full stored path.
+    int pos = 0;
+
+    // --- map recents ---
+    int nm = g_recentCount < max ? g_recentCount : max;
+    for (int i = 0; i < nm && pos < max; i++, pos++) {
         snprintf(g_recentLabels[i], sizeof g_recentLabels[i], "%s", GetFileName(g_recent[i]));
-        out[i] = (EdMenuItem){
+        out[pos] = (EdMenuItem){
             .menu    = "File",
             .label   = g_recentLabels[i],
-            .shortcut = NULL,
             .onClick = a_open_recent,
-            .enabled = NULL,
-            .checked = NULL,
             .user    = (void*)(intptr_t)i,
         };
     }
-    return n;
+
+    // --- game recents (separator + entries) ---
+    if (g_gameCount > 0 && pos < max) {
+        out[pos++] = (EdMenuItem){ .menu = "File", .label = NULL };  // separator
+    }
+    for (int i = 0; i < g_gameCount && pos < max; i++, pos++) {
+        snprintf(g_gameLabels[i], sizeof g_gameLabels[i], "[game] %s", GetFileName(g_games[i]));
+        out[pos] = (EdMenuItem){
+            .menu    = "File",
+            .label   = g_gameLabels[i],
+            .onClick = a_open_recent_game,
+            .user    = (void*)(intptr_t)i,
+        };
+    }
+
+    return pos;
+}
+
+// ---- Open Game / New Game actions ------------------------------------------
+
+// Open an existing game folder, then load its default map.
+static void a_open_game(EdHost *h, void *u) {
+    (void)u;
+    // Suggest ~/games or fall back to CWD as the starting directory.
+    char startDir[512];
+    const char *home = getenv("HOME");
+    if (home && home[0]) snprintf(startDir, sizeof startDir, "%s/games", home);
+    else                 snprintf(startDir, sizeof startDir, ".");
+
+    char chosen[512];
+    if (!EdFileDialog_SelectFolder(chosen, sizeof chosen, "Open Game folder", startDir)) return;
+
+    if (!EdProject_Open(chosen)) {
+        EdHost_Log(h, ED_LOG_ERROR, "open game FAILED: no valid game.project in %s", chosen);
+        return;
+    }
+
+    // Resolve and load the game's default map (overlay now points at the new game root).
+    char mapBuf[512];
+    EdProject proj;
+    const char *mapRel = "maps/default.map";  // safe fallback
+    if (EdProject_Read(chosen, &proj) && proj.default_map[0]) mapRel = proj.default_map;
+
+    // Resolve via the game root directly (Eng_SetGameRoot was just called above).
+    snprintf(mapBuf, sizeof mapBuf, "%s/%s", chosen, mapRel);
+
+    EdScene *s = EdHost_Scene(h);
+    if (FileExists(mapBuf)) {
+        if (EdScene_Open(s, mapBuf)) {
+            Recents_Push(s, mapBuf);
+            EdHost_Log(h, ED_LOG_INFO, "opened game '%s' — map: %s", proj.name[0] ? proj.name : chosen, mapBuf);
+        } else {
+            EdHost_Log(h, ED_LOG_ERROR, "game opened but map load FAILED: %s", mapBuf);
+        }
+    } else {
+        EdHost_Log(h, ED_LOG_INFO, "opened game '%s' (no default map found at %s)", proj.name[0] ? proj.name : chosen, mapBuf);
+    }
+
+    GameRecents_Push(s, chosen);
+}
+
+// Create a new game folder, scaffold it, then open it.
+static void a_new_game(EdHost *h, void *u) {
+    (void)u;
+    // Suggest ~/games or CWD.
+    char startDir[512];
+    const char *home = getenv("HOME");
+    if (home && home[0]) snprintf(startDir, sizeof startDir, "%s/games", home);
+    else                 snprintf(startDir, sizeof startDir, ".");
+
+    char chosen[512];
+    if (!EdFileDialog_SelectFolder(chosen, sizeof chosen, "New Game — select (or create) game folder", startDir)) return;
+
+    // Use the folder's basename as the display name; the user can edit game.project later.
+    const char *baseName = GetFileName(chosen);
+    if (!baseName || !baseName[0]) baseName = "mygame";
+
+    if (!EdProject_New(chosen, "empty", baseName)) {
+        EdHost_Log(h, ED_LOG_ERROR, "new game FAILED: could not scaffold '%s'", chosen);
+        return;
+    }
+
+    if (!EdProject_Open(chosen)) {
+        EdHost_Log(h, ED_LOG_ERROR, "new game FAILED: could not open just-scaffolded '%s'", chosen);
+        return;
+    }
+
+    EdScene *s = EdHost_Scene(h);
+
+    // Load the freshly seeded default map.
+    char mapBuf[512];
+    snprintf(mapBuf, sizeof mapBuf, "%s/maps/default.map", chosen);
+    if (FileExists(mapBuf)) {
+        if (EdScene_Open(s, mapBuf)) {
+            Recents_Push(s, mapBuf);
+            EdHost_Log(h, ED_LOG_INFO, "new game '%s' — scaffolded and opened", baseName);
+        } else {
+            EdHost_Log(h, ED_LOG_ERROR, "game scaffolded but map load FAILED: %s", mapBuf);
+        }
+    } else {
+        EdHost_Log(h, ED_LOG_INFO, "new game '%s' scaffolded (no starter map)", baseName);
+    }
+
+    GameRecents_Push(s, chosen);
+}
+
+// onClick handler for a recent-game entry.
+static void a_open_recent_game(EdHost *h, void *u) {
+    int idx = (int)(intptr_t)u;
+    if (idx < 0 || idx >= g_gameCount) return;
+
+    char dir[ED_GAME_LEN]; snprintf(dir, sizeof dir, "%s", g_games[idx]);
+
+    if (!EdProject_Open(dir)) {
+        EdHost_Log(h, ED_LOG_ERROR, "open recent game FAILED: %s", dir);
+        return;
+    }
+
+    // Load the game's default map.
+    EdProject proj;
+    const char *mapRel = "maps/default.map";
+    if (EdProject_Read(dir, &proj) && proj.default_map[0]) mapRel = proj.default_map;
+
+    char mapBuf[512];
+    snprintf(mapBuf, sizeof mapBuf, "%s/%s", dir, mapRel);
+
+    EdScene *s = EdHost_Scene(h);
+    if (FileExists(mapBuf)) {
+        if (EdScene_Open(s, mapBuf)) {
+            Recents_Push(s, mapBuf);
+            EdHost_Log(h, ED_LOG_INFO, "opened recent game: %s", dir);
+        } else {
+            EdHost_Log(h, ED_LOG_ERROR, "game opened but map load FAILED: %s", mapBuf);
+        }
+    } else {
+        EdHost_Log(h, ED_LOG_INFO, "opened recent game: %s (no map)", dir);
+    }
+
+    GameRecents_Push(s, dir);
 }
 
 // ---- non-File actions -------------------------------------------------------
@@ -379,19 +580,27 @@ static void RegisterMenus(EdHost *h) {
     // Load recents from cfg on first registration (scene is already loaded by now).
     Recents_Load(EdHost_Scene(h)->cfg);
 
-    // File menu — New, Open, Save, Save As, separator, [recents via dyn hook],
-    // separator, Reload, Exit.
-    EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="File", .label="New",       .onClick=a_new });
-    EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="File", .label="Open...",   .shortcut="Ctrl+O", .onClick=a_open });
-    EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="File", .label="Save",      .shortcut="Ctrl+S", .onClick=a_save });
+    // File menu:
+    //   New / Open... / Save / Save As... / ─ / [map recents] / ─ /
+    //   New Game... / Open Game... / ─ / [game recents] / ─ /
+    //   Reload / Exit
+    EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="File", .label="New",        .onClick=a_new });
+    EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="File", .label="Open...",    .shortcut="Ctrl+O", .onClick=a_open });
+    EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="File", .label="Save",       .shortcut="Ctrl+S", .onClick=a_save });
     EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="File", .label="Save As...", .onClick=a_save_as });
     EdHost_AddMenuSeparator(h, "File");
-    // (recents appear here via the dynamic hook — registered below)
+    // (map recents appear here via the dynamic hook — registered below)
+    EdHost_AddMenuSeparator(h, "File");
+    EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="File", .label="New Game...",  .onClick=a_new_game });
+    EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="File", .label="Open Game...", .onClick=a_open_game });
+    EdHost_AddMenuSeparator(h, "File");
+    // (recent games appear here via the second dynamic hook — registered below)
     EdHost_AddMenuSeparator(h, "File");
     EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="File", .label="Reload", .onClick=a_reload, .enabled=q_dirty });
     EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="File", .label="Exit",   .onClick=a_exit });
 
-    // Register the recents dynamic provider for the File menu.
+    // Combined dynamic provider: map recents then (separated) game recents.
+    // One slot per menu name — see RecentsDynProvider for the combined layout.
     EdHost_SetMenuDynamic(h, "File", RecentsDynProvider, NULL);
 
     EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="Edit", .label="Undo", .shortcut="Ctrl+Z", .onClick=a_undo, .enabled=q_can_undo });

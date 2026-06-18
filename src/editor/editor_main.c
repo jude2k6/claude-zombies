@@ -18,6 +18,7 @@
 #include "ui.h"
 #include "cfg.h"
 #include "mapdoc.h"
+#include "content.h"   // Eng_ResolveAssetPath
 
 #include "edscene.h"
 #include "edhost.h"
@@ -102,7 +103,12 @@ static int RunCheck(void) {
 }
 
 int main(int argc, char **argv) {
-    const char *path = "data/maps/default.map";
+    // Resolve the default map via the engine's root stack so that, once a game
+    // root is set at runtime (Open Game / New Game), the game's default map wins.
+    // With no roots set the data/ dev fallback keeps the editor working as before.
+    static char s_defaultMapBuf[512];
+    const char *path = Eng_ResolveAssetPath("maps/default.map", s_defaultMapBuf, sizeof s_defaultMapBuf);
+    if (!path) path = "data/maps/default.map";  // absolute last-resort fallback
     bool check = false;
     int viewOverride = -1;  // -1 = no override; otherwise EdViewMode value
     for (int i = 1; i < argc; i++) {

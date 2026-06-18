@@ -3,6 +3,7 @@
 #include "assets.h"
 #include "decals.h"
 #include "particles.h"
+#include "content.h"   // Eng_ResolveAssetPath — root-stack path probing
 #include "raymath.h"
 #include <stdlib.h>
 #include <stdio.h>
@@ -772,15 +773,12 @@ void Level_LoadHardcodedFallback(void) {
 }
 
 void Level_Build(void) {
-    // Try a few likely paths so it works whether you run from the project
-    // root or from the build/ directory.
-    const char *paths[] = {
-        "data/maps/default.map",
-        "../data/maps/default.map",
-        "./data/maps/default.map",
-    };
-    for (size_t i = 0; i < sizeof paths / sizeof paths[0]; i++) {
-        if (Level_LoadFromFile(paths[i])) return;
+    // Resolve the default map through the engine content root stack (game root
+    // first, then library, then data/ dev fallbacks) so the binary works from
+    // any working directory and game-project overlays are honoured.
+    char resolved[512];
+    if (Eng_ResolveAssetPath("maps/default.map", resolved, sizeof resolved)) {
+        if (Level_LoadFromFile(resolved)) return;
     }
     fprintf(stderr, "map: no .map file found, using hardcoded fallback\n");
     Level_LoadHardcodedFallback();

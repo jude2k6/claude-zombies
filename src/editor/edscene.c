@@ -10,6 +10,7 @@
 #include "debugdraw.h"
 #include "gfx.h"
 #include "deffile.h"   // shared .mob reader (engine-side, game-clean)
+#include "content.h"   // Eng_ContentDirs, Eng_ResolveAssetPath
 
 #include <stdio.h>
 #include <string.h>
@@ -516,24 +517,40 @@ static void EdMobLineCb(int lineNo, int n, char **toks, void *user) {
 
 void EdScene_ScanMobs(EdScene *s) {
     s->mobDefCount = 0;
-    static const char *prefixes[] = { "data/mobs", "../data/mobs", "./data/mobs" };
-    for (size_t p = 0; p < sizeof prefixes / sizeof prefixes[0]; p++) {
-        if (!DirectoryExists(prefixes[p])) continue;
-        FilePathList files = LoadDirectoryFilesEx(prefixes[p], ".mob", true);
+
+    // Collect the ordered root directories for "mobs" via the engine resolver
+    // (game root first, then library, then data/ dev fallbacks).
+    char dirs[4][512];
+    int nDirs = Eng_ContentDirs("mobs", dirs, 4);
+
+    // Track which mob ids we have already added so that a game entry silently
+    // shadows a same-named library/data entry (de-dup by id, first-seen wins).
+    char seen[ED_MAX_MOBDEFS][ED_MOBID_LEN];
+    int  nSeen = 0;
+
+    for (int d = 0; d < nDirs && s->mobDefCount < ED_MAX_MOBDEFS; d++) {
+        if (!DirectoryExists(dirs[d])) continue;
+        FilePathList files = LoadDirectoryFilesEx(dirs[d], ".mob", true);
         for (unsigned i = 0; i < files.count && s->mobDefCount < ED_MAX_MOBDEFS; i++) {
             char *text = LoadFileText(files.paths[i]);
             if (!text) continue;
             EdMobParse mp = { .def = { .name = "", .tint = { 200, 80, 80, 255 } }, .sawId = false };
             Eng_DefForEachLine(text, EdMobLineCb, &mp);
             UnloadFileText(text);
-            if (mp.sawId) {
-                if (!mp.def.name[0]) snprintf(mp.def.name, sizeof mp.def.name, "%s", mp.def.id);
-                s->mobDefs[s->mobDefCount++] = mp.def;
+            if (!mp.sawId) continue;
+            // De-dup: skip if we already added a mob with this id.
+            bool dup = false;
+            for (int k = 0; k < nSeen; k++) {
+                if (strcmp(seen[k], mp.def.id) == 0) { dup = true; break; }
             }
+            if (dup) continue;
+            if (!mp.def.name[0]) snprintf(mp.def.name, sizeof mp.def.name, "%s", mp.def.id);
+            s->mobDefs[s->mobDefCount++] = mp.def;
+            if (nSeen < ED_MAX_MOBDEFS) snprintf(seen[nSeen++], ED_MOBID_LEN, "%s", mp.def.id);
         }
         UnloadDirectoryFiles(files);
-        if (s->mobDefCount > 0) break;   // first existing root wins
     }
+
     // Always offer at least the zombie so the palette has a mob tool even when
     // run from a directory without a data/mobs catalog.
     if (s->mobDefCount == 0) {

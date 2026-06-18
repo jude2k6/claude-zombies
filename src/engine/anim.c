@@ -1,4 +1,5 @@
 #include "anim.h"
+#include "content.h"   // Eng_ResolveAssetPath — root-stack path probing
 #include "raymath.h"
 #include <stdio.h>
 #include <string.h>
@@ -7,20 +8,15 @@ bool Anim_Load(AnimModel *am, const char *file) {
     memset(am, 0, sizeof *am);
     am->anims = NULL;
 
-    // Same resolution strategy as the rest of the asset loaders: try the
-    // project root and the build/ layout so it works from either CWD.
-    static const char *prefixes[] = {
-        "", "data/models/", "../data/models/", "./data/models/",
-        "data/", "../data/",
-    };
+    // Resolve through the engine content root stack (game root first, then
+    // library, then data/ dev fallbacks). Build a root-relative models/ path;
+    // if `file` is already an absolute or data/-prefixed path, the resolver
+    // honours it as-is (legacy callers keep working).
+    char relPath[512];
+    snprintf(relPath, sizeof relPath, "models/%s", file);
     char path[512] = {0};
-    bool found = false;
-    for (size_t p = 0; p < sizeof prefixes / sizeof prefixes[0]; p++) {
-        snprintf(path, sizeof path, "%s%s", prefixes[p], file);
-        if (FileExists(path)) { found = true; break; }
-    }
-    if (!found) {
-        fprintf(stderr, "anim: '%s' not found in any data path\n", file);
+    if (!Eng_ResolveAssetPath(relPath, path, sizeof path)) {
+        fprintf(stderr, "anim: '%s' not found in any content root\n", file);
         return false;
     }
 

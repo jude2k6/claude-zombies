@@ -17,12 +17,33 @@
 #include "mapedit.h"
 #include "cfg.h"
 #include "app.h"      // Eng_RequestClose
+#include "content.h"  // Eng_ContentDirs, Eng_GetGameRoot
 
 #include <stdio.h>
 #include <stdlib.h>   // atof, for inspector number fields
 #include <string.h>
 #include <stdint.h>
 #include <ctype.h>    // tolower, for case-insensitive filter
+
+// ---------------------------------------------------------------------------
+// Derive the maps start directory for file dialogs.
+// When a game root is active, ask the resolver for the first existing "maps"
+// dir (game root wins over library).  Without a game root, fall back to the
+// dev-tree "data/maps".
+// ---------------------------------------------------------------------------
+static void MapsStartDir(char *buf, int cap) {
+    char dirs[4][512];
+    int n = Eng_ContentDirs("maps", dirs, 4);
+    for (int i = 0; i < n; i++) {
+        if (DirectoryExists(dirs[i])) {
+            // %.*s bounds the field so gcc can prove no truncation (the 2D
+            // dirs[] array otherwise reads as a 2047-byte object to -Wformat).
+            snprintf(buf, cap, "%.*s", cap - 1, dirs[i]);
+            return;
+        }
+    }
+    snprintf(buf, cap, "data/maps");
+}
 
 #define ED_UI_MIN 0.7f
 #define ED_UI_MAX 3.0f
@@ -146,7 +167,7 @@ static void DirtyGuardModal(EdHost *h, Rectangle area, void *u) {
         EdScene *s = EdHost_Scene(h);
         bool saved = false;
         if (strcmp(GetFileName(s->path), "untitled.map") == 0) {
-            char startDir[512]; snprintf(startDir, sizeof startDir, "data/maps");
+            char startDir[512]; MapsStartDir(startDir, sizeof startDir);
             char chosen[512];
             if (EdFileDialog_Save(chosen, sizeof chosen, startDir, "untitled.map")) {
                 if (EdScene_SaveAs(s, chosen)) {
@@ -209,7 +230,7 @@ static void do_open(EdHost *h) {
     EdScene *s = EdHost_Scene(h);
     char startDir[512]; snprintf(startDir, sizeof startDir, "%s", s->path);
     char *slash = strrchr(startDir, '/');
-    if (slash) *slash = '\0'; else snprintf(startDir, sizeof startDir, "data/maps");
+    if (slash) *slash = '\0'; else MapsStartDir(startDir, sizeof startDir);
 
     char chosen[512];
     if (!EdFileDialog_Open(chosen, sizeof chosen, startDir)) return;
@@ -244,7 +265,7 @@ static void a_save(EdHost *h, void *u) {
     (void)u; EdScene *s = EdHost_Scene(h);
     // If the file has never been saved (untitled), behave like Save As.
     if (strcmp(GetFileName(s->path), "untitled.map") == 0) {
-        char startDir[512]; snprintf(startDir, sizeof startDir, "data/maps");
+        char startDir[512]; MapsStartDir(startDir, sizeof startDir);
         char chosen[512];
         if (!EdFileDialog_Save(chosen, sizeof chosen, startDir, "untitled.map")) return;
         if (EdScene_SaveAs(s, chosen)) {
@@ -267,7 +288,7 @@ static void a_save_as(EdHost *h, void *u) {
     (void)u; EdScene *s = EdHost_Scene(h);
     char startDir[512]; snprintf(startDir, sizeof startDir, "%s", s->path);
     char *slash = strrchr(startDir, '/');
-    if (slash) *slash = '\0'; else snprintf(startDir, sizeof startDir, "data/maps");
+    if (slash) *slash = '\0'; else MapsStartDir(startDir, sizeof startDir);
     const char *defName = GetFileName(s->path);
 
     char chosen[512];

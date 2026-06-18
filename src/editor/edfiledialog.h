@@ -18,4 +18,9 @@ bool EdFileDialog_Open(char *out, int cap, const char *startDir);
 // Returns false if the user cancelled.
 bool EdFileDialog_Save(char *out, int cap, const char *startDir, const char *defaultName);
 
+// Folder-select dialog — title is shown in the OS dialog header.
+// `startDir` may be NULL (defaults to the user's home dir).
+// Writes the chosen folder path into `out`.  Returns false if cancelled.
+bool EdFileDialog_SelectFolder(char *out, int cap, const char *title, const char *startDir);
+
 #endif // SHOOTER_EDFILEDIALOG_H

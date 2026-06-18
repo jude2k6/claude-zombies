@@ -1,4 +1,5 @@
 #include "audio.h"
+#include "content.h"   // Eng_ResolveAssetPath — root-stack path probing
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -549,29 +550,19 @@ static Music  bgMusic;
 static bool   bgMusicLoaded  = false;
 static char   bgMusicName[64] = {0};  // currently-loaded music name (track key)
 
-// Try to load music stream from a few candidate paths.
+// Try to load music stream from the engine content root stack.
 // Returns true on success. Writes the loaded stream into bgMusic.
 static bool TryLoadMusic(const char *name) {
-    const char *prefixes[] = {
-        "data/audio/",
-        "../data/audio/",
-        "./data/audio/",
-    };
-    const int nPrefixes = 3;
+    // Build a root-relative audio path and let Eng_ResolveAssetPath probe the
+    // game/library/data/ stack (game root first, then library, then dev fallbacks).
+    char relPath[256];
+    snprintf(relPath, sizeof relPath, "audio/%s.ogg", name);
     char path[256];
-    for (int i = 0; i < nPrefixes; i++) {
-        snprintf(path, sizeof path, "%s%s.ogg", prefixes[i], name);
-        // Check if file is accessible before loading.
-        FILE *f = fopen(path, "rb");
-        if (!f) continue;
-        fclose(f);
-        bgMusic = LoadMusicStream(path);
-        if (bgMusic.stream.buffer != NULL) {
-            return true;
-        }
-        // LoadMusicStream failed even though file existed.
-        UnloadMusicStream(bgMusic);
-    }
+    if (!Eng_ResolveAssetPath(relPath, path, sizeof path)) return false;
+    bgMusic = LoadMusicStream(path);
+    if (bgMusic.stream.buffer != NULL) return true;
+    // LoadMusicStream failed even though the file resolved.
+    UnloadMusicStream(bgMusic);
     return false;
 }
 

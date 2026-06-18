@@ -9,6 +9,7 @@
 
 #include "mobs.h"
 #include "deffile.h"   // shared key=value reader
+#include "content.h"   // Eng_ContentDirs, Eng_ResolveAssetPath
 
 #include "raylib.h"    // LoadFileText / UnloadFileText / Directory* helpers
 #include <stdio.h>
@@ -96,16 +97,24 @@ static bool Mob_ParseFile(const char *path, MobDef *out) {
 void Mobs_Load(void) {
     g_mobCount = 0;
 
-    static const char *prefixes[] = { "data/mobs", "../data/mobs", "./data/mobs" };
-    for (size_t p = 0; p < sizeof prefixes / sizeof prefixes[0]; p++) {
-        if (!DirectoryExists(prefixes[p])) continue;
-        FilePathList files = LoadDirectoryFilesEx(prefixes[p], ".mob", true);
+    // Enumerate mob roots via the engine content resolver (game root first,
+    // then library, then data/ dev fallbacks). De-dup by mob id: the first
+    // root that provides a given id wins (game entry shadows library entry).
+    char mobDirs[4][512];
+    int nMobDirs = Eng_ContentDirs("mobs", mobDirs, 4);
+    for (int p = 0; p < nMobDirs; p++) {
+        if (!DirectoryExists(mobDirs[p])) continue;
+        FilePathList files = LoadDirectoryFilesEx(mobDirs[p], ".mob", true);
         for (unsigned i = 0; i < files.count && g_mobCount < MAX_MOB_DEFS; i++) {
             MobDef d;
-            if (Mob_ParseFile(files.paths[i], &d)) g_mobs[g_mobCount++] = d;
+            if (!Mob_ParseFile(files.paths[i], &d)) continue;
+            // De-dup: skip if this id was already loaded from an earlier root.
+            bool dup = false;
+            for (int j = 0; j < g_mobCount; j++)
+                if (strcmp(g_mobs[j].id, d.id) == 0) { dup = true; break; }
+            if (!dup) g_mobs[g_mobCount++] = d;
         }
         UnloadDirectoryFiles(files);
-        if (g_mobCount > 0) break;   // first existing root wins (mirrors weapons)
     }
 
     fprintf(stderr, "mob: parsed %d .mob file(s)\n", g_mobCount);
@@ -143,15 +152,12 @@ const MobDef *Mob_Find(const char *id) {
 
 static bool ModelResolves(const char *model) {
     if (!model || !model[0]) return false;
-    // Probe the same data/models roots the engine content loader uses, plus a
-    // bare relative path, so a headless run can verify the asset exists.
-    char path[512];
-    static const char *roots[] = { "data/models/", "../data/models/", "./data/models/", "" };
-    for (size_t r = 0; r < sizeof roots / sizeof roots[0]; r++) {
-        snprintf(path, sizeof path, "%s%s", roots[r], model);
-        if (FileExists(path)) return true;
-    }
-    return false;
+    // Route through the engine content resolver: build a root-relative models/
+    // path and let Eng_ResolveAssetPath probe the game/library/data/ root stack.
+    char relPath[512];
+    snprintf(relPath, sizeof relPath, "models/%s", model);
+    char resolved[512];
+    return Eng_ResolveAssetPath(relPath, resolved, sizeof resolved) != NULL;
 }
 
 int Mob_Validate(MobIssue *out, int max) {

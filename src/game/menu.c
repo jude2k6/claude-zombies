@@ -8,7 +8,8 @@
 #include "pad.h"
 #include "settings.h"
 #include "raygui.h"
-#include "ui.h"   // house UI toolkit: theme + shadowed/centered text
+#include "ui.h"      // house UI toolkit: theme + shadowed/centered text
+#include "content.h" // Eng_ContentDirs — root-stack directory enumeration
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -47,15 +48,25 @@ static void MenuBG(int sw, int sh) {
 
 void Menu_ScanMaps(void) {
     mapListCount = 0;
-    const char *dirs[] = { "data/maps", "../data/maps", "./data/maps" };
-    for (size_t i = 0; i < sizeof dirs / sizeof dirs[0] && mapListCount == 0; i++) {
+    // Enumerate map roots via the engine content resolver (game root first, then
+    // library, then data/ dev fallbacks). De-dup by basename: the first root
+    // that provides a given .map filename wins (game entry shadows library entry).
+    char dirs[4][512];
+    int nDirs = Eng_ContentDirs("maps", dirs, 4);
+    for (int i = 0; i < nDirs; i++) {
         if (!DirectoryExists(dirs[i])) continue;
         FilePathList list = LoadDirectoryFilesEx(dirs[i], ".map", false);
         for (unsigned int j = 0; j < list.count && mapListCount < MAP_LIST_MAX; j++) {
+            const char *base = GetFileNameWithoutExt(list.paths[j]);
+            if (!base) base = "?";
+            // De-dup: skip if a same-named entry was loaded from an earlier root.
+            bool dup = false;
+            for (int k = 0; k < mapListCount; k++)
+                if (strcmp(mapList[k].name, base) == 0) { dup = true; break; }
+            if (dup) continue;
             strncpy(mapList[mapListCount].path, list.paths[j], sizeof mapList[0].path - 1);
             mapList[mapListCount].path[sizeof mapList[0].path - 1] = 0;
-            const char *base = GetFileNameWithoutExt(list.paths[j]);
-            strncpy(mapList[mapListCount].name, base ? base : "?", sizeof mapList[0].name - 1);
+            strncpy(mapList[mapListCount].name, base, sizeof mapList[0].name - 1);
             mapList[mapListCount].name[sizeof mapList[0].name - 1] = 0;
             mapListCount++;
         }

@@ -6,6 +6,7 @@
 // ============================================================================
 
 #include "mob_ai.h"
+#include "content.h"   // Eng_ContentDirs — root-stack directory enumeration
 
 #include "raylib.h"    // Directory* helpers + TraceLog
 #include <string.h>
@@ -90,10 +91,13 @@ int Game_LoadBehaviourPlugins(void) {
     int n = 0;
     n += LoadPluginsFrom("behaviours");
     n += LoadPluginsFrom("../behaviours");
-    // Per-mob-folder behaviours: a .so living beside its .mob (locality follows
-    // ownership — see editor-content-extensibility.md §4).
-    n += LoadPluginsFrom("data/mobs");
-    n += LoadPluginsFrom("../data/mobs");
+    // Per-mob-folder .so behaviours: enumerate all mob roots via the engine
+    // content resolver (game root first, then library, then data/ dev fallbacks)
+    // so .so files beside their .mob work regardless of which root they live in.
+    char mobDirs[4][512];
+    int nMobDirs = Eng_ContentDirs("mobs", mobDirs, 4);
+    for (int i = 0; i < nMobDirs; i++)
+        n += LoadPluginsFrom(mobDirs[i]);
     return n;
 #endif
 }

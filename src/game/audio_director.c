@@ -5,6 +5,7 @@
 #include "level.h"
 #include "entities.h"
 #include "player.h"
+#include "content.h"   // Eng_ContentDirs — root-stack directory enumeration
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -110,14 +111,17 @@ static bool ParseMapMusicName(const char *path, char *outName, int nameMax) {
 // Resolve the map file path from mapName and the known map search dirs.
 // Writes path into `outPath` (max `pathMax` bytes). Returns true if found.
 static bool FindMapFile(char *outPath, int pathMax) {
-    // Maps are stored under data/maps/ (relative to the working dir). We scan
-    // known filenames in each search dir, parsing NAME to match mapName. This
-    // only runs on map change (once per load), so the cost is acceptable.
-    const char *dirs[] = { "data/maps", "../data/maps", "./data/maps" };
+    // Enumerate all active map roots (game root first, then library, then data/
+    // dev fallbacks) via the engine content resolver so game-over-library overlay
+    // works transparently. This only runs on map change (once per load).
+    char dirs[4][512];
+    int nDirs = Eng_ContentDirs("maps", dirs, 4);
     const char *known[] = { "nacht", "factory", "default", "map" };
-    for (int d = 0; d < 3; d++) {
+    for (int d = 0; d < nDirs; d++) {
         for (int k = 0; k < 4; k++) {
-            snprintf(outPath, (size_t)pathMax, "%s/%s.map", dirs[d], known[k]);
+            // %.*s bounds the dir field so gcc can prove no truncation (the 2D
+            // dirs[] array otherwise reads as a 2047-byte object to -Wformat).
+            snprintf(outPath, (size_t)pathMax, "%.*s/%s.map", pathMax - 12, dirs[d], known[k]);
             FILE *f = fopen(outPath, "r");
             if (!f) continue;
             char raw[256];

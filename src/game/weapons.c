@@ -539,33 +539,30 @@ void Weapons_Load(void) {
         weaponGrip[i] = (WeaponGrip){ .scale = 1.0f };
     }
 
-    // Search the same prefix list as other assets so the binary runs from
-    // either the build dir (data/weapons/) or the source tree (../data/...).
-    static const char *prefixes[] = {
-        "data/weapons",
-        "../data/weapons",
-        "./data/weapons",
-    };
+    // Enumerate weapon roots via the engine content resolver (game root first,
+    // then library, then data/ dev fallbacks). De-dup by weapon id: the first
+    // root that claims an id wins (game shadows library).
+    char weapDirs[4][512];
+    int nWeapDirs = Eng_ContentDirs("weapons", weapDirs, 4);
 
     bool claimed[W_COUNT] = { false };
     int parsed = 0;
-    for (size_t p = 0; p < sizeof prefixes / sizeof prefixes[0]; p++) {
-        if (!DirectoryExists(prefixes[p])) continue;
-        FilePathList files = LoadDirectoryFilesEx(prefixes[p], ".weapon", true);
+    for (int p = 0; p < nWeapDirs; p++) {
+        if (!DirectoryExists(weapDirs[p])) continue;
+        FilePathList files = LoadDirectoryFilesEx(weapDirs[p], ".weapon", true);
         for (unsigned i = 0; i < files.count; i++) {
             // Route through the engine content registry: engine reads bytes
             // and calls WeaponContentParser, which calls Weapons_ParseFile.
             void *r = Eng_LoadContent(files.paths[i]);
             if (r) {
                 int idx = (int)(uintptr_t)r - 1;
-                if (idx >= 0 && idx < W_COUNT) {
+                if (idx >= 0 && idx < W_COUNT && !claimed[idx]) {
                     claimed[idx] = true;
                     parsed++;
                 }
             }
         }
         UnloadDirectoryFiles(files);
-        if (parsed > 0) break;     // first existing root wins
     }
 
     // No compiled-in fallbacks exist: any unclaimed slot is a broken weapon

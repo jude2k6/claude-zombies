@@ -66,3 +66,13 @@ bool EdFileDialog_Save(char *out, int cap, const char *startDir, const char *def
     snprintf(out, cap, "%s", result);
     return true;
 }
+
+bool EdFileDialog_SelectFolder(char *out, int cap, const char *title, const char *startDir) {
+    const char *result = tinyfd_selectFolderDialog(
+        title ? title : "Select folder",
+        startDir ? startDir : ""
+    );
+    if (!result) return false;
+    snprintf(out, cap, "%s", result);
+    return true;
+}

@@ -19,9 +19,12 @@
 > **3.1 Place All Entity Kinds** (the PLACE palette now covers every `EngMapEntKind`,
 > grouped Spawns / Geometry / Buyables; walls are two-click, the rest drop-and-snap).
 > On the engine side the **2.4** textured-render foundation (`Eng_DrawTexturedBoxV` /
-> `…FloorV`) also landed — see [scene-builder.md](scene-builder.md) §5.7. Still open from
-> the Top 5: **5.1 Play-Test Launch**. (Beyond the editor backlog, the games-as-projects
-> **New/Open Game** UI also shipped — see [game-projects.md](game-projects.md) §8 / §10.)
+> `…FloorV`) also landed — see [scene-builder.md](scene-builder.md) §5.7. Also shipped:
+> **5.3 Asset Browser Panel** (the ASSETS panel — maps/models/textures from the content
+> overlay, model thumbnails, click-a-map-to-open, click-a-model-to-place; `edassets.{c,h}`
+> + `edthumb.{c,h}`). Still open from the Top 5: **5.1 Play-Test Launch**. (Beyond the
+> editor backlog, the games-as-projects **New/Open Game** UI also shipped — see
+> [game-projects.md](game-projects.md) §8 / §10.)
 
 ---
 
@@ -512,11 +515,24 @@ separate feature in `src/game/`.
 
 ---
 
-### 5.3 Asset Browser Panel
-A right-panel tab listing the available assets: maps in `data/maps/`, props (GLB files)
-in `data/models/`, textures in `data/textures/`. Click a map to open it; drag a prop
-onto the viewport to place it as a `PROP` entity with `name` set to the filename (less
-extension). A small thumbnail preview where raylib can render one.
+### 5.3 Asset Browser Panel — ✅ SHIPPED
+A right-zone panel listing the available assets: maps, models (GLB), textures — scanned
+from the **content overlay** (`Eng_ContentDirs`, game-over-library), not a hardcoded
+`data/` path. Implemented as `edassets.{c,h}` (the de-duped index, held on `EdScene`) +
+the `PanelAssets` built-in + `edthumb.{c,h}` (off-screen GLB thumbnail cache). Click a map
+to open it (through the unsaved-changes guard); click a model to arm prop placement with
+`name` = the file stem; per-model thumbnails render off-screen and cache.
+
+> **Implementation note worth keeping:** the host wraps every panel `draw` in a
+> `BeginScissorMode` (edhost.c). `BeginTextureMode` honours the active GL scissor, so an
+> off-screen thumbnail render under that scissor is clipped to the panel rect and produces
+> an empty texture. `PanelAssets` pre-renders thumbnails with the scissor **lifted**
+> (`EndScissorMode` → render → restore), before its own list draw.
+
+Still future (the literal-doc wishlist beyond what shipped): true **drag**-to-place (today
+it is click-to-arm, reusing the prop tool), texture-slot assignment from a texture click,
+and a copy-on-import action (stock library asset → game folder, the
+[game-projects.md](game-projects.md) overlay's writable side).
 
 **Why it matters:** Currently the only asset navigation is via the native file picker.
 An in-editor browser keeps the author's hands in the tool, is filterable/searchable, and

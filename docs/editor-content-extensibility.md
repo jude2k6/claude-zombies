@@ -325,7 +325,10 @@ and game-accurate rendering converge on the same asset path.
    open generalisation.
 5. **Partly done** — `data/mobs/dog/dog.mob` proves data-only reuse (reuses `chaser`); the
    Tier-2 `.so` no-rebuild path is wired and ready to validate with a sample plugin.
-   **Asset browser + picker** is still open.
+   **Asset browser + picker** ~~is still open~~ **landed** — the ASSETS panel
+   (`edassets.{c,h}` overlay scan + `edthumb.{c,h}` model thumbnails) browses maps/models/
+   textures, opens a map on click, and arms prop placement from a model; see
+   [scene-builder.md](scene-builder.md) §5.7b and [editor-feature-ideas.md](editor-feature-ideas.md) §5.3.
 6. ~~**Prop catalog (the second def slice, after mobs)**~~ **Done** — `props/<id>/<id>.prop`
    files (deffile format: `id`, `name`, `model`, `model_scale`, `collide_half`, `foot_y`)
    are the shared catalog for placeable props, replacing the hardcoded `barrel` placeholder

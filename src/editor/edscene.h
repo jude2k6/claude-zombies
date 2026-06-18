@@ -20,6 +20,7 @@
 #include "mapedit.h"
 #include "gizmo.h"
 #include "cfg.h"
+#include "edassets.h"
 #include <stdbool.h>
 
 // Upper bound on simultaneously-selectable proxies (one box per MapDoc entity).
@@ -121,6 +122,8 @@ typedef struct EdScene {
     int           perkDefCount;
     EdPropDef     weaponDefs[ED_MAX_BUYDEFS];  // scanned from weapons/*/*.weapon
     int           weaponDefCount;
+
+    EdAssetIndex  assets;           // maps/models/textures index (asset browser)
 
     bool          dragging;
     EngGizmoDrag  drag;

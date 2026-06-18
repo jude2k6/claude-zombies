@@ -11,6 +11,7 @@
 #include "gfx.h"
 #include "deffile.h"   // shared .mob reader (engine-side, game-clean)
 #include "content.h"   // Eng_ContentDirs, Eng_ResolveAssetPath
+#include "edthumb.h"   // asset-browser thumbnail cache (freed at shutdown)
 
 #include <stdio.h>
 #include <string.h>
@@ -782,11 +783,13 @@ void EdScene_Init(EdScene *s) {
     EdScene_ScanProps(s);
     EdScene_ScanPerks(s);
     EdScene_ScanWeapons(s);
+    EdAssets_Scan(&s->assets);
     s->dirty = false;
 }
 
 void EdScene_Shutdown(EdScene *s) {
     EngMapHistory_Free(&s->hist);
+    EdThumb_Shutdown();   // free cached asset-browser thumbnail textures
     if (s->vpTexValid) { UnloadRenderTexture(s->vpTex); s->vpTexValid = false; }
 }
 

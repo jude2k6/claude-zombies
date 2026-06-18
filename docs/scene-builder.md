@@ -25,9 +25,11 @@ loaded `.so` files in `./plugins`) extend it through the identical surface. See 
 > `File ▸ Save` (`MapDoc_Save`), **New Game / Open Game** (game-folder scaffolding +
 > overlay), **data-driven place palettes for every entity kind** (Spawns/Props/
 > Wallbuys/Perks scanned from content catalogs), submenu support, and a dynamic plugin
-> loader. Not yet: game-accurate textured rendering in the viewport (entities still
-> draw as proxy boxes — the shared engine draw helpers exist, §5.7), and the
-> asset-browser import surface. See §5.
+> loader, and an **ASSETS browser** (maps/models/textures scanned from the content
+> overlay, with model thumbnails — click a map to open it, click a model to place
+> it as a prop). Not yet: game-accurate textured rendering in the viewport
+> (entities still draw as proxy boxes — the shared engine draw helpers exist,
+> §5.7), and copy-on-import of stock library assets into the game folder. See §5.
 
 > **Related docs.** This is the canonical reference for how the editor works today.
 > For *where it's going*: [editor-content-extensibility.md](editor-content-extensibility.md)
@@ -80,6 +82,8 @@ The editor is **three layers + plugins**, all in `src/editor/`:
 | `edhost.{c,h}`  | **The shell** (the IDE frame). Owns layout (menu bar, dock zones, splitters, status bar), input routing, and the **plugin registration API**. Owns no editing logic — it hosts a viewport rect and calls into the scene. |
 | `builtins.c`    | **First-party plugins** — the default IDE (menus, the Tools/Hierarchy/Inspector/Console panels, the Settings dialog + Validate, the status segments), each written against the same `EdHost_*` API a third-party plugin uses. |
 | `editor_main.c` | **Wiring.** `main()` loads settings, opens the window, builds the host, registers the built-ins, loads dynamic plugins, runs `Eng_Run`. |
+| `edassets.{c,h}` | **Asset index.** Scans the content overlay (`Eng_ContentDirs`) for maps/models/textures into a de-duped `EdAssetIndex` (held on `EdScene`) for the ASSETS panel. Pure file listing — no parse, no load. |
+| `edthumb.{c,h}` | **Model thumbnails.** Lazily renders a `.glb` to a cached off-screen `RenderTexture`, framed by its bounds; the ASSETS panel shows it per model row. Engine-clean (raylib + `content.h` loaders). |
 | `edfiledialog.{c,h}` + `vendor/tinyfiledialogs.{c,h}` | **Native file picker** (Open/Save dialogs), editor-local — vendored, compiled into the `editor` target only, never the engine. |
 
 - **Proxies** — `EdScene_RebuildProxies()` walks the `MapDoc` each frame and emits one
@@ -256,7 +260,12 @@ registered once; recents change at runtime, hence the hook.)
   each wired through `mapedit.h` and pushing one undo step per change. When **nothing** is
   selected it shows a **MAP PROPERTIES** view instead (map name + atmosphere fog/sky via
   text fields and colour pickers, writing straight into the `MapDoc`); a *Map properties…*
-  button in the entity view deselects to reach it.
+  button in the entity view deselects to reach it. Below it, the **ASSETS** browser lists
+  the content overlay's maps / models / textures (scanned at load into `EdScene.assets` by
+  `edassets.{c,h}`, de-duped game-over-library): a filter box, **click a map to open it**
+  (through the same unsaved-changes guard as `File ▸ Open`), **click a model to arm prop
+  placement** with that model's name, and a thumbnail per model rendered off-screen by
+  `edthumb.{c,h}` (textures preview-only for now).
 - **Bottom zone**: **CONSOLE** — log output (plugin loads, save/validate results, Help),
   with a **Clear** button and a severity filter (all / warnings+ / errors).
 - **Status bar** (bottom): map name + dirty flag, entity count, view mode + gizmo mode +
@@ -349,6 +358,13 @@ Small, independently shippable steps; none blocks the game.
    `Eng_RenderBeginWorld`/`EndWorld` for the game's fog/sun shader. A later
    `libgame_edbridge.so` plugin could register game-specific draws (perk machines,
    wallbuys) for full parity without touching the editor binary.
+7b. ~~**Asset browser**~~ **Done** — the **ASSETS** panel (`edassets.{c,h}` index +
+   `edthumb.{c,h}` thumbnails) lists the overlay's maps/models/textures with a filter,
+   opens a map on click (via the unsaved-changes guard), and arms prop placement from a
+   model. Thumbnails render off-screen; note the host clips every panel draw, so the
+   thumbnail pre-render lifts the scissor (`EndScissorMode`/restore) around it. Still
+   future: drag-to-place (vs click-to-arm), texture-slot assignment, and copy-on-import of
+   stock assets into the game folder ([game-projects.md](game-projects.md)).
 8. **Docking polish** — tabbed panels + drag-to-rearrange + saved layouts (today's zones
    are fixed-position, splitter-resizable).
 9. **Packaging** — keep the standalone `editor` binary; later, optionally embed the same

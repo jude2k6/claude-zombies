@@ -12,6 +12,7 @@
 #include "edscene.h"
 #include "edfiledialog.h"
 #include "edproject.h"  // EdProject_Open, EdProject_New, EdProject_Read
+#include "edthumb.h"    // EdThumb_Model — asset-browser model previews
 
 #include "raygui.h"
 #include "ui.h"
@@ -187,19 +188,35 @@ void EdBuiltins_RememberGame(EdHost *h, const char *dir) {
 //  Unsaved-changes guard — Feature 4
 // ============================================================================
 
-static enum { PEND_NONE = 0, PEND_NEW, PEND_OPEN, PEND_EXIT } g_pending = PEND_NONE;
+static enum { PEND_NONE = 0, PEND_NEW, PEND_OPEN, PEND_EXIT, PEND_OPENPATH } g_pending = PEND_NONE;
+static char g_pendingPath[512];   // target for PEND_OPENPATH (asset-browser open)
 
 // Forward-declare the do_* helpers (bodies below, after a_save is declared).
 static void do_new (EdHost *h);
 static void do_open(EdHost *h);
 static void do_exit(EdHost *h);
+static void do_openpath(EdHost *h, const char *path);
+static void DirtyGuardModal(EdHost *h, Rectangle area, void *u);
 
 static void RunPending(EdHost *h) {
     int p = g_pending;
     g_pending = PEND_NONE;
-    if      (p == PEND_NEW)  do_new(h);
-    else if (p == PEND_OPEN) do_open(h);
-    else if (p == PEND_EXIT) do_exit(h);
+    if      (p == PEND_NEW)      do_new(h);
+    else if (p == PEND_OPEN)     do_open(h);
+    else if (p == PEND_EXIT)     do_exit(h);
+    else if (p == PEND_OPENPATH) do_openpath(h, g_pendingPath);
+}
+
+// Open a specific map by path, gated by the unsaved-changes guard — the shared
+// entry point the asset browser uses when a map row is clicked.
+static void RequestOpenMap(EdHost *h, const char *path) {
+    if (EdHost_Scene(h)->dirty) {
+        snprintf(g_pendingPath, sizeof g_pendingPath, "%s", path);
+        g_pending = PEND_OPENPATH;
+        EdHost_SetModal(h, DirtyGuardModal, NULL);
+    } else {
+        do_openpath(h, path);
+    }
 }
 
 static void DirtyGuardModal(EdHost *h, Rectangle area, void *u) {
@@ -299,6 +316,16 @@ static void do_open(EdHost *h) {
         EdHost_Log(h, ED_LOG_INFO, "opened %s", chosen);
     } else {
         EdHost_Log(h, ED_LOG_ERROR, "open FAILED: %s", chosen);
+    }
+}
+
+static void do_openpath(EdHost *h, const char *path) {
+    EdScene *s = EdHost_Scene(h);
+    if (EdScene_Open(s, path)) {
+        Recents_Push(s, path);
+        EdHost_Log(h, ED_LOG_INFO, "opened %s", path);
+    } else {
+        EdHost_Log(h, ED_LOG_ERROR, "open FAILED: %s", path);
     }
 }
 
@@ -851,6 +878,139 @@ static void PanelHierarchy(EdHost *h, Rectangle c, void *u) {
     }
 }
 
+// ---- Assets panel — Feature 5.3: browse maps / models / textures -----------
+// A scrollable index of the content overlay (EdScene.assets, scanned at init):
+// click a MAP to open it (via the unsaved-changes guard), click a MODEL to arm
+// prop placement with that model's name, TEXTURES are browse-only previews.
+// Models/textures show a thumbnail (EdThumb_Model / the engine texture cache).
+static float g_assetsScroll = 0;
+static char  g_assetFilter[64] = "";
+static bool  g_assetFilterEdit = false;
+
+// Case-insensitive substring test (empty needle always matches).
+static bool ContainsCI(const char *hay, const char *needle) {
+    if (!needle[0]) return true;
+    for (int i = 0; hay[i]; i++) {
+        int j = 0;
+        while (needle[j] && tolower((unsigned char)hay[i + j]) == tolower((unsigned char)needle[j])) j++;
+        if (!needle[j]) return true;
+    }
+    return false;
+}
+
+// One asset row: thumbnail (optional) + name, hover/click. Returns true if the
+// row was left-clicked this frame. `thumb` with .id==0 draws a plain swatch.
+static bool AssetRow(EdHost *h, Rectangle area, float y, float rowH, float sc,
+                     Texture2D thumb, bool flip, const char *name, Color tint) {
+    Rectangle row = { area.x, y, area.width, rowH };
+    bool hot = CheckCollisionPointRec(GetMousePosition(), row);
+    if (hot) DrawRectangleRec(row, (Color){ 40, 46, 56, 255 });
+    float th = rowH - 4 * sc;
+    Rectangle dst = { area.x + 2 * sc, y + 2 * sc, th, th };
+    if (thumb.id) {
+        Rectangle srcR = { 0, 0, (float)thumb.width, flip ? -(float)thumb.height : (float)thumb.height };
+        DrawTexturePro(thumb, srcR, dst, (Vector2){ 0, 0 }, 0, WHITE);
+    } else {
+        DrawRectangleRec(dst, tint);
+    }
+    Eng_UiText(name, dst.x + th + 6 * sc, y + (rowH - 11 * sc) * 0.5f, 11, ENG_UI_TEXT);
+    return hot && EdHost_PanelsInteractive(h) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
+}
+
+static void PanelAssets(EdHost *h, Rectangle c, void *u) {
+    (void)u; EdScene *s = EdHost_Scene(h);
+    float sc = EdHost_UiScale(h);
+    const EdAssetIndex *ix = &s->assets;
+    float rowH = 30 * sc, labelH = 16 * sc;
+
+    // filter box
+    Rectangle filterRect = { c.x, c.y, c.width, 20 * sc };
+    if (GuiTextBox(filterRect, g_assetFilter, sizeof g_assetFilter, g_assetFilterEdit))
+        g_assetFilterEdit = !g_assetFilterEdit;
+    Rectangle area = { c.x, c.y + 22 * sc, c.width, c.height - 22 * sc };
+
+    // Pre-render model thumbnails with the panel scissor LIFTED. The host clips
+    // every panel draw to its content rect (edhost.c), and BeginTextureMode
+    // honours the active GL scissor — so rendering a thumbnail under that scissor
+    // clips the off-screen pass to the panel rect and produces an empty texture.
+    // Lift the host clip, render (EdThumb caches → one render per model), then
+    // restore it for the rest of this panel's drawing.
+    EndScissorMode();
+    for (int i = 0; i < ix->modelCount; i++)
+        if (ContainsCI(ix->models[i].name, g_assetFilter)) EdThumb_Model(ix->models[i].path, 64);
+    BeginScissorMode((int)c.x, (int)c.y, (int)c.width, (int)c.height);
+
+    if (CheckCollisionPointRec(GetMousePosition(), area))
+        g_assetsScroll -= GetMouseWheelMove() * rowH * 2.0f;
+    static float prevTotal = 0;
+    float maxScroll = prevTotal - area.height; if (maxScroll < 0) maxScroll = 0;
+    if (g_assetsScroll < 0) g_assetsScroll = 0;
+    if (g_assetsScroll > maxScroll) g_assetsScroll = maxScroll;
+
+    BeginScissorMode((int)area.x, (int)area.y, (int)area.width, (int)area.height);
+    float y = area.y - g_assetsScroll;
+    bool vis;   // a row at [y, y+rowH] overlaps the panel?
+    #define ROW_VIS(hh) ((y + (hh) > area.y) && (y < area.y + area.height))
+
+    // ---- Maps (click to open) ----
+    if (ROW_VIS(labelH)) GuiLabel((Rectangle){ area.x, y, area.width, labelH }, "Maps");
+    y += labelH;
+    for (int i = 0; i < ix->mapCount; i++) {
+        if (!ContainsCI(ix->maps[i].name, g_assetFilter)) continue;
+        vis = ROW_VIS(rowH);
+        if (vis && AssetRow(h, area, y, rowH, sc, (Texture2D){0}, false,
+                            ix->maps[i].name, (Color){ 90, 110, 150, 255 }))
+            RequestOpenMap(h, ix->maps[i].path);
+        y += rowH;
+    }
+
+    // ---- Models (click to arm prop placement) ----
+    if (ROW_VIS(labelH)) GuiLabel((Rectangle){ area.x, y, area.width, labelH }, "Models");
+    y += labelH;
+    for (int i = 0; i < ix->modelCount; i++) {
+        if (!ContainsCI(ix->models[i].name, g_assetFilter)) continue;
+        vis = ROW_VIS(rowH);
+        if (vis) {
+            // Only render a (one-time) thumbnail when the row is actually on
+            // screen, so off-screen models never pay the render cost.
+            Texture2D t = EdThumb_Model(ix->models[i].path, 64);
+            bool armed = (s->placeTool == ED_PLACE_PROP &&
+                          strcmp(s->placePropId, ix->models[i].name) == 0);
+            if (AssetRow(h, area, y, rowH, sc, t, true, ix->models[i].name,
+                         armed ? ENG_UI_GOLD : (Color){ 70, 80, 70, 255 })) {
+                s->placeTool = ED_PLACE_PROP;
+                snprintf(s->placePropId, sizeof s->placePropId, "%s", ix->models[i].name);
+                EdHost_Log(h, ED_LOG_INFO, "place prop: %s (click the viewport)", ix->models[i].name);
+            }
+        }
+        y += rowH;
+    }
+
+    // ---- Textures (browse-only preview) ----
+    if (ROW_VIS(labelH)) GuiLabel((Rectangle){ area.x, y, area.width, labelH }, "Textures");
+    y += labelH;
+    for (int i = 0; i < ix->textureCount; i++) {
+        if (!ContainsCI(ix->textures[i].name, g_assetFilter)) continue;
+        vis = ROW_VIS(rowH);
+        if (vis) {
+            Texture2D t = {0};
+            Texture2D *tp = Eng_TextureGet(Eng_LoadTexture(ix->textures[i].path));
+            if (tp) t = *tp;
+            if (AssetRow(h, area, y, rowH, sc, t, false, ix->textures[i].name,
+                         (Color){ 80, 70, 70, 255 }))
+                EdHost_Log(h, ED_LOG_INFO, "texture: %s", ix->textures[i].name);
+        }
+        y += rowH;
+    }
+
+    #undef ROW_VIS
+    EndScissorMode();
+    prevTotal = (y + g_assetsScroll) - area.y;
+
+    if (ix->mapCount + ix->modelCount + ix->textureCount == 0)
+        Eng_UiText("(no assets found)", area.x + 4 * sc, area.y + 2 * sc, 11, ENG_UI_DIM);
+}
+
 // ============================================================================
 //  Inspector helpers — tiny field widgets used by PanelInspector
 // ============================================================================
@@ -1206,6 +1366,7 @@ static void RegisterPanels(EdHost *h) {
     EdHost_AddPanel(h, &(EdPanel){ .id="tools",     .title="TOOLS",     .zone=ED_DOCK_LEFT,   .draw=PanelTools, .prefH=256 });
     EdHost_AddPanel(h, &(EdPanel){ .id="hierarchy", .title="HIERARCHY", .zone=ED_DOCK_LEFT,   .draw=PanelHierarchy });
     EdHost_AddPanel(h, &(EdPanel){ .id="inspector", .title="INSPECTOR", .zone=ED_DOCK_RIGHT,  .draw=PanelInspector });
+    EdHost_AddPanel(h, &(EdPanel){ .id="assets",    .title="ASSETS",    .zone=ED_DOCK_RIGHT,  .draw=PanelAssets });
     EdHost_AddPanel(h, &(EdPanel){ .id="console",   .title="CONSOLE",   .zone=ED_DOCK_BOTTOM, .draw=PanelConsole });
 }
 

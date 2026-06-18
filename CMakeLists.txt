@@ -121,6 +121,8 @@ add_executable(editor
     src/editor/edscene.c
     src/editor/edhost.c
     src/editor/builtins.c
+    src/editor/edassets.c
+    src/editor/edthumb.c
     src/editor/edfiledialog.c
     src/editor/edproject.c
     src/editor/edlauncher.c

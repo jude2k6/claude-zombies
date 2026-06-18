@@ -64,6 +64,9 @@ typedef void (*EdStatusFn)(EdHost *h, char *out, int cap, void *user);// fill st
 // polled each frame the menu is open; NULL `enabled` = always enabled.
 typedef struct {
     const char *menu;
+    const char *submenu;    // optional: group into a "<submenu> ▸" flyout under
+                            // `menu`. NULL = a normal top-level item. Items sharing
+                            // a (menu, submenu) pair appear together in the flyout.
     const char *label;
     const char *shortcut;   // right-aligned hint, e.g. "Ctrl+S" (may be NULL)
     EdActionFn  onClick;
@@ -115,6 +118,7 @@ void EdHost_Log(EdHost *h, EdLogLevel lvl, const char *fmt, ...);
 // Read-side, for the console panel: number of buffered lines and line access.
 int         EdHost_LogCount(EdHost *h);
 const char *EdHost_LogLine(EdHost *h, int i, EdLogLevel *outLvl);
+void        EdHost_LogClear(EdHost *h);   // empty the ring buffer
 
 // ---- editor context accessors (stable ABI for dynamic plugins) -------------
 MapDoc  *EdHost_Doc(EdHost *h);

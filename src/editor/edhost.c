@@ -48,6 +48,7 @@ struct EdHost {
     EdMenu   menus[ED_MAX_MENUS];
     int      menuCount;
     int      openMenu;          // -1 = none
+    int      openSubmenu;       // item index of the open flyout's parent, -1 = none
 
     EdPanel  panels[ED_MAX_PANELS];
     int      panelCount;
@@ -133,6 +134,7 @@ void EdHost_Log(EdHost *h, EdLogLevel lvl, const char *fmt, ...) {
 }
 
 int EdHost_LogCount(EdHost *h) { return h->logCount; }
+void EdHost_LogClear(EdHost *h) { h->logHead = 0; h->logCount = 0; }
 
 const char *EdHost_LogLine(EdHost *h, int i, EdLogLevel *outLvl) {
     if (i < 0 || i >= h->logCount) return NULL;
@@ -159,6 +161,7 @@ EdHost *EdHost_Create(EdScene *scene) {
     EdHost *h = calloc(1, sizeof *h);
     h->scene    = scene;
     h->openMenu = -1;
+    h->openSubmenu = -1;
     h->leftW    = 210;
     h->rightW   = 240;
     h->bottomH  = 150;
@@ -288,6 +291,38 @@ static void UpdateSplitters(EdHost *h, const EdLayout *L, int W, int H) {
 
 // ---- menu bar (interaction is folded into the draw; runs first, on top) ----
 
+// Draw one dropdown row at [dx,iy,dw,ih]; handles separators (NULL label).
+// Returns true when the row is clicked this frame (caller fires onClick +
+// closes the menu). *outHot (optional) reports hover. When `arrowLabel` is
+// non-NULL the row is a submenu parent: it shows that text + a ▸, ignores the
+// item's own fields, and never reports a click.
+static bool DrawMenuRow(EdHost *h, const EdMenuItem *it, float dx, float iy,
+                        float dw, float ih, float s, Vector2 m, bool click,
+                        const char *arrowLabel, bool *outHot) {
+    if (outHot) *outHot = false;
+    if (!arrowLabel && !it->label) {  // separator
+        DrawRectangle((int)(dx + 8 * s), (int)(iy + ih * 0.5f),
+                      (int)(dw - 16 * s), 1, (Color){ 70, 76, 90, 255 });
+        return false;
+    }
+    Rectangle ir = { dx, iy, dw, ih };
+    bool en  = arrowLabel ? true  : (it->enabled ? it->enabled(h, it->user) : true);
+    bool chk = arrowLabel ? false : (it->checked ? it->checked(h, it->user) : false);
+    bool hot = en && CheckCollisionPointRec(m, ir);
+    if (hot) DrawRectangleRec(ir, (Color){ 48, 54, 66, 255 });
+    Color tc = !en ? ENG_UI_DIM : (hot ? ENG_UI_GOLD : ENG_UI_TEXT);
+    if (chk) Eng_UiText("\xE2\x9C\x93", dx + 6 * s, iy + (ih - 13 * s) / 2.0f, 13, tc);
+    Eng_UiText(arrowLabel ? arrowLabel : it->label, dx + 22 * s, iy + (ih - 13 * s) / 2.0f, 13, tc);
+    if (arrowLabel) {
+        Eng_UiText("\xE2\x96\xB8", dx + dw - 14 * s, iy + (ih - 13 * s) / 2.0f, 13, tc);  // ▸
+    } else if (it->shortcut) {
+        float sw = MeasureText(it->shortcut, (int)(12 * s));
+        Eng_UiText(it->shortcut, dx + dw - sw - 10 * s, iy + (ih - 12 * s) / 2.0f, 12, ENG_UI_DIM);
+    }
+    if (outHot) *outHot = hot;
+    return !arrowLabel && hot && click;
+}
+
 // Returns true if the menu system consumed this frame's click (so the viewport
 // must ignore it). Draws the bar + the open dropdown.
 static bool DrawMenuBar(EdHost *h, const EdLayout *L) {
@@ -311,8 +346,8 @@ static bool DrawMenuBar(EdHost *h, const EdLayout *L) {
             DrawRectangleRec(titleR[i], (Color){ 48, 54, 66, 255 });
         Eng_UiText(h->menus[i].label, x + 8 * s, (L->menuBar.height - 14 * s) / 2.0f, 14,
                    open ? ENG_UI_GOLD : ENG_UI_TEXT);
-        if (hot && click) { h->openMenu = open ? -1 : i; consumed = true; }
-        else if (hot && h->openMenu >= 0 && !open) { h->openMenu = i; }  // hover-switch
+        if (hot && click) { h->openMenu = open ? -1 : i; h->openSubmenu = -1; consumed = true; }
+        else if (hot && h->openMenu >= 0 && !open) { h->openMenu = i; h->openSubmenu = -1; }  // hover-switch
         x += tw;
     }
 
@@ -328,83 +363,93 @@ static bool DrawMenuBar(EdHost *h, const EdLayout *L) {
         if (dynCount < 0) dynCount = 0;
         if (dynCount > 16) dynCount = 16;
 
-        // Total rows: static items + (separator if both static+dyn present) + dyn items.
-        int sepRow = (mn->itemCount > 0 && dynCount > 0) ? 1 : 0;
-        int totalRows = mn->itemCount + sepRow + dynCount;
+        // Count top-level rows: every non-submenu item is one row; each distinct
+        // submenu name collapses to a single "<name> ▸" parent row.
+        const char *seen[ED_MAX_MENU_ITEMS]; int nSeen = 0;
+        int topRows = 0;
+        for (int i = 0; i < mn->itemCount; i++) {
+            const char *sub = mn->items[i].submenu;
+            if (!sub) { topRows++; continue; }
+            bool dup = false;
+            for (int k = 0; k < nSeen; k++) if (strcmp(seen[k], sub) == 0) { dup = true; break; }
+            if (!dup) { seen[nSeen++] = sub; topRows++; }
+        }
+
+        int sepRow = (topRows > 0 && dynCount > 0) ? 1 : 0;
+        int totalRows = topRows + sepRow + dynCount;
         float dh = totalRows * ih + 8 * s;
 
         Rectangle box = { dx, dy, dw, dh };
         Eng_UiPanelBg((Rectangle){ dx - 1, dy - 1, dw + 2, dh + 2 }, (Color){ 60, 66, 80, 255 });
         Eng_UiPanelBg(box, (Color){ 28, 32, 40, 255 });
 
-        // Helper lambda (inline draw of one item row).
         float iy = dy + 4 * s;
 
-        // --- static items ---
+        // --- static top-level rows (submenu children are hidden into flyouts) ---
+        const char *openSubName = NULL; float openSubY = 0;
+        const char *emitted[ED_MAX_MENU_ITEMS]; int nEmit = 0;
         for (int i = 0; i < mn->itemCount; i++) {
             EdMenuItem *it = &mn->items[i];
-            if (!it->label) {  // separator
-                DrawRectangle((int)(dx + 8 * s), (int)(iy + ih * 0.5f),
-                              (int)(dw - 16 * s), 1, (Color){ 70, 76, 90, 255 });
-                iy += ih; continue;
+            if (it->submenu) {
+                bool dup = false;
+                for (int k = 0; k < nEmit; k++) if (strcmp(emitted[k], it->submenu) == 0) { dup = true; break; }
+                if (dup) continue;            // only the first child emits the parent row
+                emitted[nEmit++] = it->submenu;
+                bool hot;
+                DrawMenuRow(h, it, dx, iy, dw, ih, s, m, click, it->submenu, &hot);
+                if (hot) h->openSubmenu = i;  // hovering the parent opens its flyout
+                if (h->openSubmenu == i) { openSubName = it->submenu; openSubY = iy; }
+                iy += ih;
+                continue;
             }
-            Rectangle ir = { dx, iy, dw, ih };
-            bool en  = it->enabled ? it->enabled(h, it->user) : true;
-            bool chk = it->checked ? it->checked(h, it->user) : false;
-            bool hot = en && CheckCollisionPointRec(m, ir);
-            if (hot) DrawRectangleRec(ir, (Color){ 48, 54, 66, 255 });
-            Color tc = !en ? ENG_UI_DIM : (hot ? ENG_UI_GOLD : ENG_UI_TEXT);
-            if (chk) Eng_UiText("\xE2\x9C\x93", dx + 6 * s, iy + (ih - 13 * s) / 2.0f, 13, tc);
-            Eng_UiText(it->label, dx + 22 * s, iy + (ih - 13 * s) / 2.0f, 13, tc);
-            if (it->shortcut) {
-                float sw = MeasureText(it->shortcut, (int)(12 * s));
-                Eng_UiText(it->shortcut, dx + dw - sw - 10 * s, iy + (ih - 12 * s) / 2.0f, 12, ENG_UI_DIM);
-            }
-            if (hot && click) {
+            bool hot;
+            if (DrawMenuRow(h, it, dx, iy, dw, ih, s, m, click, NULL, &hot)) {
                 if (it->onClick) it->onClick(h, it->user);
-                h->openMenu = -1; consumed = true;
+                h->openMenu = -1; h->openSubmenu = -1; consumed = true;
             }
+            if (hot) h->openSubmenu = -1;     // hovering a normal row closes any flyout
             iy += ih;
         }
 
-        // --- separator before dynamic items ---
-        if (sepRow) {
-            DrawRectangle((int)(dx + 8 * s), (int)(iy + ih * 0.5f),
-                          (int)(dw - 16 * s), 1, (Color){ 70, 76, 90, 255 });
-            iy += ih;
-        }
-
-        // --- dynamic items ---
+        // --- separator + dynamic items ---
+        if (sepRow) { DrawMenuRow(h, &(EdMenuItem){0}, dx, iy, dw, ih, s, m, click, NULL, NULL); iy += ih; }
         for (int i = 0; i < dynCount; i++) {
-            EdMenuItem *it = &dynItems[i];
-            if (!it->label) {  // provider may emit a separator
-                DrawRectangle((int)(dx + 8 * s), (int)(iy + ih * 0.5f),
-                              (int)(dw - 16 * s), 1, (Color){ 70, 76, 90, 255 });
-                iy += ih; continue;
+            bool hot;
+            if (DrawMenuRow(h, &dynItems[i], dx, iy, dw, ih, s, m, click, NULL, &hot)) {
+                if (dynItems[i].onClick) dynItems[i].onClick(h, dynItems[i].user);
+                h->openMenu = -1; h->openSubmenu = -1; consumed = true;
             }
-            Rectangle ir = { dx, iy, dw, ih };
-            bool en  = it->enabled ? it->enabled(h, it->user) : true;
-            bool chk = it->checked ? it->checked(h, it->user) : false;
-            bool hot = en && CheckCollisionPointRec(m, ir);
-            if (hot) DrawRectangleRec(ir, (Color){ 48, 54, 66, 255 });
-            Color tc = !en ? ENG_UI_DIM : (hot ? ENG_UI_GOLD : ENG_UI_TEXT);
-            if (chk) Eng_UiText("\xE2\x9C\x93", dx + 6 * s, iy + (ih - 13 * s) / 2.0f, 13, tc);
-            Eng_UiText(it->label, dx + 22 * s, iy + (ih - 13 * s) / 2.0f, 13, tc);
-            if (it->shortcut) {
-                float sw = MeasureText(it->shortcut, (int)(12 * s));
-                Eng_UiText(it->shortcut, dx + dw - sw - 10 * s, iy + (ih - 12 * s) / 2.0f, 12, ENG_UI_DIM);
-            }
-            if (hot && click) {
-                if (it->onClick) it->onClick(h, it->user);
-                h->openMenu = -1; consumed = true;
-            }
+            if (hot) h->openSubmenu = -1;
             iy += ih;
         }
 
-        // click outside the open menu closes it (and is consumed)
+        // --- submenu flyout, to the right of its parent row ---
+        Rectangle flyBox = { 0, 0, 0, 0 };
+        if (openSubName) {
+            int childRows = 0;
+            for (int i = 0; i < mn->itemCount; i++)
+                if (mn->items[i].submenu && strcmp(mn->items[i].submenu, openSubName) == 0) childRows++;
+            float fx = dx + dw + 1 * s, fdh = childRows * ih + 8 * s;
+            flyBox = (Rectangle){ fx, openSubY, dw, fdh };
+            Eng_UiPanelBg((Rectangle){ fx - 1, openSubY - 1, dw + 2, fdh + 2 }, (Color){ 60, 66, 80, 255 });
+            Eng_UiPanelBg(flyBox, (Color){ 28, 32, 40, 255 });
+            float fy = openSubY + 4 * s;
+            for (int i = 0; i < mn->itemCount; i++) {
+                EdMenuItem *it = &mn->items[i];
+                if (!it->submenu || strcmp(it->submenu, openSubName) != 0) continue;
+                if (DrawMenuRow(h, it, fx, fy, dw, ih, s, m, click, NULL, NULL)) {
+                    if (it->onClick) it->onClick(h, it->user);
+                    h->openMenu = -1; h->openSubmenu = -1; consumed = true;
+                }
+                fy += ih;
+            }
+        }
+
+        // click outside the open menu (and any flyout) closes it (consumed)
         if (click && !consumed && !CheckCollisionPointRec(m, box) &&
+            (!openSubName || !CheckCollisionPointRec(m, flyBox)) &&
             !CheckCollisionPointRec(m, L->menuBar)) {
-            h->openMenu = -1; consumed = true;
+            h->openMenu = -1; h->openSubmenu = -1; consumed = true;
         }
     }
     return consumed;

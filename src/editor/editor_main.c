@@ -119,6 +119,18 @@ static void EdDraw(int w, int h) {
     }
 
     EdHost_Frame(s_host, w, h);
+
+    // Window title carries the document name + dirty marker (audit P1-C) — the
+    // conventional place for it. Only push to the OS when it changes.
+    static char s_lastTitle[600] = "";
+    char title[600];
+    snprintf(title, sizeof title, "%s%s — Scene Builder",
+             GetFileName(s_scene.path), s_scene.dirty ? " *" : "");
+    if (strcmp(title, s_lastTitle) != 0) {
+        SetWindowTitle(title);
+        snprintf(s_lastTitle, sizeof s_lastTitle, "%s", title);
+    }
+
     if (s_shotAt >= 0 && ++s_frame >= s_shotAt) {
         TakeScreenshot(s_shotPath);
         Eng_RequestClose();

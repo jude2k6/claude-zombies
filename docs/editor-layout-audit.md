@@ -14,6 +14,23 @@ source code alone — the code is the ground truth.
 
 ## Resolution log
 
+- **2026-06-18 — P1-A..G done; menu API gained submenus.** The host menu system
+  now supports flyout submenus (`EdMenuItem.submenu` groups items into a
+  "`<name> ▸`" parent that opens on hover) — the missing primitive behind several
+  of these. With it: gizmo mode is a `View > Gizmo mode ▸` flyout (Move/Rotate/
+  Scale, checks + 1/2/3) (P1-B); project ops moved to a `File > Game project ▸`
+  flyout, out of the document-level New/Open (P1-E). Preferences moved from
+  `Tools` to the bottom of `Edit`, renamed from "Settings…", leaving Tools led by
+  Validate (P1-D). The Inspector's no-selection view is retitled "MAP PROPERTIES"
+  with a subtitle, and the entity view has a "Map properties…" button that
+  deselects to reach it (P1-A). The status bar drops the dead "no selection" text
+  and the window title now carries `<map><dirty> — Scene Builder` (P1-C). The
+  Console gained Clear + a severity-filter cycle (all / warn+ / errors), backed by
+  a new `EdHost_LogClear` (P1-F). P1-G (the false "move drag only" gizmo label)
+  was already resolved when that panel toggle was removed in P0. **Deferred from
+  P1-F:** the status-bar error-count badge — needs validation results plumbed
+  across plugins. Submenu/flyout *interaction* is unverified in the sandbox (no
+  screenshot/input injection); builds clean and runs crash-free.
 - **2026-06-18 — P0-A/B/C/D + P2-C done.** `PanelTools` is now placement-only:
   the UI-scale slider (P0-A), the VIEW + GIZMO toggle groups (P0-B), and the
   barricade auto-spawn checkbox (P0-C) are removed — UI scale stays on `Ctrl+=/−`,

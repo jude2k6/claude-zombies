@@ -274,6 +274,9 @@ static bool q_view_fly(EdHost *h, void *u) { (void)u; return EdHost_Scene(h)->vi
 static bool q_view_iso(EdHost *h, void *u) { (void)u; return EdHost_Scene(h)->view == ED_VIEW_ORBIT; }
 static bool q_view_top(EdHost *h, void *u) { (void)u; return EdHost_Scene(h)->view == ED_VIEW_TOP; }
 static bool q_snap    (EdHost *h, void *u) { (void)u; return EdHost_Scene(h)->snapEnabled; }
+static bool q_giz_move (EdHost *h, void *u) { (void)u; return EdHost_Scene(h)->mode == ENG_GIZMO_TRANSLATE; }
+static bool q_giz_rot  (EdHost *h, void *u) { (void)u; return EdHost_Scene(h)->mode == ENG_GIZMO_ROTATE; }
+static bool q_giz_scale(EdHost *h, void *u) { (void)u; return EdHost_Scene(h)->mode == ENG_GIZMO_SCALE; }
 
 // ---- do_* helpers (real work, no dirty check) --------------------------------
 
@@ -558,6 +561,9 @@ static void a_view_fly(EdHost *h, void *u) { (void)u; EdScene_SwitchView(EdHost_
 static void a_view_iso(EdHost *h, void *u) { (void)u; EdScene_SwitchView(EdHost_Scene(h), ED_VIEW_ORBIT); }
 static void a_view_top(EdHost *h, void *u) { (void)u; EdScene_SwitchView(EdHost_Scene(h), ED_VIEW_TOP); }
 static void a_snap(EdHost *h, void *u)     { (void)u; EdScene *s = EdHost_Scene(h); s->snapEnabled = !s->snapEnabled; }
+static void a_giz_move (EdHost *h, void *u) { (void)u; EdHost_Scene(h)->mode = ENG_GIZMO_TRANSLATE; }
+static void a_giz_rot  (EdHost *h, void *u) { (void)u; EdHost_Scene(h)->mode = ENG_GIZMO_ROTATE; }
+static void a_giz_scale(EdHost *h, void *u) { (void)u; EdHost_Scene(h)->mode = ENG_GIZMO_SCALE; }
 
 static void a_help_controls(EdHost *h, void *u) {
     (void)u;
@@ -586,8 +592,10 @@ static void RegisterMenus(EdHost *h) {
     EdHost_AddMenuSeparator(h, "File");
     // (map recents appear here via the dynamic hook — registered below)
     EdHost_AddMenuSeparator(h, "File");
-    EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="File", .label="New Game...",  .onClick=a_new_game });
-    EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="File", .label="Open Game...", .onClick=a_open_game });
+    // Project-level ops live under their own flyout so they don't blur into the
+    // document-level New/Open above (audit P1-E).
+    EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="File", .submenu="Game project", .label="New Game...",  .onClick=a_new_game });
+    EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="File", .submenu="Game project", .label="Open Game...", .onClick=a_open_game });
     EdHost_AddMenuSeparator(h, "File");
     // (recent games appear here via the second dynamic hook — registered below)
     EdHost_AddMenuSeparator(h, "File");
@@ -608,6 +616,11 @@ static void RegisterMenus(EdHost *h) {
     EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="View", .label="Top-down camera",  .shortcut="F3", .onClick=a_view_top, .checked=q_view_top });
     EdHost_AddMenuSeparator(h, "View");
     EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="View", .label="Snap to grid", .onClick=a_snap, .checked=q_snap });
+    // Gizmo mode (audit P1-B): menu-discoverable counterpart to keys 1/2/3, now
+    // that the panel toggle is gone.
+    EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="View", .submenu="Gizmo mode", .label="Move",   .shortcut="1", .onClick=a_giz_move,  .checked=q_giz_move });
+    EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="View", .submenu="Gizmo mode", .label="Rotate", .shortcut="2", .onClick=a_giz_rot,   .checked=q_giz_rot });
+    EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="View", .submenu="Gizmo mode", .label="Scale",  .shortcut="3", .onClick=a_giz_scale, .checked=q_giz_scale });
 
     EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="Help", .label="Controls", .onClick=a_help_controls });
     EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="Help", .label="About",    .onClick=a_help_about });
@@ -858,9 +871,10 @@ static void PanelInspector(EdHost *h, Rectangle c, void *u) {
         }
     }
 
-    // ---- Feature 3: Map Metadata when nothing selected ---------------------
+    // ---- Map properties when nothing is selected (audit P1-A) --------------
     if (s->selectedId < 0) {
-        Eng_UiText("MAP METADATA", X, y, 14, ENG_UI_GOLD); y += 22 * sc;
+        Eng_UiText("MAP PROPERTIES", X, y, 14, ENG_UI_GOLD); y += 16 * sc;
+        Eng_UiText("Nothing selected — editing the whole map.", X, y, 10, ENG_UI_DIM); y += 16 * sc;
 
         // Map name (doc.name)
         Eng_UiText("Name", X, y + 1 * sc, 12, ENG_UI_TEXT);
@@ -964,7 +978,15 @@ static void PanelInspector(EdHost *h, Rectangle c, void *u) {
         return;
     }
 
-    // ---- Feature 1: Editable inspector for selected entity -----------------
+    // ---- Editable inspector for the selected entity ------------------------
+    // Affordance to reach the map-properties view without hunting for empty
+    // space to click (audit P1-A): deselect → the no-selection branch above.
+    if (GuiButton((Rectangle){ X, y, W, 18 * sc }, "#185# Map properties...")) {
+        s->selectedId = -1;
+        return;
+    }
+    y += 24 * sc;
+
     EngMapEntKind k;
     EngMapEnt_Ptr(&s->doc, EngMapEnt_Find(&s->doc, s->selectedId), &k);
     Eng_UiText(TextFormat("#%d  %s", s->selectedId, EdScene_KindName(k)), X, y, 13, ENG_UI_GOLD);
@@ -1094,21 +1116,48 @@ static void PanelInspector(EdHost *h, Rectangle c, void *u) {
 }
 
 // ---- Console ---------------------------------------------------------------
+// Minimum severity shown: 0 = all, 1 = warnings+errors, 2 = errors only.
+// Maps directly onto EdLogLevel (INFO<WARN<ERROR), so the test is a >= compare.
+static int g_conMinLvl = 0;
+
 static void PanelConsole(EdHost *h, Rectangle c, void *u) {
     (void)u;
     float sc = EdHost_UiScale(h);
+
+    // Header: Clear + a severity-filter cycle button (audit P1-F). The host
+    // GuiLock()s panels while a menu/modal is open, so these can't misfire.
+    float btnH = 18 * sc;
+    if (GuiButton((Rectangle){ c.x, c.y, 56 * sc, btnH }, "Clear"))
+        EdHost_LogClear(h);
+    const char *fl = g_conMinLvl == 0 ? "Show: all"
+                   : g_conMinLvl == 1 ? "Show: warn+" : "Show: errors";
+    if (GuiButton((Rectangle){ c.x + 60 * sc, c.y, 96 * sc, btnH }, fl))
+        g_conMinLvl = (g_conMinLvl + 1) % 3;
+
+    Rectangle list = { c.x, c.y + btnH + 2 * sc, c.width, c.height - btnH - 2 * sc };
     float rowH = 14 * sc;
     int   total = EdHost_LogCount(h);
-    int   fit = (int)(c.height / rowH);
-    int   start = total - fit; if (start < 0) start = 0;
+    int   fit = (int)(list.height / rowH); if (fit < 1) fit = 1;
 
-    BeginScissorMode((int)c.x, (int)c.y, (int)c.width, (int)c.height);
-    float y = c.y;
-    for (int i = start; i < total; i++) {
+    // Count lines passing the filter, then skip all but the last `fit` of them
+    // so the newest stays in view.
+    int passing = 0;
+    for (int i = 0; i < total; i++) {
+        EdLogLevel lvl; EdHost_LogLine(h, i, &lvl);
+        if ((int)lvl >= g_conMinLvl) passing++;
+    }
+    int skip = passing - fit; if (skip < 0) skip = 0;
+
+    BeginScissorMode((int)list.x, (int)list.y, (int)list.width, (int)list.height);
+    float y = list.y;
+    int seen = 0;
+    for (int i = 0; i < total; i++) {
         EdLogLevel lvl; const char *line = EdHost_LogLine(h, i, &lvl);
+        if ((int)lvl < g_conMinLvl) continue;
+        if (seen++ < skip) continue;
         Color col = lvl == ED_LOG_ERROR ? (Color){ 235, 110, 110, 255 }
                   : lvl == ED_LOG_WARN  ? ENG_UI_GOLD : ENG_UI_TEXT;
-        Eng_UiText(line, c.x + 2 * sc, y, 11, col);
+        Eng_UiText(line, list.x + 2 * sc, y, 11, col);
         y += rowH;
     }
     EndScissorMode();
@@ -1204,8 +1253,11 @@ static void a_validate(EdHost *h, void *u) {
 }
 
 static void RegisterMapTools(EdHost *h) {
-    EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="Tools", .label="Settings...",  .onClick=a_settings });
+    // Tools leads with its map operation; editor preferences move to the bottom
+    // of Edit (the conventional home), renamed from "Settings…" (audit P1-D).
     EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="Tools", .label="Validate map", .onClick=a_validate });
+    EdHost_AddMenuSeparator(h, "Edit");
+    EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="Edit", .label="Preferences...", .onClick=a_settings });
 }
 
 // ============================================================================
@@ -1230,7 +1282,7 @@ static void st_view(EdHost *h, char *out, int cap, void *u) {
 }
 static void st_sel(EdHost *h, char *out, int cap, void *u) {
     (void)u; EdScene *s = EdHost_Scene(h);
-    if (s->selectedId < 0) { snprintf(out, cap, "no selection"); return; }
+    if (s->selectedId < 0) { out[0] = '\0'; return; }   // no dead "no selection" text (audit P1-C)
     EngMapEntKind k; EngMapEnt_Ptr(&s->doc, EngMapEnt_Find(&s->doc, s->selectedId), &k);
     snprintf(out, cap, "sel #%d %s", s->selectedId, EdScene_KindName(k));
 }

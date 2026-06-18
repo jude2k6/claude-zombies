@@ -6,28 +6,71 @@
 #include <stdlib.h>
 
 // ============================================================================
-//  Internal: path-probing prefix tables
+//  Content roots — the game-over-library overlay (docs/game-projects.md §3)
 // ============================================================================
+//
+//  Every content lookup resolves against an ordered root stack:
+//      1. <game>     the active game folder    (writable, wins)
+//      2. <library>  the engine stock library  (read-only fallback)
+//      3. the legacy data/ dev fallbacks       (running from build/src tree)
+//
+//  Both roots are unset by default, which leaves only the data/ fallbacks —
+//  identical to the pre-overlay behaviour, so this is pure plumbing until a
+//  host calls Eng_SetGameRoot / Eng_SetLibraryRoot.  A relative content path
+//  ("models/zombie.glb", "mobs/zombie/zombie.mob", "maps/arena.map") means the
+//  same asset regardless of which root answers; whether you've imported it just
+//  decides which copy resolves first.
 
-// These mirror the lists that used to be duplicated in assets.c and weapons.c.
-// Ordered: build-dir-relative first (data/X), then one level up for running
-// from the source tree (../data/X), then explicit ./ prefix.
+static char s_gameRoot[512] = "";   // empty == unset
+static char s_libRoot [512] = "";   // empty == unset
 
-static const char *MODEL_PREFIXES[]   = { "data/models/",   "../data/models/",   "./data/models/"   };
-static const char *TEXTURE_PREFIXES[] = { "data/textures/", "../data/textures/", "./data/textures/" };
-static const char *SHADER_PREFIXES[]  = { "data/shaders/",  "../data/shaders/",  "./data/shaders/"  };
-// Generic content (weapons, maps, etc.) — just the data/ root; the caller
-// supplies the full relative path.
-static const char *CONTENT_PREFIXES[] = { "",               "../",               "./"               };
+// Legacy dev fallbacks, kept last so a build/source-tree checkout still runs
+// with no roots configured.  These carry the category subdir already.
+static const char *DATA_FALLBACKS[] = { "data", "../data", "./data" };
 
 #define NARR(a) ((int)(sizeof(a)/sizeof(a)[0]))
+
+void Eng_SetGameRoot(const char *dir) {
+    snprintf(s_gameRoot, sizeof s_gameRoot, "%s", dir ? dir : "");
+}
+void Eng_SetLibraryRoot(const char *dir) {
+    snprintf(s_libRoot, sizeof s_libRoot, "%s", dir ? dir : "");
+}
+const char *Eng_GetGameRoot(void)    { return s_gameRoot[0] ? s_gameRoot : NULL; }
+const char *Eng_GetLibraryRoot(void) { return s_libRoot [0] ? s_libRoot  : NULL; }
+
+// Build the ordered list of root directory prefixes to probe (game, library,
+// then the data/ fallbacks).  Returns the count written into `out` (sized for
+// at least 2 + NARR(DATA_FALLBACKS)).
+static int collect_roots(const char *out[]) {
+    int n = 0;
+    if (s_gameRoot[0]) out[n++] = s_gameRoot;
+    if (s_libRoot [0]) out[n++] = s_libRoot;
+    for (int i = 0; i < NARR(DATA_FALLBACKS); i++) out[n++] = DATA_FALLBACKS[i];
+    return n;
+}
+
+// Resolve a root-relative content path ("models/x.glb", "weapons/p/p.weapon",
+// "maps/a.map") against the root stack.  Writes the first existing path into
+// `buf` and returns it, or NULL if nothing matched.
+static const char *resolve_rel(const char *rel, char *buf, int bufsz) {
+    const char *roots[2 + NARR(DATA_FALLBACKS)];
+    int nr = collect_roots(roots);
+    for (int i = 0; i < nr; i++) {
+        snprintf(buf, (size_t)bufsz, "%s/%s", roots[i], rel);
+        if (FileExists(buf)) return buf;
+    }
+    return NULL;
+}
 
 // ============================================================================
 //  Eng_ResolveAssetPath — public helper
 // ============================================================================
 
-// A path that already starts with "data/" or "../data/" or "./" is tried as-is
-// before the prefix list, so callers that already have a full path still work.
+// Generic resolver for callers that hand us a root-relative path.  Order:
+//   1. as-is (absolute path, or a full "data/..." path from a legacy caller),
+//   2. the root stack (game, library, data/ fallbacks),
+//   3. the bare "../" / "./" dev prefixes (a full path one level up).
 const char *Eng_ResolveAssetPath(const char *rel, char *buf, int bufsz) {
     if (!rel || !buf || bufsz <= 0) return NULL;
     // Try as-is first (absolute path, or already contains a prefix).
@@ -35,12 +78,38 @@ const char *Eng_ResolveAssetPath(const char *rel, char *buf, int bufsz) {
         snprintf(buf, (size_t)bufsz, "%s", rel);
         return buf;
     }
-    // Try each generic content prefix.
-    for (int i = 0; i < NARR(CONTENT_PREFIXES); i++) {
-        snprintf(buf, (size_t)bufsz, "%s%s", CONTENT_PREFIXES[i], rel);
+    if (resolve_rel(rel, buf, bufsz)) return buf;
+    // Bare dev prefixes for a caller that already embedded "data/" in `rel`.
+    const char *bare[] = { "../", "./" };
+    for (int i = 0; i < NARR(bare); i++) {
+        snprintf(buf, (size_t)bufsz, "%s%s", bare[i], rel);
         if (FileExists(buf)) return buf;
     }
     return NULL;
+}
+
+// ============================================================================
+//  Eng_ContentDirs — two-pass directory scan support
+// ============================================================================
+
+// Fill `dirs` with the existing directory paths for content subdir `relSubdir`
+// (e.g. "maps", "mobs"), game root first, then library, then data/ fallbacks.
+// Callers scan each in order and de-dup entry names themselves so that a game
+// entry shadows a same-named library entry.  Returns the count written.
+int Eng_ContentDirs(const char *relSubdir, char dirs[][512], int maxDirs) {
+    if (!relSubdir || maxDirs <= 0) return 0;
+    const char *roots[2 + NARR(DATA_FALLBACKS)];
+    int nr = collect_roots(roots);
+    int n = 0;
+    for (int i = 0; i < nr && n < maxDirs; i++) {
+        char cand[512];
+        snprintf(cand, sizeof cand, "%s/%s", roots[i], relSubdir);
+        if (DirectoryExists(cand)) {
+            snprintf(dirs[n], 512, "%s", cand);
+            n++;
+        }
+    }
+    return n;
 }
 
 // ============================================================================
@@ -102,20 +171,15 @@ static int          s_clipCount    = 0;
 EngModel Eng_LoadModel(const char *path) {
     if (!path || path[0] == '\0') return (EngModel){0};
 
-    // Try to resolve with each model prefix.
+    // Resolve "models/<path>" against the root stack (game, library, data/).
     char resolved[512];
-    bool found = false;
-    // First try the model-specific prefixes.
-    for (int p = 0; p < NARR(MODEL_PREFIXES); p++) {
-        snprintf(resolved, sizeof resolved, "%s%s", MODEL_PREFIXES[p], path);
-        if (FileExists(resolved)) { found = true; break; }
-    }
-    // If not found with model prefixes, try as a raw/full path.
-    if (!found) {
-        if (FileExists(path)) {
-            snprintf(resolved, sizeof resolved, "%s", path);
-            found = true;
-        }
+    char rel[512];
+    snprintf(rel, sizeof rel, "models/%s", path);
+    bool found = (resolve_rel(rel, resolved, sizeof resolved) != NULL);
+    // If not found under models/, try as a raw/full path.
+    if (!found && FileExists(path)) {
+        snprintf(resolved, sizeof resolved, "%s", path);
+        found = true;
     }
     if (!found) {
         fprintf(stderr, "content: model '%s' not found\n", path);
@@ -239,11 +303,9 @@ static EngTexture LoadTextureFromResolved(const char *resolved) {
 EngTexture Eng_LoadTexture(const char *path) {
     if (!path || path[0] == '\0') return (EngTexture){0};
     char resolved[512];
-    // Try texture-specific prefixes first.
-    for (int p = 0; p < NARR(TEXTURE_PREFIXES); p++) {
-        snprintf(resolved, sizeof resolved, "%s%s", TEXTURE_PREFIXES[p], path);
-        if (FileExists(resolved)) return LoadTextureFromResolved(resolved);
-    }
+    char rel[512];
+    snprintf(rel, sizeof rel, "textures/%s", path);
+    if (resolve_rel(rel, resolved, sizeof resolved)) return LoadTextureFromResolved(resolved);
     // Fallback: try as raw path.
     if (FileExists(path)) return LoadTextureFromResolved(path);
     fprintf(stderr, "content: texture '%s' not found\n", path);
@@ -253,10 +315,9 @@ EngTexture Eng_LoadTexture(const char *path) {
 EngTexture Eng_LoadTextureByName(const char *name) {
     if (!name || name[0] == '\0') return (EngTexture){0};
     char resolved[512];
-    for (int p = 0; p < NARR(TEXTURE_PREFIXES); p++) {
-        snprintf(resolved, sizeof resolved, "%s%s.png", TEXTURE_PREFIXES[p], name);
-        if (FileExists(resolved)) return LoadTextureFromResolved(resolved);
-    }
+    char rel[512];
+    snprintf(rel, sizeof rel, "textures/%s.png", name);
+    if (resolve_rel(rel, resolved, sizeof resolved)) return LoadTextureFromResolved(resolved);
     fprintf(stderr, "content: texture by name '%s.png' not found\n", name);
     return (EngTexture){0};
 }
@@ -310,11 +371,10 @@ EngShader Eng_LoadShader(const char *vsPath, const char *fsPath) {
     char vsResolved[512]; vsResolved[0] = '\0';
     bool vsOk = (vsPath == NULL);
     if (vsPath && vsPath[0] != '\0') {
-        for (int p = 0; p < NARR(SHADER_PREFIXES); p++) {
-            snprintf(vsResolved, sizeof vsResolved, "%s%s", SHADER_PREFIXES[p], vsPath);
-            if (FileExists(vsResolved)) { vsOk = true; break; }
-        }
-        if (!vsOk && FileExists(vsPath)) {
+        char rel[512];
+        snprintf(rel, sizeof rel, "shaders/%s", vsPath);
+        if (resolve_rel(rel, vsResolved, sizeof vsResolved)) vsOk = true;
+        else if (FileExists(vsPath)) {
             snprintf(vsResolved, sizeof vsResolved, "%s", vsPath);
             vsOk = true;
         }
@@ -323,13 +383,14 @@ EngShader Eng_LoadShader(const char *vsPath, const char *fsPath) {
     // Resolve FS path.
     char fsResolved[512]; fsResolved[0] = '\0';
     bool fsOk = false;
-    for (int p = 0; p < NARR(SHADER_PREFIXES); p++) {
-        snprintf(fsResolved, sizeof fsResolved, "%s%s", SHADER_PREFIXES[p], fsPath);
-        if (FileExists(fsResolved)) { fsOk = true; break; }
-    }
-    if (!fsOk && FileExists(fsPath)) {
-        snprintf(fsResolved, sizeof fsResolved, "%s", fsPath);
-        fsOk = true;
+    {
+        char rel[512];
+        snprintf(rel, sizeof rel, "shaders/%s", fsPath);
+        if (resolve_rel(rel, fsResolved, sizeof fsResolved)) fsOk = true;
+        else if (FileExists(fsPath)) {
+            snprintf(fsResolved, sizeof fsResolved, "%s", fsPath);
+            fsOk = true;
+        }
     }
 
     if (!fsOk) {
@@ -409,12 +470,10 @@ EngClipSet Eng_LoadAnimModel(const char *path) {
     if (!path || path[0] == '\0') return (EngClipSet){0};
 
     char resolved[512];
-    bool found = false;
-    // Try each model prefix (anim models are GLB/GLTF, same data/models dir).
-    for (int p = 0; p < NARR(MODEL_PREFIXES); p++) {
-        snprintf(resolved, sizeof resolved, "%s%s", MODEL_PREFIXES[p], path);
-        if (FileExists(resolved)) { found = true; break; }
-    }
+    char rel[512];
+    // Anim models are GLB/GLTF in the same models/ subdir.
+    snprintf(rel, sizeof rel, "models/%s", path);
+    bool found = (resolve_rel(rel, resolved, sizeof resolved) != NULL);
     if (!found && FileExists(path)) {
         snprintf(resolved, sizeof resolved, "%s", path);
         found = true;

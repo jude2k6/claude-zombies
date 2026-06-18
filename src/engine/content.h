@@ -30,11 +30,31 @@ typedef struct { uint32_t id; } EngTexture;
 typedef struct { uint32_t id; } EngShader;
 typedef struct { uint32_t id; } EngClipSet;  // model + animation clips
 
+// ---- Content roots (game-over-library overlay) ------------------------------
+//
+// The resolver probes an ordered root stack: the active game folder first, the
+// engine's read-only stock library next, then legacy data/ dev fallbacks (so a
+// build/source checkout still runs with neither root set).  A relative content
+// path resolves the same regardless of which root answers — importing a stock
+// asset (copying it under the game root) just makes the game copy win.
+// See docs/game-projects.md §3.  Pass NULL/"" to clear a root.
+void        Eng_SetGameRoot(const char *dir);     // <game>/    (writable, wins)
+void        Eng_SetLibraryRoot(const char *dir);  // <library>/ (read-only)
+const char *Eng_GetGameRoot(void);                // NULL if unset
+const char *Eng_GetLibraryRoot(void);             // NULL if unset
+
+// Fill `dirs` with the existing directory paths for content subdir `relSubdir`
+// ("maps", "mobs", ...), game root first then library then data/ fallbacks.
+// Callers scan each in order and de-dup entry names so a game entry shadows a
+// same-named library entry.  Returns the count written (<= maxDirs).
+int Eng_ContentDirs(const char *relSubdir, char dirs[][512], int maxDirs);
+
 // ---- Path probing -----------------------------------------------------------
 
-// Try each prefix in the built-in list ("data/X", "../data/X", "./data/X")
-// prepended to `rel`, writing the first existing path into `buf`.
-// Returns buf on success, NULL if nothing exists.
+// Resolve a root-relative content path against the root stack (game, library,
+// data/ fallbacks), writing the first existing path into `buf`.  A full path
+// (absolute, or one already starting with "data/") is honoured as-is first, so
+// legacy callers keep working.  Returns buf on success, NULL if nothing exists.
 const char *Eng_ResolveAssetPath(const char *rel, char *buf, int bufsz);
 
 // ---- Loaders ----------------------------------------------------------------

@@ -315,9 +315,15 @@ rendering converge on the same asset path.
    zombie loop is registered as the Tier-1 `chaser` archetype and dispatched via
    `Mobs_RunBehaviours`. A mob naming an unregistered behaviour is flagged at startup.
 4. ~~**Editor def-scanner + palette** (mob catalog)~~ **Done** — `EdScene_ScanMobs`
-   reads `data/mobs/` via `deffile`; the PLACE palette renders one button per mob
-   (`ED_PLACE_MOB` + `placeMobId`). POINT/LINE/RECT placement for **all** primitive kinds
-   is still open (see [editor-feature-ideas.md](editor-feature-ideas.md) 3.1).
+   reads `mobs/` (overlay roots) via `deffile`; the PLACE palette renders one button per
+   mob (`ED_PLACE_MOB` + `placeMobId`).
+4b. ~~**Place all primitive kinds**~~ **Done** — the palette now covers every
+   `EngMapEntKind` (walls / obstacles / props / sectors / wallbuys / perks added to
+   `EdPlaceTool`), grouped Spawns / Geometry / Buyables. POINT (drop-and-snap) for most
+   kinds + LINE (two-click) for walls; RECT-drag for sectors is the remaining placement
+   gesture. This is the hardcoded-tool → palette step; a *data-driven* `EdEntityDef`
+   registry (§2) that lets users add **definitions** (presets) without code is still the
+   open generalisation.
 5. **Partly done** — `data/mobs/dog/dog.mob` proves data-only reuse (reuses `chaser`); the
    Tier-2 `.so` no-rebuild path is wired and ready to validate with a sample plugin.
    **Asset browser + picker** is still open.

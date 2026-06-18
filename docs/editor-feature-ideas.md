@@ -15,10 +15,14 @@
 > **1.2 Rotate/Scale Drag** (PROP), **2.1 Focus on Selection (`F`)**,
 > **3.3 Map Metadata Panel** (shown in the Inspector when nothing is selected),
 > **4.2 Hierarchy Search/Filter**, **4.5 Unsaved-Changes Guard**, and
-> **4.6 Inline Validation Indicators** (red proxy outlines, live). On the engine side the
-> **2.4** textured-render foundation (`Eng_DrawTexturedBoxV` / `…FloorV`) also landed —
-> see [editor-textured-rendering-plan.md](editor-textured-rendering-plan.md). Still open
-> from the Top 5: **3.1 Place All Entity Kinds** and **5.1 Play-Test Launch**.
+> **4.6 Inline Validation Indicators** (red proxy outlines, live), and
+> **3.1 Place All Entity Kinds** (the PLACE palette now covers every `EngMapEntKind`,
+> grouped Spawns / Geometry / Buyables; walls are two-click, the rest drop-and-snap).
+> On the engine side the **2.4** textured-render foundation (`Eng_DrawTexturedBoxV` /
+> `…FloorV`) also landed — see
+> [editor-textured-rendering-plan.md](editor-textured-rendering-plan.md). Still open from
+> the Top 5: **5.1 Play-Test Launch**. (Beyond the editor backlog, the games-as-projects
+> **New/Open Game** UI also shipped — see [game-projects.md](game-projects.md) §8 / §10.)
 
 ---
 

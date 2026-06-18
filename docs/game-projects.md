@@ -1,9 +1,10 @@
 # Games as Projects — self-contained game folders + a read-only engine library
 
 > **Status: MOSTLY IMPLEMENTED (2026-06-18).** The overlay resolver (Steps 1–2),
-> the `data/` → `library/` + `games/shooter/` filesystem split (Step 3), and the
-> runtime root wiring (Step 5) are built and committed. Remaining: the editor's
-> New/Open-Game management UI (Step 4 remainder) and import/origin polish
+> the `data/` → `library/` + `games/shooter/` filesystem split (Step 3), the
+> runtime root wiring (Step 5), and the editor's **New/Open Game** management UI
+> (Step 4 management half) are built and committed. Remaining: the asset-browser
+> **import** surface (Step 4) and import/origin polish + a second sample game
 > (Step 6). See the [Implementation progress](#implementation-progress-2026-06-18)
 > section appended to §10 for the exact done/remaining breakdown. Original design
 > intent:
@@ -329,14 +330,19 @@ through the resolver:
   `mob_ai.c` behaviour-`.so` scan, engine `anim.c` + `audio.c`: route through
   `Eng_ResolveAssetPath` / `Eng_ContentDirs`.
 
-**🟡 Step 4 — Editor: PARTIAL** (the scan half, committed in `a4288be`).
-- Editor content scans are root-aware: `edscene.c` `EdScene_ScanMobs` union +
-  de-dup, `builtins.c` map-dialog start dirs (new `MapsStartDir` helper),
-  `editor_main.c` default map via the resolver.
-- `edfiledialog`: added `EdFileDialog_SelectFolder` (native folder picker) ready
-  for Open/New Game.
-- **NOT yet done:** File ▸ New Game… / Open Game… actions, `game.project`
-  read/write + scaffolding, recents-as-games, asset-browser import action.
+**🟢 Step 4 — Editor: New/Open Game done; import surface remains.**
+- *Scan half* (`a4288be`): editor content scans are root-aware — `edscene.c`
+  `EdScene_ScanMobs` union + de-dup, `builtins.c` `MapsStartDir`, `editor_main.c`
+  default map via the resolver; `EdFileDialog_SelectFolder` native folder picker.
+- *Management half* (this wave): new engine-clean **`src/editor/edproject.{c,h}`**
+  — `game.project` read/write (deffile), `EdProject_New` scaffolds a game folder
+  from `library/templates/<tpl>/` (manifest + `maps/` + seeded starter map),
+  `EdProject_Open` points `Eng_SetGameRoot` at an existing one. Wired into the
+  File menu as **New Game… / Open Game…** (folder picker) with a **Recent Games**
+  group in `editor.cfg` (`game.0..7`). A minimal `library/templates/empty/`
+  skeleton (GameModule `main.c` + CMake stub) is the New-Game source.
+- **Still NOT done:** the **asset-browser import** action (the surface that copies
+  a library asset into the game on first edit) and `.import` origin sidecars (Step 6).
 
 **✅ Step 3 — Split `data/` → `library/` + `games/shooter/`** (this wave). The
 filesystem reorg landed as a single coherent edit:
@@ -363,19 +369,26 @@ paths updated to `games/shooter/maps/`.
 
 #### Remaining work
 
-- **Step 4 remainder** — the New/Open Game UI: File ▸ New Game… / Open Game…,
-  `game.project` read/write + scaffolding from `library/templates/`,
-  recents-as-games, asset-browser import action (the `EdFileDialog_SelectFolder`
-  primitive is already in place to build on).
+- **Step 4 import surface** — the asset browser ([editor-feature-ideas] 5.3): list
+  library + game assets, and on a library asset offer **Import to game** (copy the
+  asset's folder under `<game>/`, after which it resolves game-first and is editable).
+  The `fps` template (the zombies game as a reshapeable starter) is also still TODO —
+  `library/templates/` ships only `empty/` so far.
 - **Step 6 — Polish** — `.import` origin sidecars + reset-to-library/show-changes
-  UI; a second sample game to prove independence.
+  UI; a second sample game to prove independence. `EdProject_New`'s template copy is
+  text-only (`LoadFileText`/`fputs`) — fine for the code-only `empty/` template, but
+  binary template assets would need a byte copy first.
 
 > Integration note: Steps 1, 2, and the Step-4 scans were built as one wave (two
 > parallel sub-agents on disjoint file sets, integrated from the main session).
 > Steps 3 + 5 were then done together by the main session as one coherent edit
 > (filesystem move + CMake + root wiring + doc/CI sweep), exactly as flagged —
-> not parallelized, since the move touches one shared tree. The remaining Step 4
-> UI + Step 6 polish are again parallel-friendly (disjoint editor surfaces).
+> not parallelized, since the move touches one shared tree. The Step-4
+> management UI (New/Open Game) + the place-all-kinds editor work were then a
+> third wave — two parallel sub-agents on disjoint editor surfaces (File-menu +
+> `edproject` vs. the TOOLS place palette + `edscene`), each in its own worktree,
+> integrated/de-warned/verified from the main session. The remaining Step-4
+> import surface + Step 6 polish stay parallel-friendly.
 
 ## 11. Decisions (all settled — 2026-06-18)
 

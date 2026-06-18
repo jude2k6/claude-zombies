@@ -21,11 +21,12 @@ loaded `.so` files in `./plugins`) extend it through the identical surface. See 
 > view when nothing is selected), live **inline validation** (red outlines on bad
 > entities), **focus-on-selection** (`F`), an **unsaved-changes guard**, a Console, a
 > persisted settings dialog (`editor.cfg`), and `MapDoc_Validate` map-checking — plus
-> `File ▸ Save` (`MapDoc_Save`) and a dynamic plugin loader. Not yet: game-accurate
-> textured rendering in the viewport (entities still draw as proxy boxes — though the
-> shared engine draw helpers it needs now exist, see
-> [editor-textured-rendering-plan.md](editor-textured-rendering-plan.md)), and place
-> tools for every entity kind. See §5.
+> `File ▸ Save` (`MapDoc_Save`), **New Game / Open Game** (game-folder scaffolding +
+> overlay), **place tools for every entity kind**, and a dynamic plugin loader. Not yet:
+> game-accurate textured rendering in the viewport (entities still draw as proxy boxes —
+> though the shared engine draw helpers it needs now exist, see
+> [editor-textured-rendering-plan.md](editor-textured-rendering-plan.md)), and the
+> asset-browser import surface. See §5.
 
 ## 1. What it is (and is not)
 
@@ -280,14 +281,24 @@ Small, independently shippable steps; none blocks the game.
    bar, with `EdHost_Add*` registration and a compiled-in + dynamic (`.so`) plugin loader;
    the default tools ship as first-party plugins (§3).
 2. ~~**Tool palette / Hierarchy / Console**~~ **Done** (panels plugin).
-3. ~~**Add / delete** entities~~ **Done for spawns + barricades** (P/LMB/X, the barricade
-   auto-spawn, retag/aim via R, optional grid snap); **generalise the place picker** to
-   the other kinds (walls, obstacles, props, wallbuys, perks) — a menu/palette of kinds.
-   Design for the data-driven entity/mob/asset/behaviour catalog behind this is in
-   [editor-content-extensibility.md](editor-content-extensibility.md).
+3. ~~**Add / delete** entities — **all primitive kinds**~~ **Done.** The PLACE palette
+   covers every `EngMapEntKind`, grouped Spawns / Geometry / Buyables: player + data-driven
+   mob spawns, barricades, **walls** (two-click endpoints, with a pending-start marker),
+   **obstacles / props / sectors / wallbuys / perks** (drop-and-snap with sane defaults).
+   Each placement assigns the entity to the sector under the cursor (`Eng_SetSector` — the
+   save requirement) and pushes one undo step. Still future: RECT drag for sectors and a
+   richer per-kind inspector on drop (the data-driven entity-def registry in
+   [editor-content-extensibility.md](editor-content-extensibility.md) §2).
 4. ~~**Save / Open / New + file picker**~~ **Done** — `File ▸ Save`/`Save As…` (`MapDoc_Save`),
    `Open…`/`New`, a recents list, and the `*` dirty marker; `Open…`/`Save As…` use a native
    OS dialog via `edfiledialog` + tinyfiledialogs (§"File menu").
+4b. ~~**New Game / Open Game**~~ **Done** — `File ▸ New Game…` scaffolds a game folder from
+   `library/templates/<tpl>/` (manifest + `maps/` + a seeded starter map) and `Open Game…`
+   points the content overlay at an existing one (`Eng_SetGameRoot`), both via the native
+   folder picker; opened games are tracked in a **Recent Games** group. The manifest
+   read/write + scaffolding live in engine-clean `src/editor/edproject.{c,h}` (deffile +
+   raylib FS only). This is the editor half of [game-projects.md](game-projects.md) §8.
+   Still future there: the **asset-browser import** action and `.import` origin sidecars.
 5. ~~**Editable Inspector**~~ **Done** — the right panel edits position (all kinds),
    spawn mob, window facing, prop yaw/scale, obstacle size, sector size/heights through
    `mapedit.h` (one undo step per change); a **map-metadata** view (name + atmosphere)

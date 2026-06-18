@@ -759,6 +759,14 @@ void EdScene_ScanWeapons(EdScene *s) {
                                             ED_MAX_BUYDEFS, s->placeWeaponId, sizeof s->placeWeaponId);
 }
 
+void EdScene_RescanContent(EdScene *s) {
+    EdScene_ScanMobs(s);
+    EdScene_ScanProps(s);
+    EdScene_ScanPerks(s);
+    EdScene_ScanWeapons(s);
+    EdAssets_Scan(&s->assets);
+}
+
 // ---- lifecycle -------------------------------------------------------------
 
 void EdScene_Init(EdScene *s) {

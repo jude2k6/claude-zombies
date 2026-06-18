@@ -488,6 +488,7 @@ static void a_open_game(EdHost *h, void *u) {
     snprintf(mapBuf, sizeof mapBuf, "%s/%s", chosen, mapRel);
 
     EdScene *s = EdHost_Scene(h);
+    EdScene_RescanContent(s);   // new game root → refresh palette + asset browser
     if (FileExists(mapBuf)) {
         if (EdScene_Open(s, mapBuf)) {
             Recents_Push(s, mapBuf);
@@ -525,6 +526,7 @@ static void a_new_game(EdHost *h, void *u) {
     }
 
     EdScene *s = EdHost_Scene(h);
+    EdScene_RescanContent(s);   // new game root → refresh palette + asset browser
 
     // Load the freshly seeded default map.
     char mapBuf[1024];   // gameDir (512) + '/' + default_map (256) — no truncation
@@ -564,6 +566,7 @@ static void a_open_recent_game(EdHost *h, void *u) {
     snprintf(mapBuf, sizeof mapBuf, "%s/%s", dir, mapRel);
 
     EdScene *s = EdHost_Scene(h);
+    EdScene_RescanContent(s);   // new game root → refresh palette + asset browser
     if (FileExists(mapBuf)) {
         if (EdScene_Open(s, mapBuf)) {
             Recents_Push(s, mapBuf);

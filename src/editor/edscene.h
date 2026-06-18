@@ -187,6 +187,13 @@ void EdScene_ScanProps(EdScene *s);    // props/*.prop   → propDefs
 void EdScene_ScanPerks(EdScene *s);    // perks/*.perk   → perkDefs
 void EdScene_ScanWeapons(EdScene *s);  // weapons/*.weapon → weaponDefs (wallbuys)
 
+// Re-run every content scan (mobs/props/perks/weapons + the asset index) against
+// the CURRENT content roots. Call after the active game root changes mid-session
+// (Open Game / New Game) so the placement palette + asset browser reflect the new
+// game's catalogs — EdScene_Init scans once at startup, but switching games does
+// not re-init the scene.
+void EdScene_RescanContent(EdScene *s);
+
 // Rebuild the proxy list from the document (cheap; called each frame).
 void EdScene_RebuildProxies(EdScene *s);
 

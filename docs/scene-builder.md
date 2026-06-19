@@ -356,9 +356,11 @@ Small, independently shippable steps; none blocks the game.
    sector also shows **edge-resize handles** (W/E/N/S) — drag one to move that edge to the
    cursor (snapped) while the opposite edge stays fixed; height stays Inspector-driven. The
    Inspector also carries **ramp authoring**: a FLAT/RAMP toggle, and for ramps a rise-axis
-   (+X/+Z) toggle + two link buttons (cycle the linked sectors for the AI nav edge), backed by
-   `Eng_Set/GetSectorKind` + `Eng_Set/GetSectorRamp`. Ramp sectors also draw an **inclined
-   wireframe + uphill arrow** in the viewport (`DrawRampOverlay`) so they read as sloped.
+   (+X/+Z) toggle + two link rows for the AI nav edge — each a cycle button **plus a Pick
+   button** that arms viewport click-to-link (click a sector to set the link; Esc cancels) —
+   backed by `Eng_Set/GetSectorKind` + `Eng_Set/GetSectorRamp`. Ramp sectors also draw an
+   **inclined wireframe + uphill arrow** in the viewport (`DrawRampOverlay`) so they read as
+   sloped.
    Still future: a richer per-kind inspector on drop (the data-driven entity-def registry in
    [editor-content-extensibility.md](editor-content-extensibility.md) §2).
 4. ~~**Save / Open / New + file picker**~~ **Done** — `File ▸ Save`/`Save As…` (`MapDoc_Save`),

@@ -435,6 +435,18 @@ static int SectorAt(EdScene *s, float x, float z) {
     return s->doc.sectorCount > 0 ? 0 : -1;
 }
 
+// Strict variant for ramp link-picking: the sector whose footprint contains
+// (x,z), excluding index `excl` (the ramp itself); -1 when none contains it (so
+// clicking empty space / the ramp clears the link). No fallback-to-0.
+static int SectorContainingExcl(EdScene *s, float x, float z, int excl) {
+    for (int i = 0; i < s->doc.sectorCount; i++) {
+        if (i == excl) continue;
+        const MapDocSector *sc = &s->doc.sectors[i];
+        if (fabsf(x - sc->x) <= sc->sx * 0.5f && fabsf(z - sc->z) <= sc->sz * 0.5f) return i;
+    }
+    return -1;
+}
+
 static int AddSpawn(EdScene *s, const char *mob, float x, float z) {
     int id = EngMapEnt_Add(&s->doc, ENGMAPENT_SPAWN);
     if (id < 0) return -1;
@@ -1321,6 +1333,33 @@ bool EdScene_PlayTest(EdScene *s, char *msg, int cap) {
 
 // ---- per-frame viewport ----------------------------------------------------
 
+// Ramp link-pick: while armed (s->linkPick), the next viewport click on a sector
+// sets that link on the selected ramp. Returns true while armed at entry, so the
+// caller skips all other viewport interaction this frame. Cancels on Esc or if
+// the selection is no longer a ramp.
+static bool UpdateLinkPick(EdScene *s, bool canInteract) {
+    if (!s->linkPick) return false;
+    int kind = -1;
+    bool isRamp = s->selectedId >= 0 &&
+                  Eng_GetSectorKind(&s->doc, s->selectedId, &kind) && kind == SECTOR_RAMP;
+    if (!isRamp || IsKeyPressed(KEY_ESCAPE)) { s->linkPick = 0; return true; }
+    if (canInteract && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+        Vector3 g;
+        Ray ray = Eng_PickRayFromScreen(s->cam, s->vpMouse, s->vpW, s->vpH);
+        if (Eng_PickRayGroundY(ray, 0.0f, &g)) {
+            int self = EngMapEnt_Find(&s->doc, s->selectedId).index;
+            int idx = SectorContainingExcl(s, g.x, g.z, self);
+            int axis, la, lb;
+            Eng_GetSectorRamp(&s->doc, s->selectedId, &axis, &la, &lb);
+            if (s->linkPick == 1) la = idx; else lb = idx;
+            Eng_SetSectorRamp(&s->doc, s->selectedId, axis, la, lb);
+            EdScene_Commit(s);
+        }
+        s->linkPick = 0;
+    }
+    return true;
+}
+
 void EdScene_UpdateViewport(EdScene *s, Rectangle vp, bool inputAllowed) {
     float dt = GetFrameTime();
     s->vpW = (int)vp.width  < 1 ? 1 : (int)vp.width;
@@ -1378,7 +1417,10 @@ void EdScene_UpdateViewport(EdScene *s, Rectangle vp, bool inputAllowed) {
                    IsMouseButtonDown(MOUSE_BUTTON_MIDDLE);
 
     bool canInteract = inputAllowed && !camBusy && !s->dragging;
-    if (canInteract && s->placeTool == ED_PLACE_SECTOR) {
+    bool picking = UpdateLinkPick(s, canInteract);   // ramp link-pick consumes the frame
+    if (picking) {
+        s->sectorDragging = false;
+    } else if (canInteract && s->placeTool == ED_PLACE_SECTOR) {
         UpdateSectorDrag(s);   // RECT-drag create (press → drag → release)
     } else {
         s->sectorDragging = false;   // tool switched / camera busy / focus lost mid-drag
@@ -1404,7 +1446,9 @@ void EdScene_UpdateViewport(EdScene *s, Rectangle vp, bool inputAllowed) {
         }
     }
 
-    if (s->resizing) {
+    if (picking) {
+        /* no gizmo/resize while link-picking */
+    } else if (s->resizing) {
         if (inputAllowed && !camBusy) UpdateSectorResize(s);
         else                          s->resizing = false;   // focus/camera took over mid-drag
     } else {

@@ -1461,20 +1461,31 @@ static void PanelInspector(EdHost *h, Rectangle c, void *u) {
             y += 26 * sc;
 
             int selfIdx = EngMapEnt_Find(&s->doc, s->selectedId).index;
-            Eng_UiText("links (click to cycle)", X, y, 9, ENG_UI_DIM); y += 14 * sc;
+            Eng_UiText("links (cycle, or Pick in viewport)", X, y, 9, ENG_UI_DIM); y += 14 * sc;
+            // Each row: a cycle button (most of the width) + a Pick button that
+            // arms viewport click-to-link (s->linkPick: 1 = A, 2 = B).
+            float full = W - 12 * sc, cycW = full * 0.62f, pkW = full * 0.34f, pkX = X + full - pkW;
             char lbl[64];
             snprintf(lbl, sizeof lbl, "A: %s", SectorLabel(&s->doc, la));
-            if (GuiButton((Rectangle){ X, y, W - 12 * sc, 20 * sc }, lbl)) {
+            if (GuiButton((Rectangle){ X, y, cycW, 20 * sc }, lbl)) {
                 Eng_SetSectorRamp(&s->doc, s->selectedId, axis,
                                   CycleSectorLink(&s->doc, selfIdx, la), lb);
                 EdHost_CommitEdit(h);
             }
+            if (GuiButton((Rectangle){ pkX, y, pkW, 20 * sc }, s->linkPick == 1 ? "click..." : "Pick")) {
+                s->linkPick = (s->linkPick == 1) ? 0 : 1;
+                if (s->linkPick == 1) EdHost_Log(h, ED_LOG_INFO, "link A: click a sector in the viewport (Esc cancels)");
+            }
             y += 24 * sc;
             snprintf(lbl, sizeof lbl, "B: %s", SectorLabel(&s->doc, lb));
-            if (GuiButton((Rectangle){ X, y, W - 12 * sc, 20 * sc }, lbl)) {
+            if (GuiButton((Rectangle){ X, y, cycW, 20 * sc }, lbl)) {
                 Eng_SetSectorRamp(&s->doc, s->selectedId, axis, la,
                                   CycleSectorLink(&s->doc, selfIdx, lb));
                 EdHost_CommitEdit(h);
+            }
+            if (GuiButton((Rectangle){ pkX, y, pkW, 20 * sc }, s->linkPick == 2 ? "click..." : "Pick")) {
+                s->linkPick = (s->linkPick == 2) ? 0 : 2;
+                if (s->linkPick == 2) EdHost_Log(h, ED_LOG_INFO, "link B: click a sector in the viewport (Esc cancels)");
             }
             y += 24 * sc;
         }

@@ -151,6 +151,11 @@ typedef struct EdScene {
     int           resizeEdge;
     float         resizeFixed;
 
+    // Ramp link-pick mode: 0 = off, 1 = picking link A, 2 = picking link B. Armed
+    // from the Inspector; the next viewport click on a sector sets that link on
+    // the selected ramp. The Inspector reads/sets this directly on EdScene.
+    int           linkPick;
+
     // ---- mob catalog (scanned from data/mobs/) -----------------------------
     EdMobDef      mobDefs[ED_MAX_MOBDEFS];
     int           mobDefCount;

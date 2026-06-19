@@ -331,8 +331,11 @@ round-trip. **In-viewport visualisation — ✅ SHIPPED:** every RAMP sector dra
 surface as a wireframe (perimeter + 1/4/1/2/3/4 slope rungs) plus an uphill arrow along the
 rise centre line, mirroring the game's `DocSectorY` interpolation (axis 1 → +X, axis 2 → +Z;
 −axis edge yLow, +axis edge yHigh); the selected ramp draws brighter (`DrawRampOverlay`).
-**Still open:** picking links by clicking sectors in the viewport rather than cycling the
-Inspector buttons.
+**Link-picking — ✅ SHIPPED:** each link row has a **Pick** button that arms a viewport
+click-to-link mode (`s->linkPick`); the next click on a sector sets that link to the clicked
+sector (strict containment, self excluded; clicking empty clears it), Esc cancels
+(`UpdateLinkPick`). The cycle buttons remain as the no-aiming alternative. §3.2 is now fully
+built — draw / resize / ramps (kind + axis + links + visualization + picking).
 
 **Why it matters:** Sectors are the structural unit of every map — you can't build a room
 layout without them. Before RECT-drag the only practical sector was the default square.

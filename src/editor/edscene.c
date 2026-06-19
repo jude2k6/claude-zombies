@@ -21,6 +21,7 @@
 #define ED_WALL_H    3.0f   // assumed wall height for drawing/picking
 #define ED_MARKER    0.6f   // half-size of point-entity markers (spawn/perk/…)
 #define ED_ORBIT_DIST 200.0f
+#define ED_SEL_SECONDARY ((Color){ 255, 140, 0, 255 })  // non-primary multi-selection outline
 
 // ---- settings persistence (editor.cfg) -------------------------------------
 
@@ -52,18 +53,13 @@ void EdScene_LoadSettings(EdScene *s, EngCfg *cfg) {
     if (s->undoDepth < 1) s->undoDepth = ENGMAPHISTORY_DEFAULT_DEPTH;
 }
 
-void EdScene_SaveSettings(EdScene *s, EngCfg *cfg) {
-    // The recents lists (recent.* maps, game.* games) live in the same
-    // editor.cfg but are owned by the panels plugin / launcher, not the scene.
-    // BeginSave truncates the file, so snapshot those keys from disk FIRST and
-    // re-emit them below — otherwise a clean exit would wipe the recents (and
-    // the launcher's Recent Games list would be empty next launch).
-    EngCfg disk;
-    const char *paths[] = { cfg->path };
-    EngCfg_Load(&disk, paths, 1);
-
-    FILE *f = EngCfg_BeginSave(cfg, "Claude Zombies map editor settings");
-    if (!f) return;
+// Emit every SCENE-OWNED setting key (cam/view/grid/edit/ui/win) into an open
+// EngCfg save stream. This is the single source of truth for those keys — both
+// writers (EdScene_SaveSettings here and Recents_Save in builtins.c) call it, so
+// adding a setting is a one-line change in one place instead of a drift trap.
+// The recents (recent.* / game.*) are owned by other modules and are written by
+// each caller AFTER this, before EngCfg_EndSave.
+void EdScene_PutSettingKeys(const EdScene *s, FILE *f) {
     EngCfg_PutFloat(f, "cam.flySpeed",  s->camFlySpeed);
     EngCfg_PutFloat(f, "cam.flyBoost",  s->camFlyBoost);
     EngCfg_PutFloat(f, "cam.lookSens",  s->camLookSens);
@@ -83,6 +79,21 @@ void EdScene_SaveSettings(EdScene *s, EngCfg *cfg) {
     EngCfg_PutInt  (f, "win.height",    s->winH);
     EngCfg_PutBool (f, "win.vsync",     s->vsync);
     EngCfg_PutInt  (f, "win.fpsCap",    s->fpsCap);
+}
+
+void EdScene_SaveSettings(EdScene *s, EngCfg *cfg) {
+    // The recents lists (recent.* maps, game.* games) live in the same
+    // editor.cfg but are owned by the panels plugin / launcher, not the scene.
+    // BeginSave truncates the file, so snapshot those keys from disk FIRST and
+    // re-emit them below — otherwise a clean exit would wipe the recents (and
+    // the launcher's Recent Games list would be empty next launch).
+    EngCfg disk;
+    const char *paths[] = { cfg->path };
+    EngCfg_Load(&disk, paths, 1);
+
+    FILE *f = EngCfg_BeginSave(cfg, "Claude Zombies map editor settings");
+    if (!f) return;
+    EdScene_PutSettingKeys(s, f);
     // Preserve the recents owned by other modules (see note above).
     for (int i = 0; i < disk.count; i++) {
         const char *k = disk.pairs[i].key;
@@ -183,6 +194,50 @@ static const EdProxy *FindProxy(EdScene *s, int id) {
     for (int i = 0; i < s->proxyCount; i++)
         if (s->proxies[i].id == id) return &s->proxies[i];
     return NULL;
+}
+
+// ---- selection set ---------------------------------------------------------
+// Internal helpers maintain the invariant that selectedId == selIds[selCount-1]
+// (the last-added member is the primary) and selectedId == -1 ⇔ selCount == 0.
+
+static int SelIndexOf(const EdScene *s, int id) {
+    for (int i = 0; i < s->selCount; i++) if (s->selIds[i] == id) return i;
+    return -1;
+}
+
+void EdScene_ClearSelection(EdScene *s) { s->selCount = 0; s->selectedId = -1; }
+
+static void SelAdd(EdScene *s, int id) {
+    if (id < 0 || s->selCount >= ED_MAX_ENTS) return;
+    if (SelIndexOf(s, id) < 0) s->selIds[s->selCount++] = id;
+    s->selectedId = id;   // newest member is the primary
+}
+
+static void SelRemove(EdScene *s, int id) {
+    int idx = SelIndexOf(s, id);
+    if (idx < 0) return;
+    for (int i = idx; i < s->selCount - 1; i++) s->selIds[i] = s->selIds[i + 1];
+    s->selCount--;
+    s->selectedId = s->selCount > 0 ? s->selIds[s->selCount - 1] : -1;
+}
+
+static void SelSetSingle(EdScene *s, int id) {
+    s->selCount = 0;
+    if (id >= 0) s->selIds[s->selCount++] = id;
+    s->selectedId = id >= 0 ? id : -1;
+}
+
+bool EdScene_IsSelected(const EdScene *s, int id) { return SelIndexOf(s, id) >= 0; }
+int  EdScene_SelCount(const EdScene *s)           { return s->selCount; }
+
+void EdScene_SelectClick(EdScene *s, int id, bool additive) {
+    if (additive) { if (id >= 0) (SelIndexOf(s, id) >= 0 ? SelRemove : SelAdd)(s, id); }
+    else          SelSetSingle(s, id);
+}
+
+void EdScene_SelectAll(EdScene *s) {
+    EdScene_ClearSelection(s);
+    for (int i = 0; i < s->proxyCount; i++) SelAdd(s, s->proxies[i].id);
 }
 
 const char *EdScene_KindName(EngMapEntKind k) {
@@ -332,7 +387,7 @@ static void EdUpdateCamera(EdScene *s, float dt, Rectangle vp) {
 
 // ---- pick selection --------------------------------------------------------
 
-static void PickSelection(EdScene *s) {
+static void PickSelection(EdScene *s, bool additive) {
     Ray ray = Eng_PickRayFromScreen(s->cam, s->vpMouse, s->vpW, s->vpH);
     int   best = -1;
     float bestT = 1e30f;
@@ -342,7 +397,10 @@ static void PickSelection(EdScene *s) {
             bestT = t; best = s->proxies[i].id;
         }
     }
-    s->selectedId = best;
+    // Shift-click into empty space is a no-op (keeps the current set); a plain
+    // click into empty space clears. Hits toggle (additive) or replace.
+    if (additive && best < 0) return;
+    EdScene_SelectClick(s, best, additive);
 }
 
 // ---- placement (mapedit add + retag) ---------------------------------------
@@ -382,10 +440,10 @@ static int AddSpawn(EdScene *s, const char *mob, float x, float z) {
 
 static void PlaceAt(EdScene *s, Vector3 p) {
     switch (s->placeTool) {
-        case ED_PLACE_PLAYER: s->selectedId = AddSpawn(s, "PLAYER", p.x, p.z); EdScene_Commit(s); break;
+        case ED_PLACE_PLAYER: SelSetSingle(s, AddSpawn(s, "PLAYER", p.x, p.z)); EdScene_Commit(s); break;
         case ED_PLACE_MOB: {
             const char *mob = s->placeMobId[0] ? s->placeMobId : "ZOMBIE";
-            s->selectedId = AddSpawn(s, mob, p.x, p.z); EdScene_Commit(s); break;
+            SelSetSingle(s, AddSpawn(s, mob, p.x, p.z)); EdScene_Commit(s); break;
         }
         case ED_PLACE_BARRICADE: {
             int wid = EngMapEnt_Add(&s->doc, ENGMAPENT_WINDOW);
@@ -394,7 +452,7 @@ static void PlaceAt(EdScene *s, Vector3 p) {
             Eng_SetWindowDir(&s->doc, wid, dir);
             Eng_SetSector(&s->doc, wid, SectorAt(s, p.x, p.z));
             Eng_SetPos(&s->doc, wid, p.x, p.z);
-            s->selectedId = wid;
+            SelSetSingle(s, wid);
             if (s->barricadeAutoSpawn) {
                 Vector3 n = DirNormal(dir);
                 AddSpawn(s, "ZOMBIE", p.x - n.x * 5.0f, p.z - n.z * 5.0f);
@@ -423,7 +481,7 @@ static void PlaceAt(EdScene *s, Vector3 p) {
                 float midX = (s->wallStartX + p.x) * 0.5f;
                 float midZ = (s->wallStartZ + p.z) * 0.5f;
                 Eng_SetSector(&s->doc, wid, SectorAt(s, midX, midZ));
-                s->selectedId  = wid;
+                SelSetSingle(s, wid);
                 s->wallPending = false;
                 EdScene_Commit(s);
             }
@@ -435,7 +493,7 @@ static void PlaceAt(EdScene *s, Vector3 p) {
             Eng_SetPos(&s->doc, oid, p.x, p.z);
             Eng_SetObstacleSize(&s->doc, oid, 4.0f, 4.0f, 3.0f);
             Eng_SetSector(&s->doc, oid, SectorAt(s, p.x, p.z));
-            s->selectedId = oid;
+            SelSetSingle(s, oid);
             EdScene_Commit(s);
             break;
         }
@@ -456,7 +514,7 @@ static void PlaceAt(EdScene *s, Vector3 p) {
                 }
             }
             Eng_SetSector(&s->doc, pid, SectorAt(s, p.x, p.z));
-            s->selectedId = pid;
+            SelSetSingle(s, pid);
             EdScene_Commit(s);
             break;
         }
@@ -467,7 +525,7 @@ static void PlaceAt(EdScene *s, Vector3 p) {
             Eng_SetSectorSize(&s->doc, sid, 20.0f, 20.0f);
             Eng_SetSectorHeights(&s->doc, sid, 0.0f, 0.0f);
             // Sectors are not owned by another sector; no Eng_SetSector call needed.
-            s->selectedId = sid;
+            SelSetSingle(s, sid);
             EdScene_Commit(s);
             break;
         }
@@ -487,7 +545,7 @@ static void PlaceAt(EdScene *s, Vector3 p) {
                 }
             }
             Eng_SetSector(&s->doc, wid, SectorAt(s, p.x, p.z));
-            s->selectedId = wid;
+            SelSetSingle(s, wid);
             EdScene_Commit(s);
             break;
         }
@@ -505,7 +563,7 @@ static void PlaceAt(EdScene *s, Vector3 p) {
                 }
             }
             Eng_SetSector(&s->doc, kid, SectorAt(s, p.x, p.z));
-            s->selectedId = kid;
+            SelSetSingle(s, kid);
             EdScene_Commit(s);
             break;
         }
@@ -530,9 +588,102 @@ void EdScene_CycleSelected(EdScene *s) {
 }
 
 void EdScene_DeleteSelected(EdScene *s) {
-    if (s->selectedId < 0) return;
-    EngMapEnt_Delete(&s->doc, s->selectedId);
-    s->selectedId = -1;
+    if (s->selCount == 0) return;
+    // Snapshot the ids first: EngMapEnt_Delete compacts arrays but ids are
+    // stable, so deleting by id in any order is safe.
+    int ids[ED_MAX_ENTS], n = s->selCount;
+    memcpy(ids, s->selIds, (size_t)n * sizeof(int));
+    EdScene_ClearSelection(s);
+    for (int i = 0; i < n; i++) EngMapEnt_Delete(&s->doc, ids[i]);
+    EdScene_Commit(s);
+}
+
+// Position nudge for duplicate/paste: one grid cell when snapping, else 2 units.
+static float EdNudge(const EdScene *s) { return s->snapEnabled ? s->snapStep : 2.0f; }
+
+void EdScene_DuplicateSelected(EdScene *s) {
+    if (s->selCount == 0) return;
+    int src[ED_MAX_ENTS], srcN = s->selCount;
+    memcpy(src, s->selIds, (size_t)srcN * sizeof(int));
+    float d = EdNudge(s);
+
+    int clones[ED_MAX_ENTS], n = 0;
+    for (int i = 0; i < srcN; i++) {
+        int nid = EngMapEnt_Clone(&s->doc, src[i]);
+        if (nid < 0) continue;   // kind at cap → skip
+        float x, z;
+        if (Eng_GetPos(&s->doc, nid, &x, &z)) Eng_SetPos(&s->doc, nid, x + d, z + d);
+        clones[n++] = nid;
+    }
+    if (n == 0) return;
+    EdScene_ClearSelection(s);
+    for (int i = 0; i < n; i++) SelAdd(s, clones[i]);
+    EdScene_Commit(s);
+}
+
+void EdScene_CopySelection(EdScene *s) {
+    s->clipCount = 0;
+    s->clipPasteSeq = 0;
+    for (int i = 0; i < s->selCount && s->clipCount < ED_MAX_ENTS; i++) {
+        EngMapEntHandle h = EngMapEnt_Find(&s->doc, s->selIds[i]);
+        if (h.kind == ENGMAPENT_NONE) continue;
+        EdClipEnt *c = &s->clip[s->clipCount++];
+        c->kind = h.kind;
+        switch (h.kind) {
+            case ENGMAPENT_SPAWN:    c->u.spawn    = s->doc.spawns[h.index];    break;
+            case ENGMAPENT_WALL:     c->u.wall     = s->doc.walls[h.index];     break;
+            case ENGMAPENT_WINDOW:   c->u.window   = s->doc.windows[h.index];   break;
+            case ENGMAPENT_OBSTACLE: c->u.obstacle = s->doc.obstacles[h.index]; break;
+            case ENGMAPENT_PROP:     c->u.prop     = s->doc.props[h.index];     break;
+            case ENGMAPENT_WALLBUY:  c->u.wallbuy  = s->doc.wallbuys[h.index];  break;
+            case ENGMAPENT_PERK:     c->u.perk     = s->doc.perks[h.index];     break;
+            case ENGMAPENT_SECTOR:   c->u.sector   = s->doc.sectors[h.index];   break;
+            default: s->clipCount--; break;
+        }
+    }
+}
+
+void EdScene_Cut(EdScene *s) {
+    if (s->selCount == 0) return;
+    EdScene_CopySelection(s);
+    EdScene_DeleteSelected(s);   // commits
+}
+
+void EdScene_Paste(EdScene *s) {
+    if (s->clipCount == 0) return;
+    // Fan successive pastes out by one nudge step each so they don't stack.
+    float off = EdNudge(s) * (float)(++s->clipPasteSeq);
+
+    int pasted[ED_MAX_ENTS], n = 0;
+    for (int i = 0; i < s->clipCount; i++) {
+        const EdClipEnt *c = &s->clip[i];
+        int nid = EngMapEnt_Add(&s->doc, c->kind);
+        if (nid < 0) continue;
+        EngMapEntHandle h = EngMapEnt_Find(&s->doc, nid);
+        switch (c->kind) {
+            case ENGMAPENT_SPAWN:    s->doc.spawns[h.index]    = c->u.spawn;    s->doc.spawns[h.index].id    = nid; break;
+            case ENGMAPENT_WALL:     s->doc.walls[h.index]     = c->u.wall;     s->doc.walls[h.index].id     = nid; break;
+            case ENGMAPENT_WINDOW:   s->doc.windows[h.index]   = c->u.window;   s->doc.windows[h.index].id   = nid; break;
+            case ENGMAPENT_OBSTACLE: s->doc.obstacles[h.index] = c->u.obstacle; s->doc.obstacles[h.index].id = nid; break;
+            case ENGMAPENT_PROP:     s->doc.props[h.index]     = c->u.prop;     s->doc.props[h.index].id     = nid; break;
+            case ENGMAPENT_WALLBUY:  s->doc.wallbuys[h.index]  = c->u.wallbuy;  s->doc.wallbuys[h.index].id  = nid; break;
+            case ENGMAPENT_PERK:     s->doc.perks[h.index]     = c->u.perk;     s->doc.perks[h.index].id     = nid; break;
+            case ENGMAPENT_SECTOR:   s->doc.sectors[h.index]   = c->u.sector;   s->doc.sectors[h.index].id   = nid; break;
+            default: EngMapEnt_Delete(&s->doc, nid); continue;
+        }
+        // Offset walls by both endpoints; all other kinds carry a single x/z.
+        if (c->kind == ENGMAPENT_WALL) {
+            MapDocWall *w = &s->doc.walls[h.index];
+            w->x1 += off; w->z1 += off; w->x2 += off; w->z2 += off;
+        } else {
+            float x, z;
+            if (Eng_GetPos(&s->doc, nid, &x, &z)) Eng_SetPos(&s->doc, nid, x + off, z + off);
+        }
+        pasted[n++] = nid;
+    }
+    if (n == 0) return;
+    EdScene_ClearSelection(s);
+    for (int i = 0; i < n; i++) SelAdd(s, pasted[i]);
     EdScene_Commit(s);
 }
 
@@ -573,6 +724,13 @@ static void UpdateGizmo(EdScene *s, bool allowGrab) {
                 if (s->drag.axis != ENG_GIZMO_AXIS_NONE) {
                     float x, z; Eng_GetPos(&s->doc, s->selectedId, &x, &z);
                     s->dragStartPos = (Vector3){ x, origin.y, z };
+                    // Snapshot every selected entity's start pos so a TRANSLATE
+                    // drag moves the whole set rigidly by the primary's delta.
+                    for (int i = 0; i < s->selCount; i++) {
+                        float sx = 0, sz = 0;
+                        Eng_GetPos(&s->doc, s->selIds[i], &sx, &sz);
+                        s->dragStart[i] = (Vector3){ sx, 0, sz };
+                    }
                     Eng_GetYaw(&s->doc, s->selectedId, &s->dragStartYaw);
                     Eng_GetScale(&s->doc, s->selectedId, &s->dragStartScale);
                     s->dragTag = g_nextTag++;
@@ -588,11 +746,17 @@ static void UpdateGizmo(EdScene *s, bool allowGrab) {
     EngGizmoDelta d = Eng_GizmoUpdateDrag(s->drag, s->cam, mouse, s->vpW, s->vpH);
 
     switch (s->mode) {
-        case ENG_GIZMO_TRANSLATE:
-            Eng_SetPos(&s->doc, s->selectedId,
-                       EdSnap(s, s->dragStartPos.x + d.translate.x),
-                       EdSnap(s, s->dragStartPos.z + d.translate.z));
+        case ENG_GIZMO_TRANSLATE: {
+            // Snap the PRIMARY to the grid, then move every selected entity by
+            // that same (snapped) delta so the group keeps its relative layout.
+            float nx = EdSnap(s, s->dragStartPos.x + d.translate.x);
+            float nz = EdSnap(s, s->dragStartPos.z + d.translate.z);
+            float dx = nx - s->dragStartPos.x, dz = nz - s->dragStartPos.z;
+            for (int i = 0; i < s->selCount; i++)
+                Eng_SetPos(&s->doc, s->selIds[i],
+                           s->dragStart[i].x + dx, s->dragStart[i].z + dz);
             break;
+        }
         case ENG_GIZMO_ROTATE:
             Eng_SetYaw(&s->doc, s->selectedId, s->dragStartYaw + d.rotateRadians * RAD2DEG);
             break;
@@ -784,7 +948,7 @@ void EdScene_Init(EdScene *s) {
     s->pitch  = -0.6f;
     s->focus  = (Vector3){ 0, 0, 0 };
     s->orthoH = s->viewOrthoH;
-    s->selectedId = -1;
+    EdScene_ClearSelection(s);
     s->mode = ENG_GIZMO_TRANSLATE;
     s->placeTool = ED_PLACE_NONE;
     s->wallPending = false;
@@ -804,8 +968,65 @@ void EdScene_Shutdown(EdScene *s) {
 
 bool EdScene_Save(EdScene *s) {
     int rc = MapDoc_Save(s->path, &s->doc);
-    if (rc == 0) s->dirty = false;
+    if (rc == 0) {
+        s->dirty = false;
+        s->autosaveAccum = 0.0f;
+        EdScene_DiscardRecovery(s);   // the on-disk map is now authoritative
+    }
     return rc == 0;
+}
+
+// ---- autosave / crash recovery ---------------------------------------------
+
+#define ED_AUTOSAVE_SECS 30.0f
+
+// "untitled.map" is the unsaved-scratch name New gives a fresh doc; it has no
+// real on-disk home, so we don't autosave/recover it.
+static bool EdHasRealPath(const EdScene *s) {
+    return s->path[0] && strcmp(s->path, "untitled.map") != 0;
+}
+static void EdRecoveryPath(const EdScene *s, char *buf, int cap) {
+    snprintf(buf, (size_t)cap, "%s.autosave", s->path);
+}
+
+void EdScene_AutosaveTick(EdScene *s) {
+    if (!EdHasRealPath(s)) return;
+    if (!s->dirty) { s->autosaveAccum = 0.0f; return; }
+    s->autosaveAccum += GetFrameTime();
+    if (s->autosaveAccum < ED_AUTOSAVE_SECS) return;
+    s->autosaveAccum = 0.0f;
+    char rp[600]; EdRecoveryPath(s, rp, sizeof rp);
+    MapDoc_Save(rp, &s->doc);   // best-effort; a failed autosave must not disrupt editing
+}
+
+bool EdScene_RecoveryAvailable(const EdScene *s) {
+    if (!EdHasRealPath(s)) return false;
+    char rp[600]; EdRecoveryPath(s, rp, sizeof rp);
+    if (!FileExists(rp)) return false;
+    if (!FileExists(s->path)) return true;             // map gone but a recovery survives
+    return GetFileModTime(rp) > GetFileModTime(s->path);
+}
+
+void EdScene_DiscardRecovery(EdScene *s) {
+    if (!EdHasRealPath(s)) return;
+    char rp[600]; EdRecoveryPath(s, rp, sizeof rp);
+    if (FileExists(rp)) remove(rp);
+}
+
+bool EdScene_RestoreRecovery(EdScene *s) {
+    if (!EdScene_RecoveryAvailable(s)) return false;
+    char rp[600]; EdRecoveryPath(s, rp, sizeof rp);
+    MapDoc nd; memset(&nd, 0, sizeof nd);
+    if (MapDoc_Parse(rp, &nd, stderr) > 0) return false;   // corrupt recovery → keep the loaded map
+    s->doc = nd;
+    EngMapHistory_Free(&s->hist);
+    EngMapHistory_Init(&s->hist, s->undoDepth);
+    EngMapHistory_Commit(&s->hist, &s->doc, 0);
+    EdScene_ClearSelection(s);
+    s->dragging = false;
+    s->dirty = true;            // restored edits are unsaved vs the on-disk map
+    remove(rp);                 // consumed
+    return true;
 }
 
 bool EdScene_Open(EdScene *s, const char *path) {
@@ -816,7 +1037,7 @@ bool EdScene_Open(EdScene *s, const char *path) {
     EngMapHistory_Free(&s->hist);
     EngMapHistory_Init(&s->hist, s->undoDepth);
     EngMapHistory_Commit(&s->hist, &s->doc, 0);
-    s->selectedId = -1;
+    EdScene_ClearSelection(s);
     s->dragging = false;
     s->dirty = false;
     return true;
@@ -834,7 +1055,7 @@ void EdScene_New(EdScene *s) {
     EngMapHistory_Free(&s->hist);
     EngMapHistory_Init(&s->hist, s->undoDepth);
     EngMapHistory_Commit(&s->hist, &s->doc, 0);
-    s->selectedId = -1;
+    EdScene_ClearSelection(s);
     s->dragging = false;
     snprintf(s->path, sizeof s->path, "untitled.map");
     s->dirty = true;
@@ -873,7 +1094,11 @@ void EdScene_UpdateViewport(EdScene *s, Rectangle vp, bool inputAllowed) {
         }
         if (IsKeyPressed(KEY_O)) s->barricadeAutoSpawn = !s->barricadeAutoSpawn;
         if (IsKeyPressed(KEY_R)) EdScene_CycleSelected(s);
-        if (IsKeyPressed(KEY_X)) EdScene_DeleteSelected(s);
+        // Bare X or Delete removes the selection; Ctrl+X (Cut) is handled by the
+        // shell, so ignore X while Ctrl is held to avoid a redundant delete.
+        bool ctrlHeld = IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL);
+        if ((IsKeyPressed(KEY_X) && !ctrlHeld) || IsKeyPressed(KEY_DELETE))
+            EdScene_DeleteSelected(s);
 
         // F: recenter the view on the selected entity.
         if (IsKeyPressed(KEY_F) && s->selectedId >= 0) {
@@ -912,7 +1137,10 @@ void EdScene_UpdateViewport(EdScene *s, Rectangle vp, bool inputAllowed) {
             if (SelectedOrigin(s, &origin))
                 hot = Eng_GizmoHitTest(s->cam, s->vpMouse, s->vpW, s->vpH, origin, s->mode,
                                        GizmoHandleSize(s, origin));
-            if (hot == ENG_GIZMO_AXIS_NONE) PickSelection(s);
+            if (hot == ENG_GIZMO_AXIS_NONE) {
+                bool additive = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
+                PickSelection(s, additive);
+            }
         }
     }
 
@@ -1046,15 +1274,16 @@ void EdScene_DrawViewport(EdScene *s, Rectangle vp) {
     if (s->materialMode) {
         // Material mode: textured geometry instead of flat proxy boxes.
         DrawMaterialWorld(s);
-        // Still draw selection gizmo box and semi-transparent proxy wires so the
-        // user knows what is selected.
+        // Still outline the selection so the user knows what is selected: the
+        // primary in YELLOW, other members of a multi-selection in ORANGE.
         for (int i = 0; i < s->proxyCount; i++) {
             EdProxy *p = &s->proxies[i];
-            if (p->id != s->selectedId) continue;
+            if (!EdScene_IsSelected(s, p->id)) continue;
+            Color hl = (p->id == s->selectedId) ? YELLOW : ED_SEL_SECONDARY;
             Vector3 c  = Vector3Scale(Vector3Add(p->box.min, p->box.max), 0.5f);
             Vector3 sz = Vector3Subtract(p->box.max, p->box.min);
-            Eng_GfxDrawCubeWiresV(c, sz, YELLOW);
-            Eng_DebugBox(p->box, YELLOW);
+            Eng_GfxDrawCubeWiresV(c, sz, hl);
+            Eng_DebugBox(p->box, hl);
         }
     } else {
         // Default proxy-box mode.
@@ -1062,11 +1291,13 @@ void EdScene_DrawViewport(EdScene *s, Rectangle vp) {
             EdProxy *p = &s->proxies[i];
             Vector3 c  = Vector3Scale(Vector3Add(p->box.min, p->box.max), 0.5f);
             Vector3 sz = Vector3Subtract(p->box.max, p->box.min);
-            bool sel = (p->id == s->selectedId);
+            bool sel = EdScene_IsSelected(s, p->id);
+            bool primary = (p->id == s->selectedId);
+            Color hl = primary ? YELLOW : ED_SEL_SECONDARY;
             Color fill = p->col; fill.a = sel ? 220 : 150;
             Eng_GfxDrawCubeV(c, sz, fill);
-            Eng_GfxDrawCubeWiresV(c, sz, sel ? YELLOW : (Color){ 0, 0, 0, 120 });
-            if (sel) Eng_DebugBox(p->box, YELLOW);
+            Eng_GfxDrawCubeWiresV(c, sz, sel ? hl : (Color){ 0, 0, 0, 120 });
+            if (sel) Eng_DebugBox(p->box, hl);
         }
     }
 

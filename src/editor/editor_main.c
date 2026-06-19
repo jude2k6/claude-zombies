@@ -118,6 +118,8 @@ static void EdDraw(int w, int h) {
         return;
     }
 
+    EdBuiltins_RecoveryGuard(s_host);   // offer to restore a crash autosave on (re)load
+    EdScene_AutosaveTick(&s_scene);     // periodic "<map>.autosave" while dirty
     EdHost_Frame(s_host, w, h);
 
     // Window title carries the document name + dirty marker (audit P1-C) — the

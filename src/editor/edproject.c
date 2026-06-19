@@ -167,14 +167,16 @@ static void CopyDirTree(const char *src, const char *dst) {
             MkDir(dstSub);  // ignore error if already exists
             CopyDirTree(srcPath, dstSub);
         } else {
-            // Regular file: copy verbatim.
+            // Regular file: copy verbatim. Use a *binary* load/save — text-mode
+            // copy (LoadFileText + fputs) truncates at the first NUL byte, which
+            // silently corrupts .glb / .png / any binary asset in a template.
             char dstPath[768];
             snprintf(dstPath, sizeof dstPath, "%s/%s", dst, name);
-            char *data = LoadFileText(srcPath);
+            int bytes = 0;
+            unsigned char *data = LoadFileData(srcPath, &bytes);
             if (data) {
-                FILE *f = fopen(dstPath, "w");
-                if (f) { fputs(data, f); fclose(f); }
-                UnloadFileText(data);
+                SaveFileData(dstPath, data, bytes);
+                UnloadFileData(data);
             }
         }
     }

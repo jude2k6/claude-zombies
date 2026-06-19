@@ -85,9 +85,27 @@ typedef struct {
     Color         col;
 } EdProxy;
 
+// One clipboard slot: an entity's kind plus a full copy of its struct. The
+// union holds whichever MapDoc payload matches `kind`; paste re-adds an entity
+// of that kind and copies the payload back (minus the id, which is re-minted).
+typedef struct {
+    EngMapEntKind kind;
+    union {
+        MapDocSpawn    spawn;
+        MapDocWall     wall;
+        MapDocWindow   window;
+        MapDocObstacle obstacle;
+        MapDocProp     prop;
+        MapDocWallbuy  wallbuy;
+        MapDocPerk     perk;
+        MapDocSector   sector;
+    } u;
+} EdClipEnt;
+
 typedef struct EdScene {
     char          path[512];
     bool          dirty;            // unsaved edits since last save/open
+    float         autosaveAccum;    // seconds of dirty time since last autosave
     MapDoc        doc;
     EngMapHistory hist;
 
@@ -101,7 +119,14 @@ typedef struct EdScene {
     bool          materialMode;     // M key toggle: draw textured geometry instead of proxy boxes
 
     // ---- selection / tools -------------------------------------------------
+    // selectedId is the PRIMARY (active) selection: gizmo pivot, inspector
+    // target, status line. selIds[] is the full multi-selection set and always
+    // CONTAINS selectedId when selCount > 0 (selectedId == -1 ⇔ selCount == 0).
+    // Group ops (move/delete/duplicate) iterate selIds; single-entity edits use
+    // selectedId. Shift-click toggles membership and makes the hit the primary.
     int           selectedId;       // -1 = nothing selected
+    int           selIds[ED_MAX_ENTS];
+    int           selCount;
     EngGizmoMode  mode;             // current gizmo mode
     EdPlaceTool   placeTool;        // active placement tool (NONE = select mode)
     char          placeMobId[ED_MOBID_LEN];    // ED_PLACE_MOB: which mob tag to drop
@@ -128,10 +153,20 @@ typedef struct EdScene {
 
     bool          dragging;
     EngGizmoDrag  drag;
-    Vector3       dragStartPos;     // selected entity pos at grab (TRANSLATE)
+    Vector3       dragStartPos;     // PRIMARY entity pos at grab (TRANSLATE pivot)
+    Vector3       dragStart[ED_MAX_ENTS]; // per-selected start pos (group translate)
     float         dragStartYaw;     // selected prop's yaw (deg) at grab (ROTATE)
     float         dragStartScale;   // selected prop's scale at grab (SCALE)
     uint32_t      dragTag;          // coalesce token for this drag
+
+    // ---- clipboard (copy/cut → paste) --------------------------------------
+    // Snapshots of copied entities (kind + full struct, absolute positions).
+    // Survives across edits and does not reference live ids, so cut-then-paste
+    // is safe. clipPasteSeq steps each paste so repeated pastes fan out instead
+    // of stacking; it resets on every copy/cut.
+    EdClipEnt     clip[ED_MAX_ENTS];
+    int           clipCount;
+    int           clipPasteSeq;
 
     EdProxy       proxies[ED_MAX_ENTS];
     int           proxyCount;
@@ -171,6 +206,12 @@ typedef struct EdScene {
 // by reference for the matching Save.
 void EdScene_LoadSettings(EdScene *s, EngCfg *cfg);
 void EdScene_SaveSettings(EdScene *s, EngCfg *cfg);
+
+// Write the scene-owned setting keys (cam/view/grid/edit/ui/win) into an open
+// EngCfg save stream. Shared by EdScene_SaveSettings and the panels plugin's
+// recents writer so the key list lives in exactly one place. Recents (recent.*
+// / game.*) are written by the caller after this, before EngCfg_EndSave.
+void EdScene_PutSettingKeys(const EdScene *s, FILE *f);
 
 // Parse the map at s->path and prime the camera/history/selection. Settings
 // must already be loaded (they drive history depth, default view, zoom, scale).
@@ -214,13 +255,40 @@ void EdScene_DrawViewport(EdScene *s, Rectangle vp);
 void EdScene_Commit(EdScene *s);             // push one undo step + mark dirty
 void EdScene_Undo(EdScene *s);
 void EdScene_Redo(EdScene *s);
-void EdScene_DeleteSelected(EdScene *s);
+void EdScene_DeleteSelected(EdScene *s);     // delete the whole selection set
+
+// ---- selection set ---------------------------------------------------------
+// Click selection: `additive` (shift-click) toggles `id` in/out of the set and
+// makes it the primary; non-additive replaces the set with just `id`. id < 0
+// with additive=false clears the selection.
+void EdScene_SelectClick(EdScene *s, int id, bool additive);
+void EdScene_SelectAll(EdScene *s);          // select every entity in the doc
+void EdScene_ClearSelection(EdScene *s);
+bool EdScene_IsSelected(const EdScene *s, int id);
+int  EdScene_SelCount(const EdScene *s);
+
+// ---- clipboard / duplicate -------------------------------------------------
+void EdScene_DuplicateSelected(EdScene *s);  // clone selection in place + nudge, select clones
+void EdScene_CopySelection(EdScene *s);      // snapshot selection into the clipboard
+void EdScene_Cut(EdScene *s);                // copy then delete the selection
+void EdScene_Paste(EdScene *s);              // instantiate the clipboard, select the result
 void EdScene_SwitchView(EdScene *s, EdViewMode m);
 void EdScene_CycleSelected(EdScene *s);      // R: retag spawn / rotate window facing
 bool EdScene_Save(EdScene *s);               // MapDoc_Save → s->path; clears dirty
 bool EdScene_Open(EdScene *s, const char *path);  // load a different map (resets history)
 void EdScene_New(EdScene *s);                // reset to a fresh empty document
 bool EdScene_SaveAs(EdScene *s, const char *path); // set path then Save; returns success
+
+// ---- autosave / crash recovery ---------------------------------------------
+// Autosave writes "<path>.autosave" while the document is dirty (every
+// ED_AUTOSAVE_SECS of edit time); a clean manual save deletes it. On load, a
+// newer "<path>.autosave" than the map itself means the last session crashed
+// before saving — the shell offers to restore it (EdScene_RestoreRecovery) or
+// throw it away (EdScene_DiscardRecovery).
+void EdScene_AutosaveTick(EdScene *s);            // call once per frame
+bool EdScene_RecoveryAvailable(const EdScene *s); // newer .autosave than the map?
+bool EdScene_RestoreRecovery(EdScene *s);         // load the .autosave, mark dirty, consume it
+void EdScene_DiscardRecovery(EdScene *s);         // delete the .autosave
 
 const char *EdScene_KindName(EngMapEntKind k);
 

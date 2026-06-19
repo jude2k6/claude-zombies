@@ -21,4 +21,8 @@ const EdPluginDesc *EdBuiltin_StatusBar(void);  // status segments
 // launcher-opened game lands in recents like any in-editor open.
 void EdBuiltins_RememberGame(EdHost *h, const char *dir);
 
+// Raise the crash-recovery prompt when the current map loaded with a newer
+// "<path>.autosave" than the map. Idempotent per path; call once per frame.
+void EdBuiltins_RecoveryGuard(EdHost *h);
+
 #endif

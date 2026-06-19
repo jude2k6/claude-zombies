@@ -79,31 +79,9 @@ static void Recents_Load(EngCfg *cfg) {
 static void Recents_Save(EdScene *s) {
     FILE *f = EngCfg_BeginSave(s->cfg, "Claude Zombies map editor settings");
     if (!f) return;
-    // --- camera ---
-    EngCfg_PutFloat(f, "cam.flySpeed",  s->camFlySpeed);
-    EngCfg_PutFloat(f, "cam.flyBoost",  s->camFlyBoost);
-    EngCfg_PutFloat(f, "cam.lookSens",  s->camLookSens);
-    EngCfg_PutFloat(f, "cam.orbitSens", s->camOrbitSens);
-    EngCfg_PutFloat(f, "cam.zoomSpeed", s->camZoomSpeed);
-    // --- view ---
-    EngCfg_PutFloat(f, "view.fov",         s->viewFov);
-    EngCfg_PutInt  (f, "view.default",     (int)s->viewDefault);
-    EngCfg_PutFloat(f, "view.orthoHeight", s->viewOrthoH);
-    // --- grid ---
-    EngCfg_PutFloat(f, "grid.spacing",  s->gridSpacing);
-    EngCfg_PutInt  (f, "grid.slices",   s->gridSlices);
-    EngCfg_PutBool (f, "grid.snap",     s->snapEnabled);
-    EngCfg_PutFloat(f, "grid.snapStep", s->snapStep);
-    // --- editing ---
-    EngCfg_PutBool (f, "edit.barricadeAutoSpawn", s->barricadeAutoSpawn);
-    EngCfg_PutInt  (f, "edit.undoDepth", s->undoDepth);
-    // --- display ---
-    EngCfg_PutFloat(f, "ui.scale",   s->uiScale);
-    EngCfg_PutInt  (f, "win.width",  s->winW);
-    EngCfg_PutInt  (f, "win.height", s->winH);
-    EngCfg_PutBool (f, "win.vsync",  s->vsync);
-    EngCfg_PutInt  (f, "win.fpsCap", s->fpsCap);
-    // --- recents ---
+    // Scene-owned setting keys come from the single shared writer (no drift).
+    EdScene_PutSettingKeys(s, f);
+    // --- recents (owned here / by the launcher) ---
     for (int i = 0; i < g_recentCount; i++) {
         char key[32]; snprintf(key, sizeof key, "recent.%d", i);
         EngCfg_PutStr(f, key, g_recent[i]);
@@ -278,6 +256,50 @@ static void DirtyGuardModal(EdHost *h, Rectangle area, void *u) {
     }
 }
 
+// ---- crash recovery prompt -------------------------------------------------
+// Shown once when a map loads with a newer "<path>.autosave" than the map (the
+// last session crashed mid-edit). Restore loads the autosave; Discard deletes
+// it. EdBuiltins_RecoveryGuard (called once per frame by editor_main) detects a
+// path change and raises this when recovery is available and no modal is up.
+
+static void RecoveryModal(EdHost *h, Rectangle area, void *u) {
+    (void)u;
+    float sc = EdHost_UiScale(h);
+    Eng_UiSetScale(sc); Eng_UiApplyFont(13);
+    float pw = 360 * sc, ph = 150 * sc;
+    float px = (area.width  - pw) / 2.0f;
+    float py = (area.height - ph) / 2.0f; if (py < 6 * sc) py = 6 * sc;
+    Eng_UiPanelBg((Rectangle){ px - 2, py - 2, pw + 4, ph + 4 }, (Color){ 80, 66, 60, 255 });
+    Eng_UiPanelBg((Rectangle){ px, py, pw, ph },                 (Color){ 24, 27, 34, 255 });
+
+    float X = px + 16 * sc, W = pw - 32 * sc, y = py + 16 * sc;
+    Eng_UiText("RECOVER UNSAVED WORK", X, y, 16, ENG_UI_GOLD); y += 26 * sc;
+    Eng_UiText("A newer autosave was found for this map —", X, y, 12, ENG_UI_TEXT); y += 16 * sc;
+    Eng_UiText("the last session likely closed without saving.", X, y, 12, ENG_UI_TEXT); y += 30 * sc;
+
+    EdScene *s = EdHost_Scene(h);
+    float bw = (W - 8 * sc) / 2.0f;
+    if (GuiButton((Rectangle){ X, y, bw, 26 * sc }, "Restore")) {
+        if (EdScene_RestoreRecovery(s)) EdHost_Log(h, ED_LOG_INFO, "restored autosave for %s", s->path);
+        else                            EdHost_Log(h, ED_LOG_ERROR, "autosave restore FAILED (kept loaded map)");
+        EdHost_SetModal(h, NULL, NULL);
+    }
+    if (GuiButton((Rectangle){ X + bw + 8 * sc, y, bw, 26 * sc }, "Discard")) {
+        EdScene_DiscardRecovery(s);
+        EdHost_Log(h, ED_LOG_INFO, "discarded autosave for %s", s->path);
+        EdHost_SetModal(h, NULL, NULL);
+    }
+}
+
+void EdBuiltins_RecoveryGuard(EdHost *h) {
+    static char checked[512] = "\x01";   // sentinel that never equals a real path
+    EdScene *s = EdHost_Scene(h);
+    if (strcmp(checked, s->path) == 0) return;   // already evaluated this map
+    snprintf(checked, sizeof checked, "%s", s->path);
+    if (!EdHost_HasModal(h) && EdScene_RecoveryAvailable(s))
+        EdHost_SetModal(h, RecoveryModal, NULL);
+}
+
 // ============================================================================
 //  Menus: File / Edit / View / Help   (Tools is owned by EdBuiltin_MapTools)
 // ============================================================================
@@ -285,6 +307,7 @@ static void DirtyGuardModal(EdHost *h, Rectangle area, void *u) {
 static bool q_can_undo(EdHost *h, void *u) { (void)u; return EngMapHistory_CanUndo(&EdHost_Scene(h)->hist); }
 static bool q_can_redo(EdHost *h, void *u) { (void)u; return EngMapHistory_CanRedo(&EdHost_Scene(h)->hist); }
 static bool q_has_sel (EdHost *h, void *u) { (void)u; return EdHost_SelectedId(h) >= 0; }
+static bool q_has_clip(EdHost *h, void *u) { (void)u; return EdHost_Scene(h)->clipCount > 0; }
 static bool q_dirty   (EdHost *h, void *u) { (void)u; return EdHost_Scene(h)->dirty; }
 
 static bool q_view_fly(EdHost *h, void *u) { (void)u; return EdHost_Scene(h)->view == ED_VIEW_FLY; }
@@ -586,6 +609,11 @@ static void a_open_recent_game(EdHost *h, void *u) {
 static void a_undo(EdHost *h, void *u)  { (void)u; EdScene_Undo(EdHost_Scene(h)); }
 static void a_redo(EdHost *h, void *u)  { (void)u; EdScene_Redo(EdHost_Scene(h)); }
 static void a_del (EdHost *h, void *u)  { (void)u; EdScene_DeleteSelected(EdHost_Scene(h)); }
+static void a_dup (EdHost *h, void *u)  { (void)u; EdScene_DuplicateSelected(EdHost_Scene(h)); }
+static void a_copy(EdHost *h, void *u)  { (void)u; EdScene_CopySelection(EdHost_Scene(h)); }
+static void a_cut (EdHost *h, void *u)  { (void)u; EdScene_Cut(EdHost_Scene(h)); }
+static void a_paste(EdHost *h, void *u) { (void)u; EdScene_Paste(EdHost_Scene(h)); }
+static void a_selall(EdHost *h, void *u){ (void)u; EdScene_SelectAll(EdHost_Scene(h)); }
 
 static void a_view_fly(EdHost *h, void *u) { (void)u; EdScene_SwitchView(EdHost_Scene(h), ED_VIEW_FLY); }
 static void a_view_iso(EdHost *h, void *u) { (void)u; EdScene_SwitchView(EdHost_Scene(h), ED_VIEW_ORBIT); }
@@ -598,9 +626,10 @@ static void a_giz_scale(EdHost *h, void *u) { (void)u; EdHost_Scene(h)->mode = E
 static void a_help_controls(EdHost *h, void *u) {
     (void)u;
     EdHost_Log(h, ED_LOG_INFO, "View: F1 fly / F2 iso / F3 top   Gizmo: 1 move 2 rot 3 scale");
-    EdHost_Log(h, ED_LOG_INFO, "Place: P cycle tool, click ground   R retag/rotate   X delete");
+    EdHost_Log(h, ED_LOG_INFO, "Place: P cycle tool, click ground   R retag/rotate   X/Del delete");
+    EdHost_Log(h, ED_LOG_INFO, "Select: click   Shift+click add/remove   Ctrl+A all   move gizmo drags the set");
     EdHost_Log(h, ED_LOG_INFO, "Fly: RMB+WASDQE (Shift fast)   Ortho: RMB orbit / MMB pan / wheel zoom");
-    EdHost_Log(h, ED_LOG_INFO, "Edit: Ctrl+Z undo / Ctrl+Y redo / Ctrl+S save   UI: Ctrl +/-");
+    EdHost_Log(h, ED_LOG_INFO, "Edit: Ctrl+Z undo / Ctrl+Y redo / Ctrl+S save   Ctrl+D dup / Ctrl+C copy / Ctrl+X cut / Ctrl+V paste");
 }
 static void a_help_about(EdHost *h, void *u) {
     (void)u;
@@ -639,7 +668,13 @@ static void RegisterMenus(EdHost *h) {
     EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="Edit", .label="Undo", .shortcut="Ctrl+Z", .onClick=a_undo, .enabled=q_can_undo });
     EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="Edit", .label="Redo", .shortcut="Ctrl+Y", .onClick=a_redo, .enabled=q_can_redo });
     EdHost_AddMenuSeparator(h, "Edit");
-    EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="Edit", .label="Delete selected", .shortcut="X", .onClick=a_del, .enabled=q_has_sel });
+    EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="Edit", .label="Duplicate",   .shortcut="Ctrl+D", .onClick=a_dup,   .enabled=q_has_sel });
+    EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="Edit", .label="Copy",        .shortcut="Ctrl+C", .onClick=a_copy,  .enabled=q_has_sel });
+    EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="Edit", .label="Cut",         .shortcut="Ctrl+X", .onClick=a_cut,   .enabled=q_has_sel });
+    EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="Edit", .label="Paste",       .shortcut="Ctrl+V", .onClick=a_paste, .enabled=q_has_clip });
+    EdHost_AddMenuSeparator(h, "Edit");
+    EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="Edit", .label="Select all",      .shortcut="Ctrl+A", .onClick=a_selall });
+    EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="Edit", .label="Delete selected", .shortcut="X",      .onClick=a_del, .enabled=q_has_sel });
 
     EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="View", .label="Fly camera",       .shortcut="F1", .onClick=a_view_fly, .checked=q_view_fly });
     EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="View", .label="Isometric camera", .shortcut="F2", .onClick=a_view_iso, .checked=q_view_iso });
@@ -851,7 +886,7 @@ static void PanelHierarchy(EdHost *h, Rectangle c, void *u) {
         if (ry + rowH < listArea.y || ry > listArea.y + listArea.height) continue;
         EdProxy *p = &s->proxies[filtered[fi]];
         Rectangle row = { listArea.x, ry, listArea.width, rowH };
-        bool sel = (p->id == s->selectedId);
+        bool sel = EdScene_IsSelected(s, p->id);
         bool hot = CheckCollisionPointRec(GetMousePosition(), row);
         if (sel)      DrawRectangleRec(row, (Color){ 60, 70, 90, 255 });
         else if (hot) DrawRectangleRec(row, (Color){ 40, 46, 56, 255 });
@@ -859,7 +894,10 @@ static void PanelHierarchy(EdHost *h, Rectangle c, void *u) {
         DrawRectangle((int)(listArea.x + 2 * sc), (int)(ry + 4 * sc), (int)(8 * sc), (int)(8 * sc), dot);
         Eng_UiText(TextFormat("#%d %s", p->id, EdScene_KindName(p->kind)),
                    listArea.x + 14 * sc, ry + 1 * sc, 11, sel ? ENG_UI_GOLD : ENG_UI_TEXT);
-        if (interactive && hot && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) s->selectedId = p->id;
+        if (interactive && hot && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+            bool shift = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
+            EdScene_SelectClick(s, p->id, shift);
+        }
     }
     EndScissorMode();
     if (nFiltered == 0) {
@@ -966,7 +1004,13 @@ static void PanelAssets(EdHost *h, Rectangle c, void *u) {
         y += rowH;
     }
 
-    // ---- Models (click to arm prop placement) ----
+    // ---- Models (browse-only preview) ----
+    // These are raw engine models from models/*.glb (characters, viewmodels,
+    // test rigs) — NOT placeable props. A prop is resolved as
+    // props/<id>/<id>.glb from a props/*.prop catalog entry (collision, tint,
+    // scale included), so arming a bare model stem here would place a "prop"
+    // that has no def and renders as a placeholder box. Place props from the
+    // catalog-driven Props palette above instead; this section is for browsing.
     if (ROW_VIS(labelH)) GuiLabel((Rectangle){ area.x, y, area.width, labelH }, "Models");
     y += labelH;
     for (int i = 0; i < ix->modelCount; i++) {
@@ -976,14 +1020,10 @@ static void PanelAssets(EdHost *h, Rectangle c, void *u) {
             // Only render a (one-time) thumbnail when the row is actually on
             // screen, so off-screen models never pay the render cost.
             Texture2D t = EdThumb_Model(ix->models[i].path, 64);
-            bool armed = (s->placeTool == ED_PLACE_PROP &&
-                          strcmp(s->placePropId, ix->models[i].name) == 0);
             if (AssetRow(h, area, y, rowH, sc, t, true, ix->models[i].name,
-                         armed ? ENG_UI_GOLD : (Color){ 70, 80, 70, 255 })) {
-                s->placeTool = ED_PLACE_PROP;
-                snprintf(s->placePropId, sizeof s->placePropId, "%s", ix->models[i].name);
-                EdHost_Log(h, ED_LOG_INFO, "place prop: %s (click the viewport)", ix->models[i].name);
-            }
+                         (Color){ 70, 80, 70, 255 }))
+                EdHost_Log(h, ED_LOG_INFO, "model: %s (not a placeable prop — use the Props palette)",
+                           ix->models[i].name);
         }
         y += rowH;
     }
@@ -1052,6 +1092,34 @@ static bool InspFloatBox(float X, float W, float *y, float sc,
     }
     *y += 22 * sc;
     return changed;
+}
+
+// Per-surface texture-override field for WALL / OBSTACLE. Reads/writes the
+// MapDoc TEX field via the engine accessors; a blank string clears the override
+// so the surface falls back to the map's wall_ext slot. Commits on edit-toggle.
+static void InspTexField(EdHost *h, EdScene *s, float X, float W, float *y, float sc) {
+    static char buf[MAPDOC_TEX_NAME_LEN] = "";
+    static bool edit = false;
+    static int  lastId = -1;
+    char cur[MAPDOC_TEX_NAME_LEN] = "";
+    Eng_GetSurfaceTex(&s->doc, s->selectedId, cur, sizeof cur);
+    if (lastId != s->selectedId) {
+        lastId = s->selectedId;
+        snprintf(buf, sizeof buf, "%s", cur);
+        edit = false;
+    }
+    Eng_UiText("tex", X, *y + 1 * sc, 12, ENG_UI_TEXT);
+    bool was = edit;
+    if (GuiTextBox((Rectangle){ X + 60 * sc, *y, W - 60 * sc, 18 * sc }, buf, sizeof buf, was)) {
+        edit = !was;
+        if (was && strcmp(buf, cur) != 0) {
+            Eng_SetSurfaceTex(&s->doc, s->selectedId, buf);
+            EdHost_CommitEdit(h);
+        }
+    }
+    *y += 20 * sc;
+    Eng_UiText("(blank = map default)", X, *y, 9, ENG_UI_DIM);
+    *y += 14 * sc;
 }
 
 // ---- Inspector — Feature 1: editable fields / Feature 3: map metadata ------
@@ -1188,6 +1256,9 @@ static void PanelInspector(EdHost *h, Rectangle c, void *u) {
     EngMapEntKind k;
     EngMapEnt_Ptr(&s->doc, EngMapEnt_Find(&s->doc, s->selectedId), &k);
     Eng_UiText(TextFormat("#%d  %s", s->selectedId, EdScene_KindName(k)), X, y, 13, ENG_UI_GOLD);
+    if (EdScene_SelCount(s) > 1)
+        Eng_UiText(TextFormat("%d selected (editing primary)", EdScene_SelCount(s)),
+                   X, y + 14 * sc, 10, ENG_UI_DIM);
     y += 22 * sc;
 
     // Position x, z — all kinds.
@@ -1279,6 +1350,11 @@ static void PanelInspector(EdHost *h, Rectangle c, void *u) {
             EdHost_CommitEdit(h);
         }
 
+    } else if (k == ENGMAPENT_WALL) {
+        // Walls carry only a per-surface texture override in the inspector;
+        // their geometry is edited by dragging the move gizmo / endpoints.
+        InspTexField(h, s, X, W, &y, sc);
+
     } else if (k == ENGMAPENT_OBSTACLE) {
         // Obstacle sx / sz / h.
         float sx = 1, sz = 1, oh = 1;
@@ -1291,6 +1367,8 @@ static void PanelInspector(EdHost *h, Rectangle c, void *u) {
             Eng_SetObstacleSize(&s->doc, s->selectedId, nsx, nsz, noh);
             EdHost_CommitEdit(h);
         }
+        y += 4 * sc;
+        InspTexField(h, s, X, W, &y, sc);
 
     } else if (k == ENGMAPENT_SECTOR) {
         // Sector sx / sz + yLow / yHigh.
@@ -1482,7 +1560,9 @@ static void st_sel(EdHost *h, char *out, int cap, void *u) {
     (void)u; EdScene *s = EdHost_Scene(h);
     if (s->selectedId < 0) { out[0] = '\0'; return; }   // no dead "no selection" text (audit P1-C)
     EngMapEntKind k; EngMapEnt_Ptr(&s->doc, EngMapEnt_Find(&s->doc, s->selectedId), &k);
-    snprintf(out, cap, "sel #%d %s", s->selectedId, EdScene_KindName(k));
+    int n = EdScene_SelCount(s);
+    if (n > 1) snprintf(out, cap, "sel #%d %s (+%d)", s->selectedId, EdScene_KindName(k), n - 1);
+    else       snprintf(out, cap, "sel #%d %s", s->selectedId, EdScene_KindName(k));
 }
 
 static void RegisterStatusBar(EdHost *h) {

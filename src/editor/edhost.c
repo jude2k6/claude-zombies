@@ -147,7 +147,7 @@ const char *EdHost_LogLine(EdHost *h, int i, EdLogLevel *outLvl) {
 
 MapDoc  *EdHost_Doc(EdHost *h)        { return &h->scene->doc; }
 int      EdHost_SelectedId(EdHost *h) { return h->scene->selectedId; }
-void     EdHost_Select(EdHost *h, int id) { h->scene->selectedId = id; }
+void     EdHost_Select(EdHost *h, int id) { EdScene_SelectClick(h->scene, id, false); }
 void     EdHost_CommitEdit(EdHost *h) { EdScene_Commit(h->scene); }
 EdScene *EdHost_Scene(EdHost *h)      { return h->scene; }
 float    EdHost_UiScale(EdHost *h)    { return h->scene->uiScale; }
@@ -563,6 +563,12 @@ void EdHost_Frame(EdHost *h, int W, int H) {
     bool ctrl = IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL);
     if (ctrl && IsKeyPressed(KEY_Z)) EdScene_Undo(h->scene);
     if (ctrl && IsKeyPressed(KEY_Y)) EdScene_Redo(h->scene);
+    // Selection + clipboard verbs (suppressed while a modal owns input).
+    if (!modal && ctrl && IsKeyPressed(KEY_A)) EdScene_SelectAll(h->scene);
+    if (!modal && ctrl && IsKeyPressed(KEY_C)) EdScene_CopySelection(h->scene);
+    if (!modal && ctrl && IsKeyPressed(KEY_X)) EdScene_Cut(h->scene);
+    if (!modal && ctrl && IsKeyPressed(KEY_V)) EdScene_Paste(h->scene);
+    if (!modal && ctrl && IsKeyPressed(KEY_D)) EdScene_DuplicateSelected(h->scene);
     // Ctrl+S: quick-save (skips dialog if path is known; "untitled" is handled
     //         in builtins.c a_save but we can do a direct save here too — this
     //         only fires when a real path is already set).

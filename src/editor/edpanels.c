@@ -252,6 +252,16 @@ static void PanelHierarchy(EdHost *h, Rectangle c, void *u) {
         if (interactive && hot && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
             bool shift = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
             EdScene_SelectClick(s, p->id, shift);
+            // Double-click the same row → frame that entity in the viewport.
+            static int    lastId = -1;
+            static double lastT  = -1.0;
+            double now = GetTime();
+            if (p->id == lastId && now - lastT < 0.35) {
+                EdScene_FrameSelected(s);
+                lastId = -1;   // consume, so a third click starts a new pair
+            } else {
+                lastId = p->id; lastT = now;
+            }
         }
     }
     EndScissorMode();

@@ -278,6 +278,10 @@ void EdScene_RebuildProxies(EdScene *s);
 // s->framePending instead so it runs once vpW/vpH are known.
 void EdScene_FrameAll(EdScene *s);
 
+// Frame the primary selection (zoom+centre on its proxy box). No-op with nothing
+// selected. Used by the F key and hierarchy double-click.
+void EdScene_FrameSelected(EdScene *s);
+
 // ---- per-frame viewport ----------------------------------------------------
 
 // Drive camera + editing interaction for this frame. `vp` is the viewport rect

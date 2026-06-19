@@ -116,8 +116,10 @@ height handle owns vertical editing.
 
 - No marquee/rubber-band multi-select (`PickSelection` in edscene.c is click +
   shift-click only).
-- Hierarchy is a flat `#id kind` list — no grouping/rename/double-click-to-frame
-  (`PanelHierarchy` in edpanels.c).
+- Hierarchy is a flat `#id kind` list — double-click-to-frame DONE (a row
+  double-click calls `EdScene_FrameSelected`); grouping + inline rename still open
+  (`PanelHierarchy` in edpanels.c). Also: `F` now frames AND zooms the selection
+  (was recenter-only) via the shared `FrameBox`/`EdScene_FrameSelected`.
 - `SectorAt` silently dumps out-of-bounds placements into sector 0 (now in
   `edplace.c`) → spawn at wrong floor, no warning. PARTLY MITIGATED by item 7:
   the inline inspector ISSUES list (MapDoc_Validate) now flags "outside sector"

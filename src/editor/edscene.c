@@ -120,36 +120,20 @@ void EdScene_RebuildProxies(EdScene *s) {
 
 static Vector3 ForwardFrom(float yaw, float pitch);   // defined with the cameras below
 
-void EdScene_FrameAll(EdScene *s) {
-    s->framePending = false;
-    // Forward axis of the current view (TOP looks straight down; fly/orbit use
-    // the shared look angles). The camera sits back along -fwd from the focus.
+// Fit the camera to an arbitrary world AABB: centre the focus, set orthoH (ortho)
+// or pull-back distance (fly). Shared by frame-all (union box) and frame-selected
+// (one proxy box). Rotation-independent so it holds at any iso yaw.
+static void FrameBox(EdScene *s, BoundingBox b) {
     Vector3 fwd = (s->view == ED_VIEW_TOP) ? (Vector3){ 0, -1, 0 }
                                            : ForwardFrom(s->yaw, s->pitch);
-
-    if (s->proxyCount == 0) {        // empty map → recenter on the origin
-        s->focus = (Vector3){ 0, 0, 0 };
-        s->orthoH = s->viewOrthoH;
-        s->cam.position = Vector3Subtract(s->focus, Vector3Scale(fwd, ED_ORBIT_DIST));
-        return;
-    }
-
-    // Union of every proxy box → the document's world bounds.
-    BoundingBox b = s->proxies[0].box;
-    for (int i = 1; i < s->proxyCount; i++) {
-        BoundingBox o = s->proxies[i].box;
-        b.min.x = fminf(b.min.x, o.min.x); b.max.x = fmaxf(b.max.x, o.max.x);
-        b.min.y = fminf(b.min.y, o.min.y); b.max.y = fmaxf(b.max.y, o.max.y);
-        b.min.z = fminf(b.min.z, o.min.z); b.max.z = fmaxf(b.max.z, o.max.z);
-    }
     Vector3 c = { (b.min.x + b.max.x) * 0.5f, (b.min.y + b.max.y) * 0.5f,
                   (b.min.z + b.max.z) * 0.5f };
     s->focus = c;
 
     float sx = b.max.x - b.min.x, sy = b.max.y - b.min.y, sz = b.max.z - b.min.z;
-    // Rotation-independent XZ span: using the footprint diagonal guarantees the
-    // bounds fit whatever yaw the iso camera is at (a plain max would clip on the
-    // diagonal). Add the vertical extent so tall multi-floor maps still fit.
+    // Footprint diagonal guarantees the bounds fit whatever yaw the iso camera is
+    // at (a plain max would clip on the diagonal). Add the vertical extent so tall
+    // multi-floor content still fits.
     float footprint = sqrtf(sx * sx + sz * sz);
     float aspect = (s->vpH > 0) ? (float)s->vpW / (float)s->vpH : 1.6f;
 
@@ -158,11 +142,44 @@ void EdScene_FrameAll(EdScene *s) {
     s->orthoH = fminf(400.0f, fmaxf(2.0f, fitH * 1.15f + 4.0f));   // clamp to zoom range
 
     if (s->view == ED_VIEW_FLY) {
-        // Pull back far enough that the bounding sphere fits the vertical FOV.
         float radius = fmaxf(footprint, sy) * 0.5f + 1.0f;
         float dist = radius / tanf(s->viewFov * 0.5f * DEG2RAD) + 4.0f;
         s->cam.position = Vector3Subtract(c, Vector3Scale(fwd, dist));
     }
+}
+
+void EdScene_FrameAll(EdScene *s) {
+    s->framePending = false;
+    if (s->proxyCount == 0) {        // empty map → recenter on the origin
+        Vector3 fwd = (s->view == ED_VIEW_TOP) ? (Vector3){ 0, -1, 0 }
+                                               : ForwardFrom(s->yaw, s->pitch);
+        s->focus = (Vector3){ 0, 0, 0 };
+        s->orthoH = s->viewOrthoH;
+        s->cam.position = Vector3Subtract(s->focus, Vector3Scale(fwd, ED_ORBIT_DIST));
+        return;
+    }
+    // Union of every proxy box → the document's world bounds.
+    BoundingBox b = s->proxies[0].box;
+    for (int i = 1; i < s->proxyCount; i++) {
+        BoundingBox o = s->proxies[i].box;
+        b.min.x = fminf(b.min.x, o.min.x); b.max.x = fmaxf(b.max.x, o.max.x);
+        b.min.y = fminf(b.min.y, o.min.y); b.max.y = fmaxf(b.max.y, o.max.y);
+        b.min.z = fminf(b.min.z, o.min.z); b.max.z = fmaxf(b.max.z, o.max.z);
+    }
+    FrameBox(s, b);
+}
+
+// Frame the PRIMARY selection (its proxy box). No-op if nothing is selected or
+// its proxy isn't built yet. A small point entity gets a minimum box so the zoom
+// doesn't slam to the 2-unit clamp.
+void EdScene_FrameSelected(EdScene *s) {
+    const EdProxy *p = (s->selectedId >= 0) ? FindProxy(s, s->selectedId) : NULL;
+    if (!p) return;
+    BoundingBox b = p->box;
+    const float MINH = 3.0f;   // half-extent floor so tiny markers don't over-zoom
+    if (b.max.x - b.min.x < MINH) { b.min.x -= MINH; b.max.x += MINH; }
+    if (b.max.z - b.min.z < MINH) { b.min.z -= MINH; b.max.z += MINH; }
+    FrameBox(s, b);
 }
 
 const EdProxy *FindProxy(EdScene *s, int id) {
@@ -1232,22 +1249,13 @@ void EdScene_UpdateViewport(EdScene *s, Rectangle vp, bool inputAllowed) {
         if ((IsKeyPressed(KEY_X) && !ctrlHeld) || IsKeyPressed(KEY_DELETE))
             EdScene_DeleteSelected(s);
 
-        // F: recenter on the selected entity; with nothing selected, frame the
-        // whole map (so F is never a dead key). Home always frames all.
+        // F: frame the selected entity; with nothing selected, frame the whole
+        // map (so F is never a dead key). Home always frames all.
         if (IsKeyPressed(KEY_HOME)) {
             EdScene_FrameAll(s);
         } else if (IsKeyPressed(KEY_F)) {
-            Vector3 origin;
-            if (s->selectedId >= 0 && SelectedOrigin(s, &origin)) {
-                s->focus = origin;
-                if (s->view == ED_VIEW_FLY) {
-                    // Pull the fly camera back 20 units so the entity is in frame.
-                    s->cam.position = Vector3Subtract(origin,
-                        Vector3Scale(ForwardFrom(s->yaw, s->pitch), 20.0f));
-                }
-            } else {
-                EdScene_FrameAll(s);   // no selection → frame everything
-            }
+            if (s->selectedId >= 0) EdScene_FrameSelected(s);
+            else                    EdScene_FrameAll(s);
         }
     } else if (s->looking) {
         // Lost focus mid-mouselook: show cursor again so the OS pointer is visible.

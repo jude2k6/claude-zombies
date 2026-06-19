@@ -128,12 +128,9 @@ static void EdDraw(int w, int h) {
     static bool s_selectApplied = false;
     if (s_selectId >= 0 && !s_selectApplied) {
         EdScene_SelectClick(&s_scene, s_selectId, false);
-        float ex, ez;
-        if (Eng_GetPos(&s_scene.doc, s_selectId, &ex, &ez)) {
-            s_scene.focus = (Vector3){ ex, 0, ez };
-            s_scene.orthoH = 36.0f;
-            s_scene.framePending = false;
-        }
+        EdScene_RebuildProxies(&s_scene);   // FrameSelected needs the proxy boxes
+        EdScene_FrameSelected(&s_scene);
+        s_scene.framePending = false;       // don't let the open-time frame-all override
         s_selectApplied = true;
     }
 

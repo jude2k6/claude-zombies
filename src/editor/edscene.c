@@ -524,17 +524,10 @@ static void PlaceAt(EdScene *s, Vector3 p) {
             EdScene_Commit(s);
             break;
         }
-        case ED_PLACE_SECTOR: {
-            int sid = EngMapEnt_Add(&s->doc, ENGMAPENT_SECTOR);
-            if (sid < 0) return;
-            Eng_SetPos(&s->doc, sid, p.x, p.z);
-            Eng_SetSectorSize(&s->doc, sid, 20.0f, 20.0f);
-            Eng_SetSectorHeights(&s->doc, sid, 0.0f, 0.0f);
-            // Sectors are not owned by another sector; no Eng_SetSector call needed.
-            SelSetSingle(s, sid);
-            EdScene_Commit(s);
+        case ED_PLACE_SECTOR:
+            // Sectors use RECT-drag (UpdateSectorDrag), not click-to-drop, so the
+            // SECTOR tool never reaches PlaceAt — see EdScene_UpdateViewport.
             break;
-        }
         case ED_PLACE_WALLBUY: {
             int wid = EngMapEnt_Add(&s->doc, ENGMAPENT_WALLBUY);
             if (wid < 0) return;
@@ -575,6 +568,54 @@ static void PlaceAt(EdScene *s, Vector3 p) {
         }
         default: break;
     }
+}
+
+// Ground point under the cursor, snapped to the grid. Returns false if the pick
+// ray misses the y=0 plane (e.g. camera looking at the sky).
+static bool GroundPoint(EdScene *s, Vector3 *out) {
+    Ray ray = Eng_PickRayFromScreen(s->cam, s->vpMouse, s->vpW, s->vpH);
+    if (!Eng_PickRayGroundY(ray, 0.0f, out)) return false;
+    out->x = EdSnap(s, out->x);
+    out->z = EdSnap(s, out->z);
+    return true;
+}
+
+#define ED_SECTOR_MIN_SIZE 1.0f   // below this a drag is treated as a plain click
+
+// RECT-drag sector authoring: press to anchor a corner, drag to size the
+// footprint (live preview drawn in EdScene_DrawViewport), release to create.
+// A click (or a too-thin drag) falls back to a default 20×20 at the anchor so
+// the SECTOR tool still works without dragging. Created sectors own no parent
+// sector (no Eng_SetSector), get FLAT heights at y=0, and commit one undo step.
+static void UpdateSectorDrag(EdScene *s) {
+    Vector3 g;
+    if (!s->sectorDragging) {
+        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && GroundPoint(s, &g)) {
+            s->sectorDragging = true;
+            s->sectorStartX = s->sectorCurX = g.x;
+            s->sectorStartZ = s->sectorCurZ = g.z;
+        }
+        return;
+    }
+    if (GroundPoint(s, &g)) { s->sectorCurX = g.x; s->sectorCurZ = g.z; }
+    if (!IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) return;
+
+    s->sectorDragging = false;
+    float minX = fminf(s->sectorStartX, s->sectorCurX), maxX = fmaxf(s->sectorStartX, s->sectorCurX);
+    float minZ = fminf(s->sectorStartZ, s->sectorCurZ), maxZ = fmaxf(s->sectorStartZ, s->sectorCurZ);
+    float sx = maxX - minX, sz = maxZ - minZ, cx, cz;
+    if (sx < ED_SECTOR_MIN_SIZE || sz < ED_SECTOR_MIN_SIZE) {   // click → default footprint
+        sx = sz = 20.0f; cx = s->sectorStartX; cz = s->sectorStartZ;
+    } else {
+        cx = (minX + maxX) * 0.5f; cz = (minZ + maxZ) * 0.5f;
+    }
+    int sid = EngMapEnt_Add(&s->doc, ENGMAPENT_SECTOR);
+    if (sid < 0) return;
+    Eng_SetPos(&s->doc, sid, cx, cz);
+    Eng_SetSectorSize(&s->doc, sid, sx, sz);
+    Eng_SetSectorHeights(&s->doc, sid, 0.0f, 0.0f);
+    SelSetSingle(s, sid);
+    EdScene_Commit(s);
 }
 
 void EdScene_CycleSelected(EdScene *s) {
@@ -1167,23 +1208,29 @@ void EdScene_UpdateViewport(EdScene *s, Rectangle vp, bool inputAllowed) {
     bool camBusy = s->looking || IsMouseButtonDown(MOUSE_BUTTON_RIGHT) ||
                    IsMouseButtonDown(MOUSE_BUTTON_MIDDLE);
 
-    if (inputAllowed && !camBusy && !s->dragging && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-        if (s->placeTool != ED_PLACE_NONE) {
-            Vector3 hit;
-            Ray ray = Eng_PickRayFromScreen(s->cam, s->vpMouse, s->vpW, s->vpH);
-            if (Eng_PickRayGroundY(ray, 0.0f, &hit)) {
-                hit.x = EdSnap(s, hit.x); hit.z = EdSnap(s, hit.z);
-                PlaceAt(s, hit);
-            }
-        } else {
-            Vector3 origin;
-            EngGizmoAxis hot = ENG_GIZMO_AXIS_NONE;
-            if (SelectedOrigin(s, &origin))
-                hot = Eng_GizmoHitTest(s->cam, s->vpMouse, s->vpW, s->vpH, origin, s->mode,
-                                       GizmoHandleSize(s, origin));
-            if (hot == ENG_GIZMO_AXIS_NONE) {
-                bool additive = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
-                PickSelection(s, additive);
+    bool canInteract = inputAllowed && !camBusy && !s->dragging;
+    if (canInteract && s->placeTool == ED_PLACE_SECTOR) {
+        UpdateSectorDrag(s);   // RECT-drag create (press → drag → release)
+    } else {
+        s->sectorDragging = false;   // tool switched / camera busy / focus lost mid-drag
+        if (canInteract && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+            if (s->placeTool != ED_PLACE_NONE) {
+                Vector3 hit;
+                Ray ray = Eng_PickRayFromScreen(s->cam, s->vpMouse, s->vpW, s->vpH);
+                if (Eng_PickRayGroundY(ray, 0.0f, &hit)) {
+                    hit.x = EdSnap(s, hit.x); hit.z = EdSnap(s, hit.z);
+                    PlaceAt(s, hit);
+                }
+            } else {
+                Vector3 origin;
+                EngGizmoAxis hot = ENG_GIZMO_AXIS_NONE;
+                if (SelectedOrigin(s, &origin))
+                    hot = Eng_GizmoHitTest(s->cam, s->vpMouse, s->vpW, s->vpH, origin, s->mode,
+                                           GizmoHandleSize(s, origin));
+                if (hot == ENG_GIZMO_AXIS_NONE) {
+                    bool additive = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
+                    PickSelection(s, additive);
+                }
             }
         }
     }
@@ -1380,6 +1427,14 @@ void EdScene_DrawViewport(EdScene *s, Rectangle vp) {
     if (s->wallPending)
         Eng_DebugSphere((Vector3){ s->wallStartX, 0.0f, s->wallStartZ },
                         ED_MARKER, (Color){ 255, 220, 60, 255 });
+
+    // RECT-drag sector: outline the footprint being dragged out (live preview).
+    if (s->sectorDragging) {
+        float minX = fminf(s->sectorStartX, s->sectorCurX), maxX = fmaxf(s->sectorStartX, s->sectorCurX);
+        float minZ = fminf(s->sectorStartZ, s->sectorCurZ), maxZ = fmaxf(s->sectorStartZ, s->sectorCurZ);
+        BoundingBox bb = { { minX, 0.0f, minZ }, { maxX, 0.1f, maxZ } };
+        Eng_DebugBox(bb, (Color){ 90, 200, 255, 255 });
+    }
 
     Eng_DebugDraw3D(s->cam);
     Eng_GfxEndMode3D();

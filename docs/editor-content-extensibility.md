@@ -326,9 +326,10 @@ copy-on-import of stock library assets into the game folder.
    mob (`ED_PLACE_MOB` + `placeMobId`).
 4b. ~~**Place all primitive kinds**~~ **Done** — the palette now covers every
    `EngMapEntKind` (walls / obstacles / props / sectors / wallbuys / perks added to
-   `EdPlaceTool`), grouped Spawns / Geometry / Buyables. POINT (drop-and-snap) for most
-   kinds + LINE (two-click) for walls; RECT-drag for sectors is the remaining placement
-   gesture. This is the hardcoded-tool → palette step; a *data-driven* `EdEntityDef`
+   `EdPlaceTool`), grouped Spawns / Geometry / Buyables. All three placement gestures from §5
+   are now wired: POINT (drop-and-snap) for most kinds, LINE (two-click) for walls, and
+   **RECT-drag** (press → drag footprint → release) for sectors. This is the hardcoded-tool →
+   palette step; a *data-driven* `EdEntityDef`
    registry (§2) that lets users add **definitions** (presets) without code is still the
    open generalisation.
 5. **Partly done** — `data/mobs/dog/dog.mob` proves data-only reuse (reuses `chaser`); the

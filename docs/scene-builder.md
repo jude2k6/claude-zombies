@@ -348,10 +348,14 @@ Small, independently shippable steps; none blocks the game.
 3. ~~**Add / delete** entities — **all primitive kinds**~~ **Done.** The PLACE palette
    covers every `EngMapEntKind`, grouped Spawns / Geometry / Buyables: player + data-driven
    mob spawns, barricades, **walls** (two-click endpoints, with a pending-start marker),
-   **obstacles / props / sectors / wallbuys / perks** (drop-and-snap with sane defaults).
-   Each placement assigns the entity to the sector under the cursor (`Eng_SetSector` — the
-   save requirement) and pushes one undo step. Still future: RECT drag for sectors and a
-   richer per-kind inspector on drop (the data-driven entity-def registry in
+   **sectors** (RECT-drag — press a corner, drag the footprint with a live preview, release;
+   a plain click drops a default 20×20), and **obstacles / props / wallbuys / perks**
+   (drop-and-snap with sane defaults). Each placement assigns the entity to the sector under
+   the cursor (`Eng_SetSector` — the save requirement) and pushes one undo step. Sector
+   *size/height* is then tunable in the Inspector. Still future: interactive **edge-handle
+   resize** of existing sectors + ramp linking (§3.2 in
+   [editor-feature-ideas.md](editor-feature-ideas.md)), and a richer per-kind inspector on
+   drop (the data-driven entity-def registry in
    [editor-content-extensibility.md](editor-content-extensibility.md) §2).
 4. ~~**Save / Open / New + file picker**~~ **Done** — `File ▸ Save`/`Save As…` (`MapDoc_Save`),
    `Open…`/`New`, a recents list, and the `*` dirty marker; `Open…`/`Save As…` use a native

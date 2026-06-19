@@ -637,7 +637,7 @@ static void a_giz_scale(EdHost *h, void *u) { (void)u; EdHost_Scene(h)->mode = E
 static void a_help_controls(EdHost *h, void *u) {
     (void)u;
     EdHost_Log(h, ED_LOG_INFO, "View: F1 fly / F2 iso / F3 top   Gizmo: 1 move 2 rot 3 scale   G show/hide grid");
-    EdHost_Log(h, ED_LOG_INFO, "Place: P cycle tool, click ground   R retag/rotate   X/Del delete");
+    EdHost_Log(h, ED_LOG_INFO, "Place: P cycle tool, click ground (Sector: drag a footprint)   R retag/rotate   X/Del delete");
     EdHost_Log(h, ED_LOG_INFO, "Select: click   Shift+click add/remove   Ctrl+A all   move gizmo drags the set");
     EdHost_Log(h, ED_LOG_INFO, "Fly: RMB+WASDQE (Shift fast)   Ortho: RMB orbit / MMB pan / wheel zoom");
     EdHost_Log(h, ED_LOG_INFO, "Edit: Ctrl+Z undo / Ctrl+Y redo / Ctrl+S save   Ctrl+D dup / Ctrl+C copy / Ctrl+X cut / Ctrl+V paste");
@@ -781,7 +781,7 @@ static void DrawPlaceTools(EdHost *h, Rectangle area, float *yp, float sc) {
         s->placeTool = ED_PLACE_OBSTACLE;
     y += gap;
     if (ToolRowVisible(area, y, rowH) &&
-        Eng_UiToolButton((Rectangle){ X, y, W, rowH }, "Sector (20x20)", s->placeTool == ED_PLACE_SECTOR))
+        Eng_UiToolButton((Rectangle){ X, y, W, rowH }, "Sector (drag)", s->placeTool == ED_PLACE_SECTOR))
         s->placeTool = ED_PLACE_SECTOR;
     y += gap;
 

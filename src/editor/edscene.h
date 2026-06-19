@@ -139,6 +139,12 @@ typedef struct EdScene {
     bool          wallPending;      // true = first click done, awaiting second
     float         wallStartX, wallStartZ;  // world position of first wall click
 
+    // ED_PLACE_SECTOR RECT-drag state: press anchors sectorStart{x,z}, drag
+    // tracks sectorCur{x,z} (live preview), release creates the sector.
+    bool          sectorDragging;
+    float         sectorStartX, sectorStartZ;
+    float         sectorCurX, sectorCurZ;
+
     // ---- mob catalog (scanned from data/mobs/) -----------------------------
     EdMobDef      mobDefs[ED_MAX_MOBDEFS];
     int           mobDefCount;

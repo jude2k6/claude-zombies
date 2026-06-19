@@ -301,19 +301,23 @@ editor shows a text field or a hard-coded enum picker without needing game knowl
 ---
 
 ### 3.2 Sector-Authoring Tools (Draw / Resize)
-A "draw sector" mode: click-drag to define a new sector's X/Z footprint; a height
-widget (scroll wheel while dragging, or Inspector field) sets yLow. Resize existing
-sectors by dragging their footprint edges (an AABB corner/edge handle distinct from
-the entity gizmo). Ramp authoring: pick FLAT vs RAMP kind, set rampAxis, link to
-adjacent sectors.
+**Draw — ✅ SHIPPED.** The SECTOR tool is now **RECT-drag**: press a corner, drag the X/Z
+footprint with a live preview (a blue outline in `EdScene_DrawViewport`), release to create;
+a plain click (or a sub-1-unit drag) falls back to a default 20×20 at the anchor. Built as
+`UpdateSectorDrag` + `sectorDragging`/`sectorStart`/`sectorCur` state on `EdScene`; created
+sectors get FLAT heights at y=0 and commit one undo step. Height (`yLow`/`yHigh`) and exact
+size are then tuned in the **Inspector** (the scroll-wheel-while-dragging height widget was
+dropped — wheel is zoom in the ortho views — in favour of the Inspector field).
+
+**Still open — Resize / ramps.** Resize existing sectors by dragging their footprint edges
+(an AABB corner/edge handle distinct from the entity gizmo — sectors are quads, not point
+entities, so this needs custom screen-space hit-testing). Ramp authoring: pick FLAT vs RAMP
+kind, set `rampAxis`, link `linkA`/`linkB` to adjacent sectors (a two-entity interaction
+needing a dedicated drag or picker). Until then, edge-resize is covered by the Inspector's
+numeric size fields.
 
 **Why it matters:** Sectors are the structural unit of every map — you can't build a room
-layout without them. Currently the only sector is the default 40×40 square.
-
-**Effort:** L — sector edge handles require custom hit-testing separate from the entity
-gizmo (sectors are quads, not point entities). Ramp linking (setting `linkA`/`linkB`)
-is a two-entity interaction that needs a dedicated drag or picker. Worth tackling after
-the simpler entity placement kinds (3.1) ship.
+layout without them. Before RECT-drag the only practical sector was the default square.
 
 **Seam:** No constraint — `Eng_SetSectorSize`, `Eng_SetSectorHeights`, `Eng_SetPos` are
 all in `mapedit.h`.

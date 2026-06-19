@@ -318,9 +318,17 @@ coalescing under one undo tag. Built as `BeginSectorResize`/`UpdateSectorResize`
 `DrawSectorHandles` (hover/active highlight) with `resizing`/`resizeEdge`/`resizeFixed` state;
 the translate gizmo still moves the whole sector, edge handles resize it.
 
-**Still open — Ramps.** Ramp authoring: pick FLAT vs RAMP kind, set `rampAxis`, link
-`linkA`/`linkB` to adjacent sectors (a two-entity interaction needing a dedicated drag or
-picker). Height (`yLow`/`yHigh`) stays Inspector-driven.
+**Ramps — ✅ SHIPPED.** The sector Inspector now has a **FLAT/RAMP** toggle, and for a ramp
+a **rise axis** (+X/+Z) toggle plus two **link** buttons (click to cycle through the map's
+sectors, or `<none>`) that set `linkA`/`linkB` — the nav-edge the game turns into an AI
+ramp connection. Switching to RAMP seeds a valid default (a rise + axis) so it validates
+immediately; `yLow`/`yHigh` stay the Inspector height fields (low/high edge). New engine
+mutators back it: `Eng_Set/GetSectorKind` + `Eng_Set/GetSectorRamp`. **Bug found + fixed
+along the way:** editor-created sectors had no name, so `MapDoc_Save` emitted a nameless
+`SECTOR`/`RAMP` line that wouldn't reparse (and ramp `LINK` resolves by name) —
+`EngMapEnt_Add` now assigns a unique `sec<id>` default. Verified by a save→reparse→validate
+round-trip. **Still open:** in-viewport ramp visualisation (a slope/arrow) and picking links
+by clicking sectors in the viewport rather than cycling.
 
 **Why it matters:** Sectors are the structural unit of every map — you can't build a room
 layout without them. Before RECT-drag the only practical sector was the default square.

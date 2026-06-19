@@ -165,6 +165,16 @@ bool Eng_SetSectorSize(MapDoc *doc, int id, float sx, float sz);
 bool Eng_GetSectorHeights(const MapDoc *doc, int id, float *outYLow, float *outYHigh);
 bool Eng_SetSectorHeights(MapDoc *doc, int id, float yLow, float yHigh);
 
+/* Sector kind (MapDocSectorKind: SECTOR_FLAT / SECTOR_RAMP). SECTOR only. */
+bool Eng_GetSectorKind(const MapDoc *doc, int id, int *outKind);
+bool Eng_SetSectorKind(MapDoc *doc, int id, int kind);
+
+/* Ramp parameters: axis (1 = +X, 2 = +Z) + the two linked sector INDICES
+ * (-1 = none; indices, not ids — they track sector array compaction on delete,
+ * see FixupSectorRefs). Meaningful for SECTOR_RAMP; harmless on a FLAT sector. */
+bool Eng_GetSectorRamp(const MapDoc *doc, int id, int *outAxis, int *outLinkA, int *outLinkB);
+bool Eng_SetSectorRamp(MapDoc *doc, int id, int axis, int linkA, int linkB);
+
 /* Spawn mob tag. SPAWN only. "PLAYER" = a player start; any other string is a
  * mob spawn (e.g. "ZOMBIE"). Set truncates to MAPDOC_SPAWN_MOB_LEN. */
 bool Eng_GetSpawnMob(const MapDoc *doc, int id, char *outMob, int cap);

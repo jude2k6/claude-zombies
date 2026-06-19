@@ -225,6 +225,40 @@ bool Eng_SetSectorHeights(MapDoc *doc, int id, float yLow, float yHigh) {
     return true;
 }
 
+bool Eng_GetSectorKind(const MapDoc *doc, int id, int *outKind) {
+    EngMapEntKind kind;
+    const void *p = EngMapEnt_PtrConst(doc, EngMapEnt_Find(doc, id), &kind);
+    if (!p || kind != ENGMAPENT_SECTOR) return false;
+    *outKind = ((const MapDocSector *)p)->kind;
+    return true;
+}
+bool Eng_SetSectorKind(MapDoc *doc, int id, int kind) {
+    EngMapEntKind k;
+    void *p = EngMapEnt_Ptr(doc, EngMapEnt_Find(doc, id), &k);
+    if (!p || k != ENGMAPENT_SECTOR) return false;
+    ((MapDocSector *)p)->kind = kind;
+    return true;
+}
+
+bool Eng_GetSectorRamp(const MapDoc *doc, int id, int *outAxis, int *outLinkA, int *outLinkB) {
+    EngMapEntKind kind;
+    const void *p = EngMapEnt_PtrConst(doc, EngMapEnt_Find(doc, id), &kind);
+    if (!p || kind != ENGMAPENT_SECTOR) return false;
+    const MapDocSector *e = p;
+    if (outAxis)  *outAxis  = e->rampAxis;
+    if (outLinkA) *outLinkA = e->linkA;
+    if (outLinkB) *outLinkB = e->linkB;
+    return true;
+}
+bool Eng_SetSectorRamp(MapDoc *doc, int id, int axis, int linkA, int linkB) {
+    EngMapEntKind kind;
+    void *p = EngMapEnt_Ptr(doc, EngMapEnt_Find(doc, id), &kind);
+    if (!p || kind != ENGMAPENT_SECTOR) return false;
+    MapDocSector *e = p;
+    e->rampAxis = axis; e->linkA = linkA; e->linkB = linkB;
+    return true;
+}
+
 bool Eng_GetSpawnMob(const MapDoc *doc, int id, char *outMob, int cap) {
     EngMapEntKind kind;
     const void *p = EngMapEnt_PtrConst(doc, EngMapEnt_Find(doc, id), &kind);
@@ -390,6 +424,11 @@ int EngMapEnt_Add(MapDoc *doc, EngMapEntKind kind) {
             e->linkA = -1;
             e->linkB = -1;
             e->id = MapDoc_AllocId(doc);
+            /* The .map grammar requires every sector to be named (the SECTOR/RAMP
+               line carries it, and ramp LINK resolves by name), so give new
+               sectors a unique default — without it MapDoc_Save emits a nameless
+               line that won't reparse. Authors can rename in the file. */
+            snprintf(e->name, sizeof e->name, "sec%d", e->id);
             return e->id;
         }
         case ENGMAPENT_NONE:

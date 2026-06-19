@@ -378,6 +378,8 @@ Eng_SetSpawnMob(&doc, id, "ZOMBIE");              // spawn tag: "PLAYER" or any 
 Eng_SetWindowDir(&doc, id, "-z");                 // barricade facing (+x/-x/+z/-z)
 Eng_SetSector(&doc, id, sectorIdx);               // owning sector — REQUIRED before save (see below)
 Eng_SetSurfaceTex(&doc, id, "wall_brick");        // per-surface TEX override (wall/obstacle; "" clears)
+Eng_SetSectorKind(&doc, id, SECTOR_RAMP);         // sector FLAT/RAMP
+Eng_SetSectorRamp(&doc, id, 1, linkAIdx, linkBIdx);// ramp axis (1=+X,2=+Z) + linked sector INDICES (-1=none)
 int copy = EngMapEnt_Clone(&doc, id);             // same-kind copy, fresh id (editor duplicate/paste)
 EngMapEnt_Delete(&doc, id);                        // compacts the array; fixes sector index refs
 
@@ -396,7 +398,9 @@ custom edits.
 
 Field mutators are per-kind (each returns false for the wrong kind): `Eng_Set/GetPos`
 (all kinds), `Eng_Set/GetYaw` + `Eng_Set/GetScale` (prop), `Eng_Set/GetObstacleSize`,
-`Eng_Set/GetSectorSize` + `Eng_Set/GetSectorHeights`, `Eng_Set/GetSpawnMob` (spawn),
+`Eng_Set/GetSectorSize` + `Eng_Set/GetSectorHeights` + `Eng_Set/GetSectorKind` +
+`Eng_Set/GetSectorRamp` (sector; ramp links are sector INDICES, tracked across delete),
+`Eng_Set/GetSpawnMob` (spawn),
 `Eng_Set/GetWindowDir` (window), `Eng_Set/GetSurfaceTex` (wall/obstacle TEX override; ""
 clears), and `Eng_Set/GetSector` (every placed kind except SECTOR). `EngMapEnt_Clone`
 appends a same-kind copy with a fresh id (source untouched) — the duplicate/paste

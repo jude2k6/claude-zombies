@@ -1138,6 +1138,26 @@ static void InspTexField(EdHost *h, EdScene *s, float X, float W, float *y, floa
     *y += 14 * sc;
 }
 
+// Display name for a sector array index (for ramp link buttons). -1 / OOB =
+// "<none>"; unnamed sectors fall back to "sector N". Uses a static buffer, so
+// copy the result before the next call.
+static const char *SectorLabel(const MapDoc *d, int idx) {
+    static char buf[48];
+    if (idx < 0 || idx >= d->sectorCount) return "<none>";
+    const char *nm = d->sectors[idx].name;
+    if (nm && nm[0]) snprintf(buf, sizeof buf, "%s", nm);
+    else             snprintf(buf, sizeof buf, "sector %d", idx);
+    return buf;
+}
+
+// Advance a ramp link to the next candidate sector index, skipping the ramp's
+// own index and wrapping through -1 (= none): none → 0 → 1 → … → none.
+static int CycleSectorLink(const MapDoc *d, int selfIdx, int cur) {
+    int next = cur + 1;
+    while (next < d->sectorCount && next == selfIdx) next++;
+    return (next >= d->sectorCount) ? -1 : next;
+}
+
 // ---- Inspector — Feature 1: editable fields / Feature 3: map metadata ------
 static void PanelInspector(EdHost *h, Rectangle c, void *u) {
     (void)u; EdScene *s = EdHost_Scene(h);
@@ -1403,6 +1423,60 @@ static void PanelInspector(EdHost *h, Rectangle c, void *u) {
         if (cyLow || cyHi) {
             Eng_SetSectorHeights(&s->doc, s->selectedId, nyLow, nyHigh);
             EdHost_CommitEdit(h);
+        }
+        y += 4 * sc;
+
+        // Kind: FLAT vs RAMP (SECTOR_FLAT = 0, SECTOR_RAMP = 1).
+        int kind = SECTOR_FLAT; Eng_GetSectorKind(&s->doc, s->selectedId, &kind);
+        Eng_UiText("kind", X, y + 1 * sc, 12, ENG_UI_TEXT); y += 16 * sc;
+        int newKind = kind;
+        GuiToggleGroup((Rectangle){ X, y, (W - 12 * sc) / 2.0f, 20 * sc }, "FLAT;RAMP", &newKind);
+        if (newKind != kind) {
+            Eng_SetSectorKind(&s->doc, s->selectedId, newKind);
+            if (newKind == SECTOR_RAMP) {
+                // Seed a valid ramp: give it a rise + a default axis if it has none,
+                // so it passes MapDoc_Validate straight away.
+                float lo, hi; Eng_GetSectorHeights(&s->doc, s->selectedId, &lo, &hi);
+                if (hi - lo < 0.01f) Eng_SetSectorHeights(&s->doc, s->selectedId, lo, lo + 4.0f);
+                int ax, la, lb; Eng_GetSectorRamp(&s->doc, s->selectedId, &ax, &la, &lb);
+                if (ax != 1 && ax != 2) Eng_SetSectorRamp(&s->doc, s->selectedId, 1, la, lb);
+            }
+            EdHost_CommitEdit(h);
+        }
+        y += 26 * sc;
+
+        // RAMP-only: rise axis + the two linked sectors (AI nav edge).
+        if (newKind == SECTOR_RAMP) {
+            int axis = 1, la = -1, lb = -1;
+            Eng_GetSectorRamp(&s->doc, s->selectedId, &axis, &la, &lb);
+            int ai = (axis == 2) ? 1 : 0;   // 0 = +X, 1 = +Z
+            Eng_UiText("rise axis", X, y + 1 * sc, 12, ENG_UI_TEXT); y += 16 * sc;
+            int newAi = ai;
+            GuiToggleGroup((Rectangle){ X, y, (W - 12 * sc) / 2.0f, 20 * sc }, "+X;+Z", &newAi);
+            if (newAi != ai) {
+                axis = (newAi == 1) ? 2 : 1;
+                Eng_SetSectorRamp(&s->doc, s->selectedId, axis, la, lb);
+                EdHost_CommitEdit(h);
+            }
+            y += 26 * sc;
+
+            int selfIdx = EngMapEnt_Find(&s->doc, s->selectedId).index;
+            Eng_UiText("links (click to cycle)", X, y, 9, ENG_UI_DIM); y += 14 * sc;
+            char lbl[64];
+            snprintf(lbl, sizeof lbl, "A: %s", SectorLabel(&s->doc, la));
+            if (GuiButton((Rectangle){ X, y, W - 12 * sc, 20 * sc }, lbl)) {
+                Eng_SetSectorRamp(&s->doc, s->selectedId, axis,
+                                  CycleSectorLink(&s->doc, selfIdx, la), lb);
+                EdHost_CommitEdit(h);
+            }
+            y += 24 * sc;
+            snprintf(lbl, sizeof lbl, "B: %s", SectorLabel(&s->doc, lb));
+            if (GuiButton((Rectangle){ X, y, W - 12 * sc, 20 * sc }, lbl)) {
+                Eng_SetSectorRamp(&s->doc, s->selectedId, axis, la,
+                                  CycleSectorLink(&s->doc, selfIdx, lb));
+                EdHost_CommitEdit(h);
+            }
+            y += 24 * sc;
         }
     }
 }

@@ -116,6 +116,53 @@ void EdScene_RebuildProxies(EdScene *s) {
     }
 }
 
+static Vector3 ForwardFrom(float yaw, float pitch);   // defined with the cameras below
+
+void EdScene_FrameAll(EdScene *s) {
+    s->framePending = false;
+    // Forward axis of the current view (TOP looks straight down; fly/orbit use
+    // the shared look angles). The camera sits back along -fwd from the focus.
+    Vector3 fwd = (s->view == ED_VIEW_TOP) ? (Vector3){ 0, -1, 0 }
+                                           : ForwardFrom(s->yaw, s->pitch);
+
+    if (s->proxyCount == 0) {        // empty map → recenter on the origin
+        s->focus = (Vector3){ 0, 0, 0 };
+        s->orthoH = s->viewOrthoH;
+        s->cam.position = Vector3Subtract(s->focus, Vector3Scale(fwd, ED_ORBIT_DIST));
+        return;
+    }
+
+    // Union of every proxy box → the document's world bounds.
+    BoundingBox b = s->proxies[0].box;
+    for (int i = 1; i < s->proxyCount; i++) {
+        BoundingBox o = s->proxies[i].box;
+        b.min.x = fminf(b.min.x, o.min.x); b.max.x = fmaxf(b.max.x, o.max.x);
+        b.min.y = fminf(b.min.y, o.min.y); b.max.y = fmaxf(b.max.y, o.max.y);
+        b.min.z = fminf(b.min.z, o.min.z); b.max.z = fmaxf(b.max.z, o.max.z);
+    }
+    Vector3 c = { (b.min.x + b.max.x) * 0.5f, (b.min.y + b.max.y) * 0.5f,
+                  (b.min.z + b.max.z) * 0.5f };
+    s->focus = c;
+
+    float sx = b.max.x - b.min.x, sy = b.max.y - b.min.y, sz = b.max.z - b.min.z;
+    // Rotation-independent XZ span: using the footprint diagonal guarantees the
+    // bounds fit whatever yaw the iso camera is at (a plain max would clip on the
+    // diagonal). Add the vertical extent so tall multi-floor maps still fit.
+    float footprint = sqrtf(sx * sx + sz * sz);
+    float aspect = (s->vpH > 0) ? (float)s->vpW / (float)s->vpH : 1.6f;
+
+    float fitH = fmaxf(footprint, sy);
+    if (aspect > 0.01f && footprint / aspect > fitH) fitH = footprint / aspect;
+    s->orthoH = fminf(400.0f, fmaxf(2.0f, fitH * 1.15f + 4.0f));   // clamp to zoom range
+
+    if (s->view == ED_VIEW_FLY) {
+        // Pull back far enough that the bounding sphere fits the vertical FOV.
+        float radius = fmaxf(footprint, sy) * 0.5f + 1.0f;
+        float dist = radius / tanf(s->viewFov * 0.5f * DEG2RAD) + 4.0f;
+        s->cam.position = Vector3Subtract(c, Vector3Scale(fwd, dist));
+    }
+}
+
 const EdProxy *FindProxy(EdScene *s, int id) {
     for (int i = 0; i < s->proxyCount; i++)
         if (s->proxies[i].id == id) return &s->proxies[i];
@@ -859,6 +906,7 @@ bool EdScene_Open(EdScene *s, const char *path) {
     EdScene_ClearSelection(s);
     s->dragging = false;
     s->dirty = false;
+    s->framePending = true;   // fit the camera to the new map (deferred: needs vpW/vpH)
     return true;
 }
 
@@ -878,6 +926,7 @@ void EdScene_New(EdScene *s) {
     s->dragging = false;
     snprintf(s->path, sizeof s->path, "untitled.map");
     s->dirty = true;
+    s->framePending = true;   // fit the camera to the fresh map (deferred)
 }
 
 bool EdScene_SaveAs(EdScene *s, const char *path) {
@@ -959,6 +1008,10 @@ void EdScene_UpdateViewport(EdScene *s, Rectangle vp, bool inputAllowed) {
 
     EdScene_RebuildProxies(s);
 
+    // Deferred "frame all" from Open/New: now that proxies are current and the
+    // viewport is sized (vpW/vpH above), fit the camera to the map.
+    if (s->framePending) EdScene_FrameAll(s);
+
     if (inputAllowed) {
         if (IsKeyPressed(KEY_F1)) EdScene_SwitchView(s, ED_VIEW_FLY);
         if (IsKeyPressed(KEY_F2)) EdScene_SwitchView(s, ED_VIEW_ORBIT);
@@ -984,16 +1037,21 @@ void EdScene_UpdateViewport(EdScene *s, Rectangle vp, bool inputAllowed) {
         if ((IsKeyPressed(KEY_X) && !ctrlHeld) || IsKeyPressed(KEY_DELETE))
             EdScene_DeleteSelected(s);
 
-        // F: recenter the view on the selected entity.
-        if (IsKeyPressed(KEY_F) && s->selectedId >= 0) {
+        // F: recenter on the selected entity; with nothing selected, frame the
+        // whole map (so F is never a dead key). Home always frames all.
+        if (IsKeyPressed(KEY_HOME)) {
+            EdScene_FrameAll(s);
+        } else if (IsKeyPressed(KEY_F)) {
             Vector3 origin;
-            if (SelectedOrigin(s, &origin)) {
+            if (s->selectedId >= 0 && SelectedOrigin(s, &origin)) {
                 s->focus = origin;
                 if (s->view == ED_VIEW_FLY) {
                     // Pull the fly camera back 20 units so the entity is in frame.
                     s->cam.position = Vector3Subtract(origin,
                         Vector3Scale(ForwardFrom(s->yaw, s->pitch), 20.0f));
                 }
+            } else {
+                EdScene_FrameAll(s);   // no selection → frame everything
             }
         }
     } else if (s->looking) {

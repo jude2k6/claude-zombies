@@ -17,8 +17,9 @@
 #include "mapedit.h"
 
 #include <stdio.h>
-#include <stdlib.h>   // atof, for inspector number fields
+#include <stdlib.h>   // strtod, for inspector number fields
 #include <string.h>
+#include <ctype.h>    // isspace, validating numeric input
 
 // ============================================================================
 //  Inspector helpers — tiny field widgets used by PanelInspector
@@ -82,8 +83,13 @@ static InspFloatState *InspFloatSlot(const char *key) {
 }
 
 // Draw a float field via a GuiTextBox, keyed by its `label`.
-// Returns true and writes *v if the user committed a change (toggled out of edit).
-static bool InspFloatBox(float X, float W, float *y, float sc,
+// Returns true and writes *v if the user committed a valid change (toggled out of
+// edit). Non-numeric input is REJECTED, not silently coerced: the old `atof`
+// turned "abc" into 0.0 and zeroed the field with no feedback. We parse with
+// strtod and require the whole buffer to be a number (trailing spaces aside); on
+// reject the value is left untouched (the buffer refreshes from it next frame)
+// and a warning is logged.
+static bool InspFloatBox(EdHost *h, float X, float W, float *y, float sc,
                          const char *label, float *v) {
     InspFloatState *st = InspFloatSlot(label);
     if (!st) return false;
@@ -95,9 +101,19 @@ static bool InspFloatBox(float X, float W, float *y, float sc,
                    st->buf, sizeof st->buf, wasEdit)) {
         st->editing = !wasEdit;
         if (wasEdit) {
-            // toggling out of edit → parse and commit
-            float parsed = (float)atof(st->buf);
-            if (parsed != *v) { *v = parsed; changed = true; }
+            char *end = NULL;
+            double parsed = strtod(st->buf, &end);
+            bool valid = (end != st->buf);             // consumed at least one char
+            while (valid && *end) {                    // only trailing spaces are ok
+                if (!isspace((unsigned char)*end)) valid = false;
+                end++;
+            }
+            if (valid) {
+                float fv = (float)parsed;
+                if (fv != *v) { *v = fv; changed = true; }
+            } else if (st->buf[0]) {                   // ignore a silently-cleared box
+                EdHost_Log(h, ED_LOG_WARN, "%s: ignored non-numeric input \"%s\"", label, st->buf);
+            }
         }
     }
     *y += 22 * sc;
@@ -297,8 +313,8 @@ void PanelInspector(EdHost *h, Rectangle c, void *u) {
     float px = 0, pz = 0;
     if (Eng_GetPos(&s->doc, s->selectedId, &px, &pz)) {
         float newX = px, newZ = pz;
-        bool cx = InspFloatBox(X, W, &y, sc, "pos x", &newX);
-        bool cz = InspFloatBox(X, W, &y, sc, "pos z", &newZ);
+        bool cx = InspFloatBox(h, X, W, &y, sc, "pos x", &newX);
+        bool cz = InspFloatBox(h, X, W, &y, sc, "pos z", &newZ);
         if (cx || cz) {
             Eng_SetPos(&s->doc, s->selectedId, newX, newZ);
             EdHost_CommitEdit(h);
@@ -392,9 +408,9 @@ void PanelInspector(EdHost *h, Rectangle c, void *u) {
         float sx = 1, sz = 1, oh = 1;
         Eng_GetObstacleSize(&s->doc, s->selectedId, &sx, &sz, &oh);
         float nsx = sx, nsz = sz, noh = oh;
-        bool csx = InspFloatBox(X, W, &y, sc, "size x", &nsx);
-        bool csz = InspFloatBox(X, W, &y, sc, "size z", &nsz);
-        bool coh = InspFloatBox(X, W, &y, sc, "height", &noh);
+        bool csx = InspFloatBox(h, X, W, &y, sc, "size x", &nsx);
+        bool csz = InspFloatBox(h, X, W, &y, sc, "size z", &nsz);
+        bool coh = InspFloatBox(h, X, W, &y, sc, "height", &noh);
         if (csx || csz || coh) {
             Eng_SetObstacleSize(&s->doc, s->selectedId, nsx, nsz, noh);
             EdHost_CommitEdit(h);
@@ -408,10 +424,10 @@ void PanelInspector(EdHost *h, Rectangle c, void *u) {
         Eng_GetSectorSize(&s->doc, s->selectedId, &sx, &sz);
         Eng_GetSectorHeights(&s->doc, s->selectedId, &yLow, &yHigh);
         float nsx = sx, nsz = sz, nyLow = yLow, nyHigh = yHigh;
-        bool csx   = InspFloatBox(X, W, &y, sc, "size x", &nsx);
-        bool csz   = InspFloatBox(X, W, &y, sc, "size z", &nsz);
-        bool cyLow = InspFloatBox(X, W, &y, sc, "y low",  &nyLow);
-        bool cyHi  = InspFloatBox(X, W, &y, sc, "y high", &nyHigh);
+        bool csx   = InspFloatBox(h, X, W, &y, sc, "size x", &nsx);
+        bool csz   = InspFloatBox(h, X, W, &y, sc, "size z", &nsz);
+        bool cyLow = InspFloatBox(h, X, W, &y, sc, "y low",  &nyLow);
+        bool cyHi  = InspFloatBox(h, X, W, &y, sc, "y high", &nyHigh);
         if (csx || csz) {
             Eng_SetSectorSize(&s->doc, s->selectedId, nsx, nsz);
             EdHost_CommitEdit(h);
@@ -485,5 +501,24 @@ void PanelInspector(EdHost *h, Rectangle c, void *u) {
             }
             y += 24 * sc;
         }
+    }
+
+    // ---- Inline validation for the selected entity (TODO item 7) -----------
+    // MapDoc_Validate already powers the red viewport outline, but the reason
+    // only appeared as a console line that scrolls away. Echo this entity's
+    // issues right here so the fix is visible next to the field that caused it.
+    MapDocIssue issues[64];
+    int nIssue = MapDoc_Validate(&s->doc, issues, 64);
+    bool issueHeader = false;
+    for (int i = 0; i < nIssue && i < 64; i++) {
+        if (issues[i].entId != s->selectedId) continue;
+        if (!issueHeader) {
+            y += 6 * sc;
+            Eng_UiText("ISSUES", X, y, 12, (Color){ 235, 110, 110, 255 }); y += 16 * sc;
+            issueHeader = true;
+        }
+        Color col = (issues[i].severity == MAPDOC_ERROR)
+                    ? (Color){ 235, 110, 110, 255 } : ENG_UI_GOLD;
+        Eng_UiText(issues[i].msg, X, y, 10, col); y += 13 * sc;
     }
 }

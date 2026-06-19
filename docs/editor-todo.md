@@ -80,19 +80,19 @@ on selection change. NOTE: `InspTexField`, the spawn-mob and map-name statics
 were left as-is (single-instance, no collision); fold them in only if a second
 inspector instance is ever needed.
 
-**6. No "frame all" / camera can get lost.  [Medium, small]**
-`F` frames the selection only. Open an off-origin map → you stare at empty space.
-- `src/editor/edscene.c`: the `KEY_F` handler in `EdScene_UpdateViewport`; camera
-  state (`s->focus`, `s->cam`, `s->orthoH`). `EdScene_Open` is where to call a
-  fit-on-load.
-- Fix: add Home / "frame all" that fits the camera to doc bounds; call on Open.
+**6. No "frame all" / camera can get lost.  [DONE]**
+Shipped: `EdScene_FrameAll` fits the camera to the union of all proxy bounds
+(footprint-diagonal so it holds at any iso yaw; aspect-corrected; clamped to the
+zoom range). `Home` always frames all; `F` frames the selection or, with nothing
+selected, frames all (no longer a dead key). `EdScene_Open`/`New` set
+`s->framePending`, consumed on the next viewport update once vpW/vpH are known.
 
-**7. Numeric fields silently swallow garbage.  [Medium]**
-`InspFloatBox` does `atof` on commit → `atof("abc")` = 0 silently zeroes the field.
-Validation only shows as a red viewport outline + a console line that scrolls away.
-- `src/editor/panel_inspector.c`: `InspFloatBox`.
-- Validation source: `MapDoc_Validate` (used in edscene.c draw + `a_validate` in
-  edmenus.c). Surface the selected entity's issues inline in the inspector.
+**7. Numeric fields silently swallow garbage.  [DONE]**
+Shipped: `InspFloatBox` parses with `strtod` and requires the whole buffer to be
+numeric — non-numeric input is rejected (value untouched, buffer refreshes next
+frame) with a console warning, instead of `atof` zeroing the field. Also surfaces
+the selected entity's `MapDoc_Validate` issues inline under an "ISSUES" header in
+the inspector (red = error, gold = warn), not just as a scroll-away console line.
 
 **8. Sector handles are X/Z only, primary sector only.  [Medium]**
 No vertical (height) handle in the 3D view; floor height is inspector-typing only.
@@ -115,7 +115,8 @@ Weak for a multi-floor engine. Same `DrawSectorHandles` cluster as item 3.
   on next Open (`SettingsModal` in edmenus.c; `EngMapHistory_Init` in edscene.c).
 
 ## Recommended order for a fresh session
-Items **1**, **2**, **4**, **5** are done. Next high-value item is **3** (wall
-vertex editing) — tackle it together with the deferred `edgizmo.c` extraction in
-its own dedicated session. Items **6** (frame-all) and **7** (numeric validation)
-are good small standalone follow-ups.
+Items **1**, **2**, **4**, **5**, **6**, **7** are done. Remaining Tier 1/2 work:
+**3** (wall vertex editing, + the deferred `edgizmo.c` extraction) and **8**
+(vertical sector handles) — best done together in a dedicated geometry-editing
+session since both extend the same `DrawSectorHandles`/gizmo seam. After that,
+only the Tier 3 tail remains.

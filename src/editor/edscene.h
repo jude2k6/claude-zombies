@@ -196,6 +196,8 @@ typedef struct EdScene {
     int           vpW, vpH;
     RenderTexture2D vpTex;          // lazily (re)created to vpW×vpH
     bool          vpTexValid;
+    bool          framePending;     // request a "frame all" on the next viewport
+                                    // update (set by Open, when vpW/vpH aren't known yet)
 
     // ---- persisted settings (editor.cfg) -----------------------------------
     float         camFlySpeed, camFlyBoost, camLookSens, camOrbitSens, camZoomSpeed;
@@ -256,6 +258,12 @@ void EdScene_RescanContent(EdScene *s);
 
 // Rebuild the proxy list from the document (cheap; called each frame).
 void EdScene_RebuildProxies(EdScene *s);
+
+// Fit the camera to ALL entities (or recenter on the origin when the map is
+// empty). For ortho views this sets focus + orthoH; for fly it pulls the camera
+// back. Needs current proxies + a sized viewport — open-time callers set
+// s->framePending instead so it runs once vpW/vpH are known.
+void EdScene_FrameAll(EdScene *s);
 
 // ---- per-frame viewport ----------------------------------------------------
 

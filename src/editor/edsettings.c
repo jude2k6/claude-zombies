@@ -1,0 +1,96 @@
+// ============================================================================
+//  edsettings.c — EdScene persisted settings (editor.cfg) load/save.
+//
+//  Split out of edscene.c: the cam/view/grid/edit/ui/win keys are the editor's
+//  preferences, independent of the document and viewport. EdScene_PutSettingKeys
+//  is the single source of truth for those keys — both writers (here and the
+//  recents writer in ed_recents.c) call it, so adding a setting is a one-line
+//  change in one place instead of a drift trap.
+// ============================================================================
+
+#include "edscene.h"
+
+#include <stdio.h>
+#include <string.h>
+
+// ---- settings persistence (editor.cfg) -------------------------------------
+
+void EdScene_LoadSettings(EdScene *s, EngCfg *cfg) {
+    s->cfg = cfg;
+    const char *paths[] = { "editor.cfg", "../editor.cfg", "./editor.cfg" };
+    EngCfg_Load(cfg, paths, 3);
+    s->camFlySpeed        = EngCfg_Float(cfg, "cam.flySpeed",   16.0f);
+    s->camFlyBoost        = EngCfg_Float(cfg, "cam.flyBoost",   40.0f);
+    s->camLookSens        = EngCfg_Float(cfg, "cam.lookSens",   0.003f);
+    s->camOrbitSens       = EngCfg_Float(cfg, "cam.orbitSens",  0.005f);
+    s->camZoomSpeed       = EngCfg_Float(cfg, "cam.zoomSpeed",  0.1f);
+    s->viewFov            = EngCfg_Float(cfg, "view.fov",       60.0f);
+    s->viewDefault        = (EdViewMode)EngCfg_Int(cfg, "view.default", ED_VIEW_ORBIT);
+    s->viewOrthoH         = EngCfg_Float(cfg, "view.orthoHeight", 40.0f);
+    s->gridSpacing        = EngCfg_Float(cfg, "grid.spacing",   1.0f);
+    s->gridSlices         = EngCfg_Int  (cfg, "grid.slices",    80);
+    s->gridVisible        = EngCfg_Bool (cfg, "grid.visible",   true);
+    s->snapEnabled        = EngCfg_Bool (cfg, "grid.snap",      false);
+    s->snapStep           = EngCfg_Float(cfg, "grid.snapStep",  1.0f);
+    s->barricadeAutoSpawn = EngCfg_Bool (cfg, "edit.barricadeAutoSpawn", true);
+    s->undoDepth          = EngCfg_Int  (cfg, "edit.undoDepth", ENGMAPHISTORY_DEFAULT_DEPTH);
+    s->uiScale            = EngCfg_Float(cfg, "ui.scale",       0.0f);  // 0 = use recommendation
+    s->winW               = EngCfg_Int  (cfg, "win.width",      1280);
+    s->winH               = EngCfg_Int  (cfg, "win.height",     800);
+    s->vsync              = EngCfg_Bool (cfg, "win.vsync",      true);
+    s->fpsCap             = EngCfg_Int  (cfg, "win.fpsCap",     60);
+
+    if (s->viewDefault < ED_VIEW_FLY || s->viewDefault > ED_VIEW_TOP) s->viewDefault = ED_VIEW_ORBIT;
+    if (s->undoDepth < 1) s->undoDepth = ENGMAPHISTORY_DEFAULT_DEPTH;
+}
+
+// Emit every SCENE-OWNED setting key (cam/view/grid/edit/ui/win) into an open
+// EngCfg save stream. This is the single source of truth for those keys — both
+// writers (EdScene_SaveSettings here and Recents_Save in ed_recents.c) call it,
+// so adding a setting is a one-line change in one place instead of a drift trap.
+// The recents (recent.* / game.*) are owned by other modules and are written by
+// each caller AFTER this, before EngCfg_EndSave.
+void EdScene_PutSettingKeys(const EdScene *s, FILE *f) {
+    EngCfg_PutFloat(f, "cam.flySpeed",  s->camFlySpeed);
+    EngCfg_PutFloat(f, "cam.flyBoost",  s->camFlyBoost);
+    EngCfg_PutFloat(f, "cam.lookSens",  s->camLookSens);
+    EngCfg_PutFloat(f, "cam.orbitSens", s->camOrbitSens);
+    EngCfg_PutFloat(f, "cam.zoomSpeed", s->camZoomSpeed);
+    EngCfg_PutFloat(f, "view.fov",      s->viewFov);
+    EngCfg_PutInt  (f, "view.default",  (int)s->viewDefault);
+    EngCfg_PutFloat(f, "view.orthoHeight", s->viewOrthoH);
+    EngCfg_PutFloat(f, "grid.spacing",  s->gridSpacing);
+    EngCfg_PutInt  (f, "grid.slices",   s->gridSlices);
+    EngCfg_PutBool (f, "grid.visible",  s->gridVisible);
+    EngCfg_PutBool (f, "grid.snap",     s->snapEnabled);
+    EngCfg_PutFloat(f, "grid.snapStep", s->snapStep);
+    EngCfg_PutBool (f, "edit.barricadeAutoSpawn", s->barricadeAutoSpawn);
+    EngCfg_PutInt  (f, "edit.undoDepth", s->undoDepth);
+    EngCfg_PutFloat(f, "ui.scale",      s->uiScale);
+    EngCfg_PutInt  (f, "win.width",     s->winW);
+    EngCfg_PutInt  (f, "win.height",    s->winH);
+    EngCfg_PutBool (f, "win.vsync",     s->vsync);
+    EngCfg_PutInt  (f, "win.fpsCap",    s->fpsCap);
+}
+
+void EdScene_SaveSettings(EdScene *s, EngCfg *cfg) {
+    // The recents lists (recent.* maps, game.* games) live in the same
+    // editor.cfg but are owned by the panels plugin / launcher, not the scene.
+    // BeginSave truncates the file, so snapshot those keys from disk FIRST and
+    // re-emit them below — otherwise a clean exit would wipe the recents (and
+    // the launcher's Recent Games list would be empty next launch).
+    EngCfg disk;
+    const char *paths[] = { cfg->path };
+    EngCfg_Load(&disk, paths, 1);
+
+    FILE *f = EngCfg_BeginSave(cfg, "Claude Zombies map editor settings");
+    if (!f) return;
+    EdScene_PutSettingKeys(s, f);
+    // Preserve the recents owned by other modules (see note above).
+    for (int i = 0; i < disk.count; i++) {
+        const char *k = disk.pairs[i].key;
+        if (strncmp(k, "recent.", 7) == 0 || strncmp(k, "game.", 5) == 0)
+            EngCfg_PutStr(f, k, disk.pairs[i].val);
+    }
+    EngCfg_EndSave(f);
+}

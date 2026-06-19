@@ -4,14 +4,12 @@
 // ============================================================================
 
 #include "edscene.h"
+#include "edscene_internal.h"
 
 #include "raymath.h"
 #include "pick.h"
 #include "debugdraw.h"
 #include "gfx.h"
-#include "eng_render.h"   // Eng_RenderSetLighting / Begin/EndWorld for material mode
-#include "deffile.h"      // shared .mob reader (engine-side, game-clean)
-#include "content.h"      // Eng_ContentDirs, Eng_ResolveAssetPath, Eng_LoadTexture*
 #include "edthumb.h"      // asset-browser thumbnail cache (freed at shutdown)
 
 #include <stdio.h>
@@ -23,100 +21,22 @@
 extern char **environ;  // pass the editor's environment to the spawned game
 
 #define ED_WALL_H    3.0f   // assumed wall height for drawing/picking
-#define ED_MARKER    0.6f   // half-size of point-entity markers (spawn/perk/…)
 #define ED_ORBIT_DIST 200.0f
 #define ED_SEL_SECONDARY ((Color){ 255, 140, 0, 255 })  // non-primary multi-selection outline
 
-// ---- settings persistence (editor.cfg) -------------------------------------
+// Settings persistence (editor.cfg) lives in edsettings.c.
+// Material-mode rendering lives in edmat.c; placement lives in edplace.c. The
+// few helpers those siblings share with this file are declared in
+// edscene_internal.h (and defined non-static below).
 
-void EdScene_LoadSettings(EdScene *s, EngCfg *cfg) {
-    s->cfg = cfg;
-    const char *paths[] = { "editor.cfg", "../editor.cfg", "./editor.cfg" };
-    EngCfg_Load(cfg, paths, 3);
-    s->camFlySpeed        = EngCfg_Float(cfg, "cam.flySpeed",   16.0f);
-    s->camFlyBoost        = EngCfg_Float(cfg, "cam.flyBoost",   40.0f);
-    s->camLookSens        = EngCfg_Float(cfg, "cam.lookSens",   0.003f);
-    s->camOrbitSens       = EngCfg_Float(cfg, "cam.orbitSens",  0.005f);
-    s->camZoomSpeed       = EngCfg_Float(cfg, "cam.zoomSpeed",  0.1f);
-    s->viewFov            = EngCfg_Float(cfg, "view.fov",       60.0f);
-    s->viewDefault        = (EdViewMode)EngCfg_Int(cfg, "view.default", ED_VIEW_ORBIT);
-    s->viewOrthoH         = EngCfg_Float(cfg, "view.orthoHeight", 40.0f);
-    s->gridSpacing        = EngCfg_Float(cfg, "grid.spacing",   1.0f);
-    s->gridSlices         = EngCfg_Int  (cfg, "grid.slices",    80);
-    s->gridVisible        = EngCfg_Bool (cfg, "grid.visible",   true);
-    s->snapEnabled        = EngCfg_Bool (cfg, "grid.snap",      false);
-    s->snapStep           = EngCfg_Float(cfg, "grid.snapStep",  1.0f);
-    s->barricadeAutoSpawn = EngCfg_Bool (cfg, "edit.barricadeAutoSpawn", true);
-    s->undoDepth          = EngCfg_Int  (cfg, "edit.undoDepth", ENGMAPHISTORY_DEFAULT_DEPTH);
-    s->uiScale            = EngCfg_Float(cfg, "ui.scale",       0.0f);  // 0 = use recommendation
-    s->winW               = EngCfg_Int  (cfg, "win.width",      1280);
-    s->winH               = EngCfg_Int  (cfg, "win.height",     800);
-    s->vsync              = EngCfg_Bool (cfg, "win.vsync",      true);
-    s->fpsCap             = EngCfg_Int  (cfg, "win.fpsCap",     60);
-
-    if (s->viewDefault < ED_VIEW_FLY || s->viewDefault > ED_VIEW_TOP) s->viewDefault = ED_VIEW_ORBIT;
-    if (s->undoDepth < 1) s->undoDepth = ENGMAPHISTORY_DEFAULT_DEPTH;
-}
-
-// Emit every SCENE-OWNED setting key (cam/view/grid/edit/ui/win) into an open
-// EngCfg save stream. This is the single source of truth for those keys — both
-// writers (EdScene_SaveSettings here and Recents_Save in builtins.c) call it, so
-// adding a setting is a one-line change in one place instead of a drift trap.
-// The recents (recent.* / game.*) are owned by other modules and are written by
-// each caller AFTER this, before EngCfg_EndSave.
-void EdScene_PutSettingKeys(const EdScene *s, FILE *f) {
-    EngCfg_PutFloat(f, "cam.flySpeed",  s->camFlySpeed);
-    EngCfg_PutFloat(f, "cam.flyBoost",  s->camFlyBoost);
-    EngCfg_PutFloat(f, "cam.lookSens",  s->camLookSens);
-    EngCfg_PutFloat(f, "cam.orbitSens", s->camOrbitSens);
-    EngCfg_PutFloat(f, "cam.zoomSpeed", s->camZoomSpeed);
-    EngCfg_PutFloat(f, "view.fov",      s->viewFov);
-    EngCfg_PutInt  (f, "view.default",  (int)s->viewDefault);
-    EngCfg_PutFloat(f, "view.orthoHeight", s->viewOrthoH);
-    EngCfg_PutFloat(f, "grid.spacing",  s->gridSpacing);
-    EngCfg_PutInt  (f, "grid.slices",   s->gridSlices);
-    EngCfg_PutBool (f, "grid.visible",  s->gridVisible);
-    EngCfg_PutBool (f, "grid.snap",     s->snapEnabled);
-    EngCfg_PutFloat(f, "grid.snapStep", s->snapStep);
-    EngCfg_PutBool (f, "edit.barricadeAutoSpawn", s->barricadeAutoSpawn);
-    EngCfg_PutInt  (f, "edit.undoDepth", s->undoDepth);
-    EngCfg_PutFloat(f, "ui.scale",      s->uiScale);
-    EngCfg_PutInt  (f, "win.width",     s->winW);
-    EngCfg_PutInt  (f, "win.height",    s->winH);
-    EngCfg_PutBool (f, "win.vsync",     s->vsync);
-    EngCfg_PutInt  (f, "win.fpsCap",    s->fpsCap);
-}
-
-void EdScene_SaveSettings(EdScene *s, EngCfg *cfg) {
-    // The recents lists (recent.* maps, game.* games) live in the same
-    // editor.cfg but are owned by the panels plugin / launcher, not the scene.
-    // BeginSave truncates the file, so snapshot those keys from disk FIRST and
-    // re-emit them below — otherwise a clean exit would wipe the recents (and
-    // the launcher's Recent Games list would be empty next launch).
-    EngCfg disk;
-    const char *paths[] = { cfg->path };
-    EngCfg_Load(&disk, paths, 1);
-
-    FILE *f = EngCfg_BeginSave(cfg, "Claude Zombies map editor settings");
-    if (!f) return;
-    EdScene_PutSettingKeys(s, f);
-    // Preserve the recents owned by other modules (see note above).
-    for (int i = 0; i < disk.count; i++) {
-        const char *k = disk.pairs[i].key;
-        if (strncmp(k, "recent.", 7) == 0 || strncmp(k, "game.", 5) == 0)
-            EngCfg_PutStr(f, k, disk.pairs[i].val);
-    }
-    EngCfg_EndSave(f);
-}
-
-static float EdSnap(EdScene *s, float v) {
+float EdSnap(EdScene *s, float v) {
     if (!s->snapEnabled || s->snapStep <= 0.0f) return v;
     return roundf(v / s->snapStep) * s->snapStep;
 }
 
 // ---- proxy build (MapDoc → selectable boxes) -------------------------------
 
-static float SectorFloorY(EdScene *s, int sectorId) {
+float SectorFloorY(EdScene *s, int sectorId) {
     if (sectorId < 0 || sectorId >= s->doc.sectorCount) return 0.0f;
     return s->doc.sectors[sectorId].yLow;
 }
@@ -196,7 +116,7 @@ void EdScene_RebuildProxies(EdScene *s) {
     }
 }
 
-static const EdProxy *FindProxy(EdScene *s, int id) {
+const EdProxy *FindProxy(EdScene *s, int id) {
     for (int i = 0; i < s->proxyCount; i++)
         if (s->proxies[i].id == id) return &s->proxies[i];
     return NULL;
@@ -227,7 +147,7 @@ static void SelRemove(EdScene *s, int id) {
     s->selectedId = s->selCount > 0 ? s->selIds[s->selCount - 1] : -1;
 }
 
-static void SelSetSingle(EdScene *s, int id) {
+void SelSetSingle(EdScene *s, int id) {
     s->selCount = 0;
     if (id >= 0) s->selIds[s->selCount++] = id;
     s->selectedId = id >= 0 ? id : -1;
@@ -409,30 +329,11 @@ static void PickSelection(EdScene *s, bool additive) {
     EdScene_SelectClick(s, best, additive);
 }
 
-// ---- placement (mapedit add + retag) ---------------------------------------
+// ---- commit + sector query (placement itself lives in edplace.c) -----------
 
 void EdScene_Commit(EdScene *s) {
     EngMapHistory_Commit(&s->hist, &s->doc, 0);
     s->dirty = true;
-}
-
-static const char *FacingToward(Vector3 p) {
-    if (fabsf(p.x) >= fabsf(p.z)) return p.x > 0 ? "-x" : "+x";
-    return p.z > 0 ? "-z" : "+z";
-}
-static Vector3 DirNormal(const char *d) {
-    if (!strcmp(d, "+x")) return (Vector3){  1, 0,  0 };
-    if (!strcmp(d, "-x")) return (Vector3){ -1, 0,  0 };
-    if (!strcmp(d, "+z")) return (Vector3){  0, 0,  1 };
-    return (Vector3){ 0, 0, -1 };
-}
-
-static int SectorAt(EdScene *s, float x, float z) {
-    for (int i = 0; i < s->doc.sectorCount; i++) {
-        const MapDocSector *sc = &s->doc.sectors[i];
-        if (fabsf(x - sc->x) <= sc->sx * 0.5f && fabsf(z - sc->z) <= sc->sz * 0.5f) return i;
-    }
-    return s->doc.sectorCount > 0 ? 0 : -1;
 }
 
 // Strict variant for ramp link-picking: the sector whose footprint contains
@@ -445,189 +346,6 @@ static int SectorContainingExcl(EdScene *s, float x, float z, int excl) {
         if (fabsf(x - sc->x) <= sc->sx * 0.5f && fabsf(z - sc->z) <= sc->sz * 0.5f) return i;
     }
     return -1;
-}
-
-static int AddSpawn(EdScene *s, const char *mob, float x, float z) {
-    int id = EngMapEnt_Add(&s->doc, ENGMAPENT_SPAWN);
-    if (id < 0) return -1;
-    Eng_SetSpawnMob(&s->doc, id, mob);
-    Eng_SetSector(&s->doc, id, SectorAt(s, x, z));
-    Eng_SetPos(&s->doc, id, x, z);
-    return id;
-}
-
-static void PlaceAt(EdScene *s, Vector3 p) {
-    switch (s->placeTool) {
-        case ED_PLACE_PLAYER: SelSetSingle(s, AddSpawn(s, "PLAYER", p.x, p.z)); EdScene_Commit(s); break;
-        case ED_PLACE_MOB: {
-            const char *mob = s->placeMobId[0] ? s->placeMobId : "ZOMBIE";
-            SelSetSingle(s, AddSpawn(s, mob, p.x, p.z)); EdScene_Commit(s); break;
-        }
-        case ED_PLACE_BARRICADE: {
-            int wid = EngMapEnt_Add(&s->doc, ENGMAPENT_WINDOW);
-            if (wid < 0) return;
-            const char *dir = FacingToward(p);
-            Eng_SetWindowDir(&s->doc, wid, dir);
-            Eng_SetSector(&s->doc, wid, SectorAt(s, p.x, p.z));
-            Eng_SetPos(&s->doc, wid, p.x, p.z);
-            SelSetSingle(s, wid);
-            if (s->barricadeAutoSpawn) {
-                Vector3 n = DirNormal(dir);
-                AddSpawn(s, "ZOMBIE", p.x - n.x * 5.0f, p.z - n.z * 5.0f);
-            }
-            EdScene_Commit(s);
-            break;
-        }
-        case ED_PLACE_WALL: {
-            // Two-click flow: first click stores start; second click places.
-            if (!s->wallPending) {
-                s->wallPending  = true;
-                s->wallStartX   = p.x;
-                s->wallStartZ   = p.z;
-                // Nothing committed yet — show pending visually via wallPending flag.
-            } else {
-                int wid = EngMapEnt_Add(&s->doc, ENGMAPENT_WALL);
-                if (wid < 0) { s->wallPending = false; return; }
-                // Set wall endpoints directly via the typed pointer.
-                EngMapEntHandle h = EngMapEnt_Find(&s->doc, wid);
-                MapDocWall *w = (MapDocWall *)EngMapEnt_Ptr(&s->doc, h, NULL);
-                if (w) {
-                    w->x1 = s->wallStartX; w->z1 = s->wallStartZ;
-                    w->x2 = p.x;           w->z2 = p.z;
-                }
-                // Assign to the sector under the midpoint.
-                float midX = (s->wallStartX + p.x) * 0.5f;
-                float midZ = (s->wallStartZ + p.z) * 0.5f;
-                Eng_SetSector(&s->doc, wid, SectorAt(s, midX, midZ));
-                SelSetSingle(s, wid);
-                s->wallPending = false;
-                EdScene_Commit(s);
-            }
-            break;
-        }
-        case ED_PLACE_OBSTACLE: {
-            int oid = EngMapEnt_Add(&s->doc, ENGMAPENT_OBSTACLE);
-            if (oid < 0) return;
-            Eng_SetPos(&s->doc, oid, p.x, p.z);
-            Eng_SetObstacleSize(&s->doc, oid, 4.0f, 4.0f, 3.0f);
-            Eng_SetSector(&s->doc, oid, SectorAt(s, p.x, p.z));
-            SelSetSingle(s, oid);
-            EdScene_Commit(s);
-            break;
-        }
-        case ED_PLACE_PROP: {
-            int pid = EngMapEnt_Add(&s->doc, ENGMAPENT_PROP);
-            if (pid < 0) return;
-            Eng_SetPos(&s->doc, pid, p.x, p.z);
-            Eng_SetYaw(&s->doc, pid, 0.0f);
-            Eng_SetScale(&s->doc, pid, 1.0f);
-            // Stamp the active prop id (from the catalog) directly on the typed
-            // pointer; falls back to the first known prop if none is armed.
-            {
-                EngMapEntHandle h = EngMapEnt_Find(&s->doc, pid);
-                MapDocProp *prop = (MapDocProp *)EngMapEnt_Ptr(&s->doc, h, NULL);
-                if (prop) {
-                    const char *id = s->placePropId[0] ? s->placePropId : "obstacle_barrel";
-                    snprintf(prop->name, sizeof prop->name, "%s", id);
-                }
-            }
-            Eng_SetSector(&s->doc, pid, SectorAt(s, p.x, p.z));
-            SelSetSingle(s, pid);
-            EdScene_Commit(s);
-            break;
-        }
-        case ED_PLACE_SECTOR:
-            // Sectors use RECT-drag (UpdateSectorDrag), not click-to-drop, so the
-            // SECTOR tool never reaches PlaceAt — see EdScene_UpdateViewport.
-            break;
-        case ED_PLACE_WALLBUY: {
-            int wid = EngMapEnt_Add(&s->doc, ENGMAPENT_WALLBUY);
-            if (wid < 0) return;
-            Eng_SetPos(&s->doc, wid, p.x, p.z);
-            // Set default weapon string directly on the typed pointer.
-            {
-                EngMapEntHandle h = EngMapEnt_Find(&s->doc, wid);
-                MapDocWallbuy *wb = (MapDocWallbuy *)EngMapEnt_Ptr(&s->doc, h, NULL);
-                if (wb) {
-                    const char *wid = s->placeWeaponId[0] ? s->placeWeaponId : "PISTOL";
-                    snprintf(wb->weapon, sizeof wb->weapon, "%.*s", (int)(sizeof wb->weapon - 1), wid);
-                    // Default facing: point away from the origin (toward nearest wall).
-                    snprintf(wb->dir, sizeof wb->dir, "%s", FacingToward(p));
-                }
-            }
-            Eng_SetSector(&s->doc, wid, SectorAt(s, p.x, p.z));
-            SelSetSingle(s, wid);
-            EdScene_Commit(s);
-            break;
-        }
-        case ED_PLACE_PERK: {
-            int kid = EngMapEnt_Add(&s->doc, ENGMAPENT_PERK);
-            if (kid < 0) return;
-            Eng_SetPos(&s->doc, kid, p.x, p.z);
-            // Set default perk string directly on the typed pointer.
-            {
-                EngMapEntHandle h = EngMapEnt_Find(&s->doc, kid);
-                MapDocPerk *pk = (MapDocPerk *)EngMapEnt_Ptr(&s->doc, h, NULL);
-                if (pk) {
-                    const char *kid = s->placePerkId[0] ? s->placePerkId : "JUG";
-                    snprintf(pk->perk, sizeof pk->perk, "%.*s", (int)(sizeof pk->perk - 1), kid);
-                }
-            }
-            Eng_SetSector(&s->doc, kid, SectorAt(s, p.x, p.z));
-            SelSetSingle(s, kid);
-            EdScene_Commit(s);
-            break;
-        }
-        default: break;
-    }
-}
-
-// Ground point under the cursor, snapped to the grid. Returns false if the pick
-// ray misses the y=0 plane (e.g. camera looking at the sky).
-static bool GroundPoint(EdScene *s, Vector3 *out) {
-    Ray ray = Eng_PickRayFromScreen(s->cam, s->vpMouse, s->vpW, s->vpH);
-    if (!Eng_PickRayGroundY(ray, 0.0f, out)) return false;
-    out->x = EdSnap(s, out->x);
-    out->z = EdSnap(s, out->z);
-    return true;
-}
-
-#define ED_SECTOR_MIN_SIZE 1.0f   // below this a drag is treated as a plain click
-
-// RECT-drag sector authoring: press to anchor a corner, drag to size the
-// footprint (live preview drawn in EdScene_DrawViewport), release to create.
-// A click (or a too-thin drag) falls back to a default 20×20 at the anchor so
-// the SECTOR tool still works without dragging. Created sectors own no parent
-// sector (no Eng_SetSector), get FLAT heights at y=0, and commit one undo step.
-static void UpdateSectorDrag(EdScene *s) {
-    Vector3 g;
-    if (!s->sectorDragging) {
-        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && GroundPoint(s, &g)) {
-            s->sectorDragging = true;
-            s->sectorStartX = s->sectorCurX = g.x;
-            s->sectorStartZ = s->sectorCurZ = g.z;
-        }
-        return;
-    }
-    if (GroundPoint(s, &g)) { s->sectorCurX = g.x; s->sectorCurZ = g.z; }
-    if (!IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) return;
-
-    s->sectorDragging = false;
-    float minX = fminf(s->sectorStartX, s->sectorCurX), maxX = fmaxf(s->sectorStartX, s->sectorCurX);
-    float minZ = fminf(s->sectorStartZ, s->sectorCurZ), maxZ = fmaxf(s->sectorStartZ, s->sectorCurZ);
-    float sx = maxX - minX, sz = maxZ - minZ, cx, cz;
-    if (sx < ED_SECTOR_MIN_SIZE || sz < ED_SECTOR_MIN_SIZE) {   // click → default footprint
-        sx = sz = 20.0f; cx = s->sectorStartX; cz = s->sectorStartZ;
-    } else {
-        cx = (minX + maxX) * 0.5f; cz = (minZ + maxZ) * 0.5f;
-    }
-    int sid = EngMapEnt_Add(&s->doc, ENGMAPENT_SECTOR);
-    if (sid < 0) return;
-    Eng_SetPos(&s->doc, sid, cx, cz);
-    Eng_SetSectorSize(&s->doc, sid, sx, sz);
-    Eng_SetSectorHeights(&s->doc, sid, 0.0f, 0.0f);
-    SelSetSingle(s, sid);
-    EdScene_Commit(s);
 }
 
 void EdScene_CycleSelected(EdScene *s) {
@@ -1009,156 +727,7 @@ static void DrawRampOverlay(EdScene *s) {
     }
 }
 
-// ---- mob catalog scan (data/mobs/*/*.mob via the shared deffile reader) -----
-
-// Accumulator for one .mob file: we read only the editor-relevant fields.
-typedef struct { EdMobDef def; bool sawId; } EdMobParse;
-
-static void EdMobLineCb(int lineNo, int n, char **toks, void *user) {
-    (void)lineNo;
-    EdMobParse *mp = (EdMobParse *)user;
-    const char *k = toks[0];
-    if (strcmp(k, "id") == 0 && n >= 2) {
-        snprintf(mp->def.id, sizeof mp->def.id, "%s", toks[1]);
-        mp->sawId = true;
-    } else if (strcmp(k, "name") == 0 && n >= 2) {
-        snprintf(mp->def.name, sizeof mp->def.name, "%s", toks[1]);
-    } else if (strcmp(k, "tint") == 0 && n >= 4) {
-        unsigned char rgba[4];
-        Eng_DefParseColor(toks, n, 1, rgba);
-        mp->def.tint = (Color){ rgba[0], rgba[1], rgba[2], rgba[3] };
-    }
-    // behaviour / stats are game-only — the editor never reads them.
-}
-
-void EdScene_ScanMobs(EdScene *s) {
-    s->mobDefCount = 0;
-
-    // Collect the ordered root directories for "mobs" via the engine resolver
-    // (game root first, then library, then data/ dev fallbacks).
-    char dirs[4][512];
-    int nDirs = Eng_ContentDirs("mobs", dirs, 4);
-
-    // Track which mob ids we have already added so that a game entry silently
-    // shadows a same-named library/data entry (de-dup by id, first-seen wins).
-    char seen[ED_MAX_MOBDEFS][ED_MOBID_LEN];
-    int  nSeen = 0;
-
-    for (int d = 0; d < nDirs && s->mobDefCount < ED_MAX_MOBDEFS; d++) {
-        if (!DirectoryExists(dirs[d])) continue;
-        FilePathList files = LoadDirectoryFilesEx(dirs[d], ".mob", true);
-        for (unsigned i = 0; i < files.count && s->mobDefCount < ED_MAX_MOBDEFS; i++) {
-            char *text = LoadFileText(files.paths[i]);
-            if (!text) continue;
-            EdMobParse mp = { .def = { .name = "", .tint = { 200, 80, 80, 255 } }, .sawId = false };
-            Eng_DefForEachLine(text, EdMobLineCb, &mp);
-            UnloadFileText(text);
-            if (!mp.sawId) continue;
-            // De-dup: skip if we already added a mob with this id.
-            bool dup = false;
-            for (int k = 0; k < nSeen; k++) {
-                if (strcmp(seen[k], mp.def.id) == 0) { dup = true; break; }
-            }
-            if (dup) continue;
-            if (!mp.def.name[0]) snprintf(mp.def.name, sizeof mp.def.name, "%s", mp.def.id);
-            s->mobDefs[s->mobDefCount++] = mp.def;
-            if (nSeen < ED_MAX_MOBDEFS) snprintf(seen[nSeen++], ED_MOBID_LEN, "%s", mp.def.id);
-        }
-        UnloadDirectoryFiles(files);
-    }
-
-    // Always offer at least the zombie so the palette has a mob tool even when
-    // run from a directory without a data/mobs catalog.
-    if (s->mobDefCount == 0) {
-        EdMobDef z = { .id = "ZOMBIE", .name = "Zombie spawn", .tint = { 200, 80, 80, 255 } };
-        s->mobDefs[s->mobDefCount++] = z;
-    }
-    // Default the active mob tool to the first scanned mob.
-    snprintf(s->placeMobId, sizeof s->placeMobId, "%s", s->mobDefs[0].id);
-}
-
-// ---- id+name catalogs (props / perks / wallbuy weapons) --------------------
-// All three are the editor's view of a content catalog: read the placeable
-// identity (id + display name) and ignore the game-only rest (model/collision/
-// effect/stats) — the seam. One generic scanner serves all three; only the
-// subdir + extension differ.
-typedef struct { EdPropDef def; bool sawId; } EdPropParse;
-
-static void EdPropLineCb(int lineNo, int n, char **toks, void *user) {
-    (void)lineNo;
-    EdPropParse *pp = (EdPropParse *)user;
-    const char *k = toks[0];
-    if (strcmp(k, "id") == 0 && n >= 2) {
-        snprintf(pp->def.id, sizeof pp->def.id, "%s", toks[1]);
-        pp->sawId = true;
-    } else if (strcmp(k, "name") == 0 && n >= 2) {
-        // Join the remaining tokens so multi-word labels ("Sandbag stack") survive.
-        size_t cap = sizeof pp->def.name, off = 0;
-        for (int t = 1; t < n && off < cap - 1; t++) {
-            int w = snprintf(pp->def.name + off, cap - off, "%s%s", t > 1 ? " " : "", toks[t]);
-            if (w < 0) break;
-            off += (size_t)w;
-        }
-    }
-    // everything else (model / collide_half / cost / stats) is game-only.
-}
-
-// Scan <subdir>/*<ext> across the content roots into out[] (id + label), de-dup
-// by id (game shadows library). Returns the count written. `placeId` (if non-
-// NULL) is seeded with the first def's id as the default armed tool.
-static int EdScanIdNameCatalog(const char *subdir, const char *ext,
-                               EdPropDef out[], int max,
-                               char *placeId, int placeCap) {
-    int count = 0;
-    char dirs[4][512];
-    int nDirs = Eng_ContentDirs(subdir, dirs, 4);
-    char seen[ED_MAX_PROPDEFS][ED_PROPID_LEN];
-    int  nSeen = 0;
-
-    for (int d = 0; d < nDirs && count < max; d++) {
-        if (!DirectoryExists(dirs[d])) continue;
-        FilePathList files = LoadDirectoryFilesEx(dirs[d], ext, true);
-        for (unsigned i = 0; i < files.count && count < max; i++) {
-            char *text = LoadFileText(files.paths[i]);
-            if (!text) continue;
-            EdPropParse pp = { .def = { .name = "" }, .sawId = false };
-            Eng_DefForEachLine(text, EdPropLineCb, &pp);
-            UnloadFileText(text);
-            if (!pp.sawId) continue;
-            bool dup = false;
-            for (int k = 0; k < nSeen && k < ED_MAX_PROPDEFS; k++)
-                if (strcmp(seen[k], pp.def.id) == 0) { dup = true; break; }
-            if (dup) continue;
-            if (!pp.def.name[0]) snprintf(pp.def.name, sizeof pp.def.name, "%s", pp.def.id);
-            out[count++] = pp.def;
-            if (nSeen < ED_MAX_PROPDEFS) snprintf(seen[nSeen++], ED_PROPID_LEN, "%s", pp.def.id);
-        }
-        UnloadDirectoryFiles(files);
-    }
-    if (placeId && count > 0) snprintf(placeId, placeCap, "%s", out[0].id);
-    return count;
-}
-
-void EdScene_ScanProps(EdScene *s) {
-    s->propDefCount = EdScanIdNameCatalog("props", ".prop", s->propDefs,
-                                          ED_MAX_PROPDEFS, s->placePropId, sizeof s->placePropId);
-}
-void EdScene_ScanPerks(EdScene *s) {
-    s->perkDefCount = EdScanIdNameCatalog("perks", ".perk", s->perkDefs,
-                                          ED_MAX_BUYDEFS, s->placePerkId, sizeof s->placePerkId);
-}
-void EdScene_ScanWeapons(EdScene *s) {
-    s->weaponDefCount = EdScanIdNameCatalog("weapons", ".weapon", s->weaponDefs,
-                                            ED_MAX_BUYDEFS, s->placeWeaponId, sizeof s->placeWeaponId);
-}
-
-void EdScene_RescanContent(EdScene *s) {
-    EdScene_ScanMobs(s);
-    EdScene_ScanProps(s);
-    EdScene_ScanPerks(s);
-    EdScene_ScanWeapons(s);
-    EdAssets_Scan(&s->assets);
-}
+// Content catalog scanning (mobs/props/perks/weapons) lives in edcatalog.c.
 
 // ---- lifecycle -------------------------------------------------------------
 
@@ -1454,134 +1023,6 @@ void EdScene_UpdateViewport(EdScene *s, Rectangle vp, bool inputAllowed) {
     } else {
         UpdateGizmo(s, inputAllowed && !camBusy && s->placeTool == ED_PLACE_NONE);
     }
-}
-
-// ---- material-mode helpers -------------------------------------------------
-
-// Resolve a texture slot name via Eng_LoadTextureByName.  Returns NULL when
-// the slot is empty or the asset is missing (caller falls back to a flat colour).
-static Texture2D *MatTex(const char *slotName) {
-    if (!slotName || !slotName[0]) return NULL;
-    EngTexture h = Eng_LoadTextureByName(slotName);
-    return Eng_TextureGet(h);  // NULL when handle invalid
-}
-
-// Draw floor/ceiling quads for every sector.
-static void DrawMatSectors(EdScene *s, Texture2D *floorTex) {
-    const MapDoc *d = &s->doc;
-    for (int i = 0; i < d->sectorCount; i++) {
-        const MapDocSector *sc = &d->sectors[i];
-        Vector3 floorCentre = { sc->x, sc->yLow, sc->z };
-        Eng_DrawTexturedFloorV(floorCentre, sc->sx, sc->sz,
-                               floorTex, 4.0f, WHITE, (Color){ 80, 70, 55, 255 });
-    }
-}
-
-// Draw walls as textured boxes sized from their proxy bounding boxes.
-static void DrawMatWalls(EdScene *s, Texture2D *wallTex) {
-    const MapDoc *d = &s->doc;
-    for (int i = 0; i < d->wallCount; i++) {
-        const MapDocWall *w = &d->walls[i];
-        // Per-surface TEX wins; fall back to map-slot wall_ext.
-        Texture2D *tex = wallTex;
-        if (w->texName[0]) {
-            EngTexture h = Eng_LoadTextureByName(w->texName);
-            Texture2D *t = Eng_TextureGet(h);
-            if (t) tex = t;
-        }
-        const EdProxy *ep = FindProxy(s, w->id);
-        if (!ep) continue;
-        Vector3 c  = Vector3Scale(Vector3Add(ep->box.min, ep->box.max), 0.5f);
-        Vector3 sz = Vector3Subtract(ep->box.max, ep->box.min);
-        Eng_DrawTexturedBoxV(c, sz, tex, 2.0f, WHITE, (Color){ 130, 120, 100, 255 });
-    }
-}
-
-// Draw obstacles as textured boxes sized from their proxy bounding boxes.
-static void DrawMatObstacles(EdScene *s, Texture2D *wallTex) {
-    const MapDoc *d = &s->doc;
-    for (int i = 0; i < d->obstacleCount; i++) {
-        const MapDocObstacle *o = &d->obstacles[i];
-        // Per-surface TEX wins; fall back to map-slot wall_ext.
-        Texture2D *tex = wallTex;
-        if (o->texName[0]) {
-            EngTexture h = Eng_LoadTextureByName(o->texName);
-            Texture2D *t = Eng_TextureGet(h);
-            if (t) tex = t;
-        }
-        const EdProxy *ep = FindProxy(s, o->id);
-        if (!ep) continue;
-        Vector3 c  = Vector3Scale(Vector3Add(ep->box.min, ep->box.max), 0.5f);
-        Vector3 sz = Vector3Subtract(ep->box.max, ep->box.min);
-        Eng_DrawTexturedBoxV(c, sz, tex, 2.0f, WHITE, (Color){ 110, 100, 80, 255 });
-    }
-}
-
-// Draw props: attempt to load the prop model from props/<name>/<name>.glb.
-// Falls back to a small textured box on load failure (which is fine for the
-// editor — we just need something visible at the correct position).
-static void DrawMatProps(EdScene *s) {
-    const MapDoc *d = &s->doc;
-    for (int i = 0; i < d->propCount; i++) {
-        const MapDocProp *p = &d->props[i];
-        float y = SectorFloorY(s, p->sectorId);
-        Vector3 pos = { p->x, y, p->z };
-
-        // Build props/<name>/<name>.glb path and try loading via content registry.
-        char relPath[128];
-        snprintf(relPath, sizeof relPath, "props/%s/%s.glb", p->name, p->name);
-        EngModel mh = Eng_LoadModel(relPath);
-        Model *m = Eng_ModelGet(mh);
-        if (m && m->meshCount > 0) {
-            // Stamp the world shader onto the model's materials so props get the
-            // same fog/sun lighting as the immediate-mode floor/wall draws (which
-            // pick up the bound shader automatically). DrawModel uses the per-
-            // material shader, not the rlgl batch shader, so this is required.
-            if (Eng_RenderWorldShaderLoaded()) {
-                Shader ws = Eng_RenderWorldShader();
-                for (int k = 0; k < m->materialCount; k++) m->materials[k].shader = ws;
-            }
-            // Yaw around Y axis (prop uses degrees).
-            Vector3 axis  = { 0.0f, 1.0f, 0.0f };
-            Vector3 scale = { p->scale, p->scale, p->scale };
-            Eng_GfxDrawModelEx(*m, pos, axis, p->yawDeg, scale, WHITE);
-        } else {
-            // No model: draw a placeholder textured box at marker size.
-            float h = ED_MARKER * p->scale;
-            Vector3 c  = { p->x, y + h, p->z };
-            Vector3 sz = { h * 2.0f, h * 2.0f, h * 2.0f };
-            Eng_DrawTexturedBoxV(c, sz, NULL, 1.0f, WHITE, (Color){ 90, 160, 110, 255 });
-        }
-    }
-}
-
-// Push a fixed, bright editor lighting state and bind the world shader so the
-// material-mode draws get the same fog/sun/ambient program the game uses. The
-// editor calls Eng_RenderLoad once at startup (editor_main); when the shader is
-// missing the begin/end pair is a graceful no-op and the draws stay unlit but
-// correct. Unlike the game's night fog, these defaults are deliberately bright
-// (high ambient, fog pushed far past any editor map) so geometry reads clearly.
-static void DrawMaterialWorld(EdScene *s) {
-    const MapDocTextures *tx = &s->doc.textures;
-
-    // Resolve map-slot textures (empty slot → NULL → flat-colour fallback).
-    Texture2D *floorTex = MatTex(tx->floor[0]   ? tx->floor    : "floor_concrete");
-    Texture2D *wallTex  = MatTex(tx->wall_ext[0] ? tx->wall_ext : "wall_brick");
-
-    Eng_RenderSetLighting((EngLighting){
-        .sunDir       = (Vector3){ -0.35f, -0.88f, -0.32f },  // shader normalises
-        .sunColor     = (Vector3){ 1.00f,  0.98f,  0.92f },
-        .ambientColor = (Vector3){ 0.45f,  0.47f,  0.52f },   // high → no black faces
-        .fogColor     = (Color){ 18, 20, 26, 255 },           // matches the viewport clear
-        .fogStart     = 200.0f,                               // editor maps are small;
-        .fogEnd       = 2000.0f,                              // keep fog effectively off
-    });
-    Eng_RenderBeginWorld();
-    DrawMatSectors(s, floorTex);
-    DrawMatWalls(s, wallTex);
-    DrawMatObstacles(s, wallTex);
-    DrawMatProps(s);
-    Eng_RenderEndWorld();
 }
 
 // ---- per-frame draw --------------------------------------------------------

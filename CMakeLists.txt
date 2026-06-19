@@ -119,8 +119,15 @@ set_target_properties(shooter PROPERTIES ENABLE_EXPORTS ON)
 add_executable(editor
     src/editor/editor_main.c
     src/editor/edscene.c
+    src/editor/edsettings.c
+    src/editor/edcatalog.c
+    src/editor/edplace.c
+    src/editor/edmat.c
     src/editor/edhost.c
-    src/editor/builtins.c
+    src/editor/ed_recents.c
+    src/editor/edmenus.c
+    src/editor/panel_inspector.c
+    src/editor/edpanels.c
     src/editor/edassets.c
     src/editor/edthumb.c
     src/editor/edfiledialog.c

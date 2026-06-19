@@ -100,9 +100,17 @@ frame) with a console warning, instead of `atof` zeroing the field. Also surface
 the selected entity's `MapDoc_Validate` issues inline under an "ISSUES" header in
 the inspector (red = error, gold = warn), not just as a scroll-away console line.
 
-**8. Sector handles are X/Z only, primary sector only.  [Medium]**
-No vertical (height) handle in the 3D view; floor height is inspector-typing only.
-Weak for a multi-floor engine. Same `DrawSectorHandles` cluster as item 3.
+**8. Sector handles are X/Z only, primary sector only.  [DONE (vertical handle)]**
+Shipped: a floating height handle above the selected sector's footprint centre
+(`SectorHeightHandlePos`/`BeginSectorHeight`/`UpdateSectorHeight`/
+`DrawSectorHeightHandle` in edscene.c). Dragging it vertically raises/lowers the
+floor — FLAT keeps yHigh==yLow, RAMP shifts both edges to preserve rise. The
+vertical drag reuses the gizmo Y-axis translate constraint (`s->heightDrag`).
+Verified via `--shot --view iso --select <sector-id>`.
+STILL OPEN (the "primary sector only" half): handles show only for the primary
+selection — multi-sector editing is unchanged. Note: the sector's translate gizmo
+still draws a no-op Y axis; consider hiding gizmo-Y for sectors now that the
+height handle owns vertical editing.
 
 ### Tier 3 — tail (smaller)
 
@@ -121,7 +129,8 @@ Weak for a multi-floor engine. Same `DrawSectorHandles` cluster as item 3.
   on next Open (`SettingsModal` in edmenus.c; `EngMapHistory_Init` in edscene.c).
 
 ## Recommended order for a fresh session
-Items **1**–**7** are done. Remaining: **8** (vertical sector height handle — no
-proven sibling to mirror, since sector-resize is ground-plane only; design a
-vertical drag axis à la the gizmo Y) and the Tier 3 tail. The `edgizmo.c`
-extraction (deferred under item 3) is the one larger refactor left.
+Items **1**–**8** are done (8's vertical handle; its "multi-sector" half remains).
+What's left: the Tier 3 tail (below) — all small and independent — plus the one
+larger deferred refactor, the `edgizmo.c` extraction (see item 3). Good next picks
+from the tail: Play-Test binary name (game-agnostic goal) and the misleading
+undo-depth label are quick; marquee select is the most-wanted bigger one.

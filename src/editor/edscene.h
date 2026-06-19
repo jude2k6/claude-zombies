@@ -157,6 +157,13 @@ typedef struct EdScene {
     bool          wallEditing;
     int           wallVert;
 
+    // Sector vertical height drag (selected sector only): a handle floating above
+    // the footprint centre raises/lowers the floor. Reuses the gizmo Y-axis
+    // translate constraint (heightDrag) for the drag math.
+    bool          heightEditing;
+    EngGizmoDrag  heightDrag;
+    float         heightStartLow, heightStartHigh;  // sector heights at grab
+
     // Ramp link-pick mode: 0 = off, 1 = picking link A, 2 = picking link B. Armed
     // from the Inspector; the next viewport click on a sector sets that link on
     // the selected ramp. The Inspector reads/sets this directly on EdScene.

@@ -844,6 +844,80 @@ static void DrawWallHandles(EdScene *s) {
     }
 }
 
+// ---- sector vertical height handle -----------------------------------------
+// X/Z resize lives on the ground plane; floor HEIGHT had no viewport handle (it
+// was inspector-typing only). This adds one cube floating above the footprint
+// centre: dragging it vertically raises/lowers the floor. FLAT keeps yHigh==yLow;
+// RAMP shifts both edges by the same delta so its rise is preserved. The vertical
+// drag reuses the gizmo's Y-axis translate constraint (drift-free since grab).
+
+static float SectorFloorTop(EdScene *s) {
+    float lo, hi; Eng_GetSectorHeights(&s->doc, s->selectedId, &lo, &hi);
+    return fmaxf(lo, hi);
+}
+
+// Handle centre: above the footprint centre, clear of the floor so it reads as a
+// separate grab. `half` is its cube half-extent (also the AABB pick size).
+static Vector3 SectorHeightHandlePos(EdScene *s, float cx, float cz, float half) {
+    return (Vector3){ cx, SectorFloorTop(s) + half * 5.0f, cz };
+}
+
+static bool BeginSectorHeight(EdScene *s) {
+    float cx, cz, sx, sz;
+    if (!SelectedSector(s, &cx, &cz, &sx, &sz)) return false;
+    float half = SectorHandleHalf(s, cx, cz);
+    Vector3 hp = SectorHeightHandlePos(s, cx, cz, half);
+    BoundingBox bb = { { hp.x - half, hp.y - half, hp.z - half },
+                       { hp.x + half, hp.y + half, hp.z + half } };
+    Ray ray = Eng_PickRayFromScreen(s->cam, s->vpMouse, s->vpW, s->vpH);
+    float t;
+    if (!Eng_PickRayAABB(ray, bb, &t)) return false;
+    s->heightDrag = Eng_GizmoBeginDrag(s->cam, s->vpMouse, s->vpW, s->vpH, hp,
+                                       ENG_GIZMO_TRANSLATE, ENG_GIZMO_AXIS_Y);
+    if (s->heightDrag.axis == ENG_GIZMO_AXIS_NONE) return false;
+    Eng_GetSectorHeights(&s->doc, s->selectedId, &s->heightStartLow, &s->heightStartHigh);
+    s->dragTag = EdScene_NextTag(s);
+    s->heightEditing = true;
+    return true;
+}
+
+static void UpdateSectorHeight(EdScene *s) {
+    float cx, cz, sx, sz;
+    if (!SelectedSector(s, &cx, &cz, &sx, &sz)) { s->heightEditing = false; return; }
+    EngGizmoDelta d = Eng_GizmoUpdateDrag(s->heightDrag, s->cam, s->vpMouse, s->vpW, s->vpH);
+    float newLow = EdSnap(s, s->heightStartLow + d.translate.y);
+    float dy = newLow - s->heightStartLow;
+    int kind = SECTOR_FLAT; Eng_GetSectorKind(&s->doc, s->selectedId, &kind);
+    if (kind == SECTOR_RAMP)
+        Eng_SetSectorHeights(&s->doc, s->selectedId, newLow, s->heightStartHigh + dy);
+    else
+        Eng_SetSectorHeights(&s->doc, s->selectedId, newLow, newLow);
+    EngMapHistory_Commit(&s->hist, &s->doc, s->dragTag);
+    s->dirty = true;
+    if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) s->heightEditing = false;
+}
+
+static void DrawSectorHeightHandle(EdScene *s) {
+    if (s->placeTool != ED_PLACE_NONE) return;
+    float cx, cz, sx, sz;
+    if (!SelectedSector(s, &cx, &cz, &sx, &sz)) return;
+    float half = SectorHandleHalf(s, cx, cz);
+    Vector3 hp = SectorHeightHandlePos(s, cx, cz, half);
+    bool hover = false;
+    if (!s->heightEditing) {
+        BoundingBox bb = { { hp.x - half, hp.y - half, hp.z - half },
+                           { hp.x + half, hp.y + half, hp.z + half } };
+        Ray ray = Eng_PickRayFromScreen(s->cam, s->vpMouse, s->vpW, s->vpH);
+        float t; hover = Eng_PickRayAABB(ray, bb, &t);
+    }
+    Color c = s->heightEditing ? (Color){ 255, 255, 120, 255 }
+            : hover            ? (Color){ 150, 255, 170, 255 }
+            :                    (Color){ 110, 210, 140, 255 };
+    // Stalk from the floor centre up to the handle, so its height reads clearly.
+    Eng_GfxDrawLine3D((Vector3){ cx, SectorFloorTop(s), cz }, hp, c);
+    Eng_GfxDrawCubeWiresV(hp, (Vector3){ half * 2, half * 2, half * 2 }, c);
+}
+
 // ---- ramp visualization ----------------------------------------------------
 // Draw every RAMP sector's inclined surface as a wireframe (perimeter + slope
 // rungs) plus an uphill arrow, so ramps read as sloped in the viewport instead
@@ -1196,7 +1270,8 @@ void EdScene_UpdateViewport(EdScene *s, Rectangle vp, bool inputAllowed) {
                 if (SelectedOrigin(s, &origin))
                     hot = Eng_GizmoHitTest(s->cam, s->vpMouse, s->vpW, s->vpH, origin, s->mode,
                                            GizmoHandleSize(s, origin));
-                if (hot == ENG_GIZMO_AXIS_NONE && !BeginSectorResize(s) && !BeginWallEdit(s)) {
+                if (hot == ENG_GIZMO_AXIS_NONE && !BeginSectorResize(s) &&
+                    !BeginSectorHeight(s) && !BeginWallEdit(s)) {
                     bool additive = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
                     PickSelection(s, additive);
                 }
@@ -1212,6 +1287,9 @@ void EdScene_UpdateViewport(EdScene *s, Rectangle vp, bool inputAllowed) {
     } else if (s->wallEditing) {
         if (inputAllowed && !camBusy) UpdateWallEdit(s);
         else                          s->wallEditing = false;
+    } else if (s->heightEditing) {
+        if (inputAllowed && !camBusy) UpdateSectorHeight(s);
+        else                          s->heightEditing = false;
     } else {
         UpdateGizmo(s, inputAllowed && !camBusy && s->placeTool == ED_PLACE_NONE);
     }
@@ -1290,6 +1368,7 @@ void EdScene_DrawViewport(EdScene *s, Rectangle vp) {
     // Edge-resize handles for the selected sector / endpoint handles for the
     // selected wall (when no placement tool armed).
     DrawSectorHandles(s);
+    DrawSectorHeightHandle(s);
     DrawWallHandles(s);
 
     // Ramp slope wireframe + uphill arrow for every RAMP sector.

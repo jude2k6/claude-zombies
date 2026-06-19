@@ -627,8 +627,10 @@ static void SettingsModal(EdHost *h, Rectangle area, void *u) {
 
     OvSection(X, W, &y, sc, "EDITING");
     OvCheck(X, &y, sc, " Barricade auto-spawn ZOMBIE", &s->barricadeAutoSpawn);
+    // Undo depth takes effect on the NEXT map Open (EngMapHistory_Init), not on
+    // app restart — so it gets its own note rather than the DISPLAY "*" (restart).
     float depth = (float)s->undoDepth;
-    OvSlider(X, W, &y, sc, "Undo depth*", &depth, 16, 256, "%.0f"); s->undoDepth = (int)depth;
+    OvSlider(X, W, &y, sc, "Undo depth (next open)", &depth, 16, 256, "%.0f"); s->undoDepth = (int)depth;
 
     OvSection(X, W, &y, sc, "DISPLAY   (* applies on restart)");
     OvCheck(X, &y, sc, " VSync*", &s->vsync);

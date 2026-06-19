@@ -11,6 +11,8 @@
 #include "debugdraw.h"
 #include "gfx.h"
 #include "edthumb.h"      // asset-browser thumbnail cache (freed at shutdown)
+#include "edproject.h"    // Play Test: resolve the game binary from the manifest
+#include "content.h"      // Eng_GetGameRoot — the open game's directory
 
 #include <stdio.h>
 #include <string.h>
@@ -1130,9 +1132,19 @@ bool EdScene_PlayTest(EdScene *s, char *msg, int cap) {
         snprintf(msg, (size_t)cap, "play test: save FAILED: %s", s->path);
         return false;
     }
-    // The game binary sits next to the editor binary (same build/install dir).
+    // Which binary? The open game's manifest decides (game-agnostic): its
+    // "binary" key, else its id, else the legacy "shooter" — so Play Test works
+    // for any game project, not just the bundled one. The binary sits next to the
+    // editor binary (same build/install dir).
+    const char *binName = "shooter";
+    EdProject proj;
+    const char *gameRoot = Eng_GetGameRoot();
+    if (gameRoot && EdProject_Read(gameRoot, &proj)) {
+        if      (proj.binary[0]) binName = proj.binary;
+        else if (proj.id[0])     binName = proj.id;
+    }
     char exe[1024];
-    snprintf(exe, sizeof exe, "%sshooter", GetApplicationDirectory());  // trailing slash incl.
+    snprintf(exe, sizeof exe, "%s%s", GetApplicationDirectory(), binName);  // dir has trailing slash
     if (!FileExists(exe)) {
         snprintf(msg, (size_t)cap, "play test: game binary not found at %s", exe);
         return false;

@@ -75,6 +75,7 @@ static void ProjectLineCallback(int lineNo, int n, char **toks, void *user) {
     else if (strcmp(key, "name")           == 0) snprintf(p->name,        sizeof p->name,        "%s", val);
     else if (strcmp(key, "engine_version") == 0) p->engine_version = atoi(val);
     else if (strcmp(key, "default_map")    == 0) snprintf(p->default_map, sizeof p->default_map, "%s", val);
+    else if (strcmp(key, "binary")         == 0) snprintf(p->binary,      sizeof p->binary,      "%s", val);
     // Unknown keys are silently ignored (forward compatibility).
 }
 
@@ -129,6 +130,10 @@ bool EdProject_Write(const char *gameDir, const EdProject *p) {
     fprintf(f, "name            %s\n", p->name);
     fprintf(f, "engine_version  %d\n", p->engine_version > 0 ? p->engine_version : 1);
     fprintf(f, "default_map     %s\n", p->default_map[0] ? p->default_map : "maps/default.map");
+    // binary defaults to id (the build names the game exe after it); only the
+    // editor's Play Test reads it, so omit when it would just echo id.
+    if (p->binary[0] && strcmp(p->binary, p->id) != 0)
+        fprintf(f, "binary          %s\n", p->binary);
 
     fclose(f);
     return true;

@@ -119,14 +119,19 @@ height handle owns vertical editing.
 - Hierarchy is a flat `#id kind` list — no grouping/rename/double-click-to-frame
   (`PanelHierarchy` in edpanels.c).
 - `SectorAt` silently dumps out-of-bounds placements into sector 0 (now in
-  `edplace.c`) → spawn at wrong floor, no warning.
-- Play Test hardcodes the game binary name `shooter`
-  (`EdScene_PlayTest` in edscene.c) — should read the project manifest
-  (`edproject.h`), since the editor is meant to be game-agnostic.
+  `edplace.c`) → spawn at wrong floor, no warning. PARTLY MITIGATED by item 7:
+  the inline inspector ISSUES list (MapDoc_Validate) now flags "outside sector"
+  once the entity is selected. A placement-time toast still wants a log path
+  threaded into `PlaceAt` (it has `EdScene` but no `EdHost`).
+- Play Test hardcodes the game binary name `shooter` — DONE. `EdScene_PlayTest`
+  now resolves the binary from the open game's manifest (`binary` key → `id` →
+  legacy `shooter`) via `Eng_GetGameRoot` + `EdProject_Read`. New `binary` field
+  on `EdProject` (parsed + written, omitted when it would just echo `id`).
 - Copy/paste of a SECTOR duplicates its `name` (`EdScene_CopySelection`/`Paste` in
   edscene.c) — verify `MapDoc_Save` tolerates duplicate sector names.
-- Settings "Undo depth applies on restart" label is subtly wrong — it takes effect
-  on next Open (`SettingsModal` in edmenus.c; `EngMapHistory_Init` in edscene.c).
+- Settings "Undo depth applies on restart" label is subtly wrong — DONE. Relabeled
+  "Undo depth (next open)" (dropped the DISPLAY-section `*`=restart marker, which
+  didn't match its real timing in `EngMapHistory_Init`).
 
 ## Recommended order for a fresh session
 Items **1**–**8** are done (8's vertical handle; its "multi-sector" half remains).

@@ -12,16 +12,18 @@
 
 #include <stdbool.h>
 
-#define EDPROJECT_ID_LEN    64
-#define EDPROJECT_NAME_LEN  128
-#define EDPROJECT_MAP_LEN   256
+#define EDPROJECT_ID_LEN     64
+#define EDPROJECT_NAME_LEN   128
+#define EDPROJECT_MAP_LEN    256
+#define EDPROJECT_BINARY_LEN 128
 
 // Parsed fields of a game.project manifest (deffile format).
 typedef struct {
-    char id             [EDPROJECT_ID_LEN];   // id              shooter
-    char name           [EDPROJECT_NAME_LEN]; // name            Claude Zombies
-    int  engine_version;                       // engine_version  1
-    char default_map    [EDPROJECT_MAP_LEN];  // default_map     maps/default.map
+    char id             [EDPROJECT_ID_LEN];     // id              shooter
+    char name           [EDPROJECT_NAME_LEN];   // name            Claude Zombies
+    int  engine_version;                         // engine_version  1
+    char default_map    [EDPROJECT_MAP_LEN];    // default_map     maps/default.map
+    char binary         [EDPROJECT_BINARY_LEN]; // binary          shooter  (Play Test exe; "" → id)
 } EdProject;
 
 // The default directory the New Game / Open Game pickers open in: the "games/"

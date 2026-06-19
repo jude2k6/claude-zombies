@@ -309,12 +309,18 @@ sectors get FLAT heights at y=0 and commit one undo step. Height (`yLow`/`yHigh`
 size are then tuned in the **Inspector** (the scroll-wheel-while-dragging height widget was
 dropped — wheel is zoom in the ortho views — in favour of the Inspector field).
 
-**Still open — Resize / ramps.** Resize existing sectors by dragging their footprint edges
-(an AABB corner/edge handle distinct from the entity gizmo — sectors are quads, not point
-entities, so this needs custom screen-space hit-testing). Ramp authoring: pick FLAT vs RAMP
-kind, set `rampAxis`, link `linkA`/`linkB` to adjacent sectors (a two-entity interaction
-needing a dedicated drag or picker). Until then, edge-resize is covered by the Inspector's
-numeric size fields.
+**Resize — ✅ SHIPPED.** A selected sector shows four **edge handles** (W/E/N/S), hit-tested
+as small AABBs against the pick ray (the same ray primitives selection uses — no
+screen-projection convention needed, sectors being quads not point entities). Dragging an
+edge moves it to the cursor's snapped ground position while the **opposite edge stays fixed**,
+re-deriving centre+size each frame (drift-free, mirroring the gizmo drag convention) and
+coalescing under one undo tag. Built as `BeginSectorResize`/`UpdateSectorResize` +
+`DrawSectorHandles` (hover/active highlight) with `resizing`/`resizeEdge`/`resizeFixed` state;
+the translate gizmo still moves the whole sector, edge handles resize it.
+
+**Still open — Ramps.** Ramp authoring: pick FLAT vs RAMP kind, set `rampAxis`, link
+`linkA`/`linkB` to adjacent sectors (a two-entity interaction needing a dedicated drag or
+picker). Height (`yLow`/`yHigh`) stays Inspector-driven.
 
 **Why it matters:** Sectors are the structural unit of every map — you can't build a room
 layout without them. Before RECT-drag the only practical sector was the default square.

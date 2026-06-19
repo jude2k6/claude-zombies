@@ -145,6 +145,12 @@ typedef struct EdScene {
     float         sectorStartX, sectorStartZ;
     float         sectorCurX, sectorCurZ;
 
+    // Sector edge-handle resize (selected sector only): resizeEdge 0=W/1=E/2=N/3=S,
+    // resizeFixed = the opposite edge's world coordinate (held fixed during drag).
+    bool          resizing;
+    int           resizeEdge;
+    float         resizeFixed;
+
     // ---- mob catalog (scanned from data/mobs/) -----------------------------
     EdMobDef      mobDefs[ED_MAX_MOBDEFS];
     int           mobDefCount;

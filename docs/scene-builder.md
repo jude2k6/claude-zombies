@@ -212,7 +212,8 @@ and the gizmo work unchanged under it because `Eng_PickRayFromScreen`
 (`GetScreenToWorldRayEx`) builds a correct ray for an ortho camera, and handle sizing
 switches from distance-based (fly) to zoom-based (ortho).
 
-**Editing controls (all views):** **LMB** select or drag a gizmo handle; **Shift+LMB**
+**Editing controls (all views):** **LMB** select or drag a gizmo handle (for a selected
+**sector**, drag an **edge handle** W/E/N/S to resize it); **Shift+LMB**
 adds/removes from a multi-selection (the move gizmo then drags the whole set rigidly);
 **Ctrl+A** selects all; **1/2/3** switch gizmo mode — translate drags any entity,
 **rotate/scale drag PROPs** (the only kind with a yaw/scale, per `mapedit.h`); **X** or
@@ -351,11 +352,11 @@ Small, independently shippable steps; none blocks the game.
    **sectors** (RECT-drag — press a corner, drag the footprint with a live preview, release;
    a plain click drops a default 20×20), and **obstacles / props / wallbuys / perks**
    (drop-and-snap with sane defaults). Each placement assigns the entity to the sector under
-   the cursor (`Eng_SetSector` — the save requirement) and pushes one undo step. Sector
-   *size/height* is then tunable in the Inspector. Still future: interactive **edge-handle
-   resize** of existing sectors + ramp linking (§3.2 in
-   [editor-feature-ideas.md](editor-feature-ideas.md)), and a richer per-kind inspector on
-   drop (the data-driven entity-def registry in
+   the cursor (`Eng_SetSector` — the save requirement) and pushes one undo step. A selected
+   sector also shows **edge-resize handles** (W/E/N/S) — drag one to move that edge to the
+   cursor (snapped) while the opposite edge stays fixed; height stays Inspector-driven. Still
+   future: **ramp linking** (§3.2 in [editor-feature-ideas.md](editor-feature-ideas.md)) and
+   a richer per-kind inspector on drop (the data-driven entity-def registry in
    [editor-content-extensibility.md](editor-content-extensibility.md) §2).
 4. ~~**Save / Open / New + file picker**~~ **Done** — `File ▸ Save`/`Save As…` (`MapDoc_Save`),
    `Open…`/`New`, a recents list, and the `*` dirty marker; `Open…`/`Save As…` use a native

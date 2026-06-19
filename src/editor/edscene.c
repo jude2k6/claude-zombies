@@ -828,6 +828,118 @@ static void UpdateGizmo(EdScene *s, bool allowGrab) {
     if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) s->dragging = false;
 }
 
+// ---- sector edge-handle resize ---------------------------------------------
+// Sectors are quads, not point entities, so resizing uses its own handles (one
+// per edge: W/E on X, N/S on Z) hit-tested as small AABBs against the pick ray —
+// the same ray primitives selection uses, so no screen-projection convention is
+// needed. Dragging an edge moves it to the cursor's (snapped) ground position
+// while the OPPOSITE edge stays fixed, re-deriving centre+size each frame from
+// that fixed coordinate (drift-free, mirroring the gizmo drag convention).
+//
+// resizeEdge: 0=W(-X) 1=E(+X) 2=N(-Z) 3=S(+Z); resizeFixed = opposite edge coord.
+
+// Primary selection is a sector? Fill its centre + full size.
+static bool SelectedSector(EdScene *s, float *cx, float *cz, float *sx, float *sz) {
+    if (s->selectedId < 0) return false;
+    EngMapEntKind k;
+    EngMapEnt_Ptr(&s->doc, EngMapEnt_Find(&s->doc, s->selectedId), &k);
+    if (k != ENGMAPENT_SECTOR) return false;
+    return Eng_GetPos(&s->doc, s->selectedId, cx, cz) &&
+           Eng_GetSectorSize(&s->doc, s->selectedId, sx, sz);
+}
+
+// The 4 edge-handle boxes (W,E,N,S), each a cube of half-extent `half` centred
+// on its edge midpoint at y=0.
+static void SectorHandleBoxes(float cx, float cz, float sx, float sz, float half, BoundingBox out[4]) {
+    float xW = cx - sx * 0.5f, xE = cx + sx * 0.5f;
+    float zN = cz - sz * 0.5f, zS = cz + sz * 0.5f;
+    Vector3 mid[4] = { { xW, 0, cz }, { xE, 0, cz }, { cx, 0, zN }, { cx, 0, zS } };
+    for (int i = 0; i < 4; i++) {
+        out[i].min = (Vector3){ mid[i].x - half, -half, mid[i].z - half };
+        out[i].max = (Vector3){ mid[i].x + half,  half, mid[i].z + half };
+    }
+}
+
+static float SectorHandleHalf(EdScene *s, float cx, float cz) {
+    return fmaxf(0.5f, GizmoHandleSize(s, (Vector3){ cx, 0.0f, cz }) * 0.5f);
+}
+
+// On press over a sector edge handle: begin a resize drag. Returns true if a
+// handle was hit (caller then skips selection-picking).
+static bool BeginSectorResize(EdScene *s) {
+    float cx, cz, sx, sz;
+    if (!SelectedSector(s, &cx, &cz, &sx, &sz)) return false;
+    BoundingBox bb[4];
+    SectorHandleBoxes(cx, cz, sx, sz, SectorHandleHalf(s, cx, cz), bb);
+    Ray ray = Eng_PickRayFromScreen(s->cam, s->vpMouse, s->vpW, s->vpH);
+    int best = -1; float bestT = 1e30f, t;
+    for (int i = 0; i < 4; i++)
+        if (Eng_PickRayAABB(ray, bb[i], &t) && t < bestT) { bestT = t; best = i; }
+    if (best < 0) return false;
+    switch (best) {
+        case 0: s->resizeFixed = cx + sx * 0.5f; break;  // W moves, E fixed
+        case 1: s->resizeFixed = cx - sx * 0.5f; break;  // E moves, W fixed
+        case 2: s->resizeFixed = cz + sz * 0.5f; break;  // N moves, S fixed
+        case 3: s->resizeFixed = cz - sz * 0.5f; break;  // S moves, N fixed
+    }
+    s->resizeEdge = best;
+    s->dragTag = g_nextTag++; if (g_nextTag == 0) g_nextTag = 1;
+    s->resizing = true;
+    return true;
+}
+
+static void UpdateSectorResize(EdScene *s) {
+    float cx, cz, sx, sz;
+    if (!SelectedSector(s, &cx, &cz, &sx, &sz)) { s->resizing = false; return; }
+    Vector3 g;
+    Ray ray = Eng_PickRayFromScreen(s->cam, s->vpMouse, s->vpW, s->vpH);
+    if (Eng_PickRayGroundY(ray, 0.0f, &g)) {
+        g.x = EdSnap(s, g.x); g.z = EdSnap(s, g.z);
+        const float MIN = ED_SECTOR_MIN_SIZE, fixed = s->resizeFixed;
+        if (s->resizeEdge <= 1) {                          // X edge
+            float lo, hi;
+            if (s->resizeEdge == 0) { lo = fminf(g.x, fixed - MIN); hi = fixed; }
+            else                    { lo = fixed; hi = fmaxf(g.x, fixed + MIN); }
+            Eng_SetSectorSize(&s->doc, s->selectedId, hi - lo, sz);
+            Eng_SetPos(&s->doc, s->selectedId, (lo + hi) * 0.5f, cz);
+        } else {                                           // Z edge
+            float lo, hi;
+            if (s->resizeEdge == 2) { lo = fminf(g.z, fixed - MIN); hi = fixed; }
+            else                    { lo = fixed; hi = fmaxf(g.z, fixed + MIN); }
+            Eng_SetSectorSize(&s->doc, s->selectedId, sx, hi - lo);
+            Eng_SetPos(&s->doc, s->selectedId, cx, (lo + hi) * 0.5f);
+        }
+        EngMapHistory_Commit(&s->hist, &s->doc, s->dragTag);
+        s->dirty = true;
+    }
+    if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) s->resizing = false;
+}
+
+// Draw the selected sector's edge handles (skipped while a placement tool is
+// armed). Highlights the hovered handle, or the active one mid-resize.
+static void DrawSectorHandles(EdScene *s) {
+    if (s->placeTool != ED_PLACE_NONE) return;
+    float cx, cz, sx, sz;
+    if (!SelectedSector(s, &cx, &cz, &sx, &sz)) return;
+    BoundingBox bb[4];
+    SectorHandleBoxes(cx, cz, sx, sz, SectorHandleHalf(s, cx, cz), bb);
+    int hover = -1;
+    if (!s->resizing) {
+        Ray ray = Eng_PickRayFromScreen(s->cam, s->vpMouse, s->vpW, s->vpH);
+        float bestT = 1e30f, t;
+        for (int i = 0; i < 4; i++)
+            if (Eng_PickRayAABB(ray, bb[i], &t) && t < bestT) { bestT = t; hover = i; }
+    }
+    for (int i = 0; i < 4; i++) {
+        Color c = (s->resizing && i == s->resizeEdge) ? (Color){ 255, 255, 120, 255 }
+                : (i == hover)                         ? (Color){ 130, 235, 255, 255 }
+                :                                        (Color){ 90, 160, 210, 255 };
+        Vector3 ctr = Vector3Scale(Vector3Add(bb[i].min, bb[i].max), 0.5f);
+        Vector3 sz3 = Vector3Subtract(bb[i].max, bb[i].min);
+        Eng_GfxDrawCubeWiresV(ctr, sz3, c);
+    }
+}
+
 // ---- mob catalog scan (data/mobs/*/*.mob via the shared deffile reader) -----
 
 // Accumulator for one .mob file: we read only the editor-relevant fields.
@@ -1227,7 +1339,7 @@ void EdScene_UpdateViewport(EdScene *s, Rectangle vp, bool inputAllowed) {
                 if (SelectedOrigin(s, &origin))
                     hot = Eng_GizmoHitTest(s->cam, s->vpMouse, s->vpW, s->vpH, origin, s->mode,
                                            GizmoHandleSize(s, origin));
-                if (hot == ENG_GIZMO_AXIS_NONE) {
+                if (hot == ENG_GIZMO_AXIS_NONE && !BeginSectorResize(s)) {
                     bool additive = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
                     PickSelection(s, additive);
                 }
@@ -1235,7 +1347,12 @@ void EdScene_UpdateViewport(EdScene *s, Rectangle vp, bool inputAllowed) {
         }
     }
 
-    UpdateGizmo(s, inputAllowed && !camBusy && s->placeTool == ED_PLACE_NONE);
+    if (s->resizing) {
+        if (inputAllowed && !camBusy) UpdateSectorResize(s);
+        else                          s->resizing = false;   // focus/camera took over mid-drag
+    } else {
+        UpdateGizmo(s, inputAllowed && !camBusy && s->placeTool == ED_PLACE_NONE);
+    }
 }
 
 // ---- material-mode helpers -------------------------------------------------
@@ -1435,6 +1552,9 @@ void EdScene_DrawViewport(EdScene *s, Rectangle vp) {
         BoundingBox bb = { { minX, 0.0f, minZ }, { maxX, 0.1f, maxZ } };
         Eng_DebugBox(bb, (Color){ 90, 200, 255, 255 });
     }
+
+    // Edge-resize handles for the selected sector (when no placement tool armed).
+    DrawSectorHandles(s);
 
     Eng_DebugDraw3D(s->cam);
     Eng_GfxEndMode3D();

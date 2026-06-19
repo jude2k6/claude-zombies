@@ -35,28 +35,68 @@ static bool InspSlider(float X, float W, float *y, float sc,
     return (*v != oldV);
 }
 
-// Float text-box state (one set per named field — we use a small static array).
-// We track edit mode + buffer per logical field via a simple index.
-#define INSP_FLOAT_FIELDS 4
-static bool g_inspFloatEdit[INSP_FLOAT_FIELDS];
-static char g_inspFloatBuf[INSP_FLOAT_FIELDS][32];
+// Coalesce token for the current continuous edit (slider / colour-picker drag).
+// Reset to 0 every frame the mouse is up (see the top of PanelInspector), so it
+// holds steady for one drag and is fresh for the next. Module-level rather than a
+// function static because a slider's release frame produces no commit — the reset
+// has to be driven by the per-frame panel update, not by commit timing.
+static uint32_t g_inspContTag = 0;
+
+// Commit a continuous edit so the whole drag collapses to ONE undo step instead
+// of one-per-frame. The first commit of a drag claims a tag from the shared
+// editor allocator (never colliding with a gizmo drag); the rest coalesce into
+// it. (TODO item 4: undo spam from inspector sliders / colour pickers.)
+static void InspCommitCont(EdHost *h) {
+    if (g_inspContTag == 0) g_inspContTag = EdHost_NewEditTag(h);
+    EdHost_CommitEditTagged(h, g_inspContTag);
+}
+
+// Float text-box edit-state, addressed by a STABLE STRING KEY (the field label)
+// rather than a hand-assigned index. The old design was a fixed 4-slot array
+// indexed by a caller-passed idx; pos x/z reused slots 0/1 that obstacle/sector
+// size x/z ALSO claimed, so editing one silently clobbered the other's buffer,
+// and adding any field risked a fresh collision. Keying by label makes every
+// distinct field its own slot — no manual bookkeeping, no collisions. Slots are
+// reclaimed (key cleared) whenever the selection changes.
+typedef struct {
+    const char *key;        // field label; NULL = free slot
+    bool        editing;    // is this box in text-entry mode?
+    char        buf[32];    // live edit buffer
+} InspFloatState;
+#define INSP_FLOAT_FIELDS 8   // max distinct float fields shown for one entity
+static InspFloatState g_inspFloat[INSP_FLOAT_FIELDS];
 static int  g_inspLastId = -1;  // reset buffers when selection changes
 
-// Draw a float field via a GuiTextBox; idx indexes g_inspFloatBuf/Edit.
+// Find (or lazily claim) the edit-state slot for `key`. Keys are string literals
+// so pointer identity is stable, but we compare by content to be safe. Returns
+// NULL only if the table is full (more than INSP_FLOAT_FIELDS live at once).
+static InspFloatState *InspFloatSlot(const char *key) {
+    for (int i = 0; i < INSP_FLOAT_FIELDS; i++)
+        if (g_inspFloat[i].key && strcmp(g_inspFloat[i].key, key) == 0) return &g_inspFloat[i];
+    for (int i = 0; i < INSP_FLOAT_FIELDS; i++)
+        if (!g_inspFloat[i].key) {
+            g_inspFloat[i].key = key; g_inspFloat[i].editing = false; g_inspFloat[i].buf[0] = '\0';
+            return &g_inspFloat[i];
+        }
+    return NULL;
+}
+
+// Draw a float field via a GuiTextBox, keyed by its `label`.
 // Returns true and writes *v if the user committed a change (toggled out of edit).
 static bool InspFloatBox(float X, float W, float *y, float sc,
-                         const char *label, float *v, int idx) {
-    if (idx < 0 || idx >= INSP_FLOAT_FIELDS) return false;
+                         const char *label, float *v) {
+    InspFloatState *st = InspFloatSlot(label);
+    if (!st) return false;
     Eng_UiText(label, X, *y + 1 * sc, 12, ENG_UI_TEXT);
     bool changed = false;
-    bool wasEdit = g_inspFloatEdit[idx];
-    if (!wasEdit) snprintf(g_inspFloatBuf[idx], sizeof g_inspFloatBuf[idx], "%.3f", *v);
+    bool wasEdit = st->editing;
+    if (!wasEdit) snprintf(st->buf, sizeof st->buf, "%.3f", *v);
     if (GuiTextBox((Rectangle){ X + 60 * sc, *y, W - 60 * sc, 18 * sc },
-                   g_inspFloatBuf[idx], sizeof g_inspFloatBuf[idx], wasEdit)) {
-        g_inspFloatEdit[idx] = !wasEdit;
+                   st->buf, sizeof st->buf, wasEdit)) {
+        st->editing = !wasEdit;
         if (wasEdit) {
             // toggling out of edit → parse and commit
-            float parsed = (float)atof(g_inspFloatBuf[idx]);
+            float parsed = (float)atof(st->buf);
             if (parsed != *v) { *v = parsed; changed = true; }
         }
     }
@@ -118,14 +158,16 @@ void PanelInspector(EdHost *h, Rectangle c, void *u) {
     float sc = EdHost_UiScale(h);
     float X = c.x, W = c.width, y = c.y;
 
-    // Reset per-field buffers when the selection changes (avoids stale text).
+    // Release every float-field slot when the selection changes, so a new entity
+    // (possibly a different kind with different labels) starts from fresh buffers.
     if (s->selectedId != g_inspLastId) {
         g_inspLastId = s->selectedId;
-        for (int i = 0; i < INSP_FLOAT_FIELDS; i++) {
-            g_inspFloatEdit[i] = false;
-            g_inspFloatBuf[i][0] = '\0';
-        }
+        for (int i = 0; i < INSP_FLOAT_FIELDS; i++) g_inspFloat[i].key = NULL;
     }
+
+    // End any continuous-edit coalescing run once the mouse is released, so the
+    // next slider/picker drag starts a fresh undo step (see InspCommitCont).
+    if (!IsMouseButtonDown(MOUSE_BUTTON_LEFT)) g_inspContTag = 0;
 
     // ---- Map properties when nothing is selected (audit P1-A) --------------
     if (s->selectedId < 0) {
@@ -173,7 +215,7 @@ void PanelInspector(EdHost *h, Rectangle c, void *u) {
             atm->fogG = (float)newFogCol.g;
             atm->fogB = (float)newFogCol.b;
             atm->present = true;
-            EdHost_CommitEdit(h);
+            InspCommitCont(h);
         }
         y += cpSz + 4 * sc;
 
@@ -189,7 +231,7 @@ void PanelInspector(EdHost *h, Rectangle c, void *u) {
         y += 22 * sc;
         if (atm->fogStart != oldFogStart || atm->fogEnd != oldFogEnd) {
             atm->present = true;
-            EdHost_CommitEdit(h);
+            InspCommitCont(h);
         }
 
         // Sky tint (only shown when hasSkyTint or to enable it).
@@ -207,7 +249,7 @@ void PanelInspector(EdHost *h, Rectangle c, void *u) {
                 atm->skyG = (float)newSkyCol.g;
                 atm->skyB = (float)newSkyCol.b;
                 atm->present = true;
-                EdHost_CommitEdit(h);
+                InspCommitCont(h);
             }
             y += cpSz + 4 * sc;
         }
@@ -255,8 +297,8 @@ void PanelInspector(EdHost *h, Rectangle c, void *u) {
     float px = 0, pz = 0;
     if (Eng_GetPos(&s->doc, s->selectedId, &px, &pz)) {
         float newX = px, newZ = pz;
-        bool cx = InspFloatBox(X, W, &y, sc, "pos x", &newX, 0);
-        bool cz = InspFloatBox(X, W, &y, sc, "pos z", &newZ, 1);
+        bool cx = InspFloatBox(X, W, &y, sc, "pos x", &newX);
+        bool cz = InspFloatBox(X, W, &y, sc, "pos z", &newZ);
         if (cx || cz) {
             Eng_SetPos(&s->doc, s->selectedId, newX, newZ);
             EdHost_CommitEdit(h);
@@ -333,11 +375,11 @@ void PanelInspector(EdHost *h, Rectangle c, void *u) {
         float newYaw = yawDeg, newScale = scale;
         if (InspSlider(X, W, &y, sc, "yaw",   &newYaw,   0,   360)) {
             Eng_SetYaw(&s->doc, s->selectedId, newYaw);
-            EdHost_CommitEdit(h);
+            InspCommitCont(h);
         }
         if (InspSlider(X, W, &y, sc, "scale", &newScale, 0.1f, 5)) {
             Eng_SetScale(&s->doc, s->selectedId, newScale);
-            EdHost_CommitEdit(h);
+            InspCommitCont(h);
         }
 
     } else if (k == ENGMAPENT_WALL) {
@@ -350,9 +392,9 @@ void PanelInspector(EdHost *h, Rectangle c, void *u) {
         float sx = 1, sz = 1, oh = 1;
         Eng_GetObstacleSize(&s->doc, s->selectedId, &sx, &sz, &oh);
         float nsx = sx, nsz = sz, noh = oh;
-        bool csx = InspFloatBox(X, W, &y, sc, "size x", &nsx, 0);
-        bool csz = InspFloatBox(X, W, &y, sc, "size z", &nsz, 1);
-        bool coh = InspFloatBox(X, W, &y, sc, "height", &noh, 2);
+        bool csx = InspFloatBox(X, W, &y, sc, "size x", &nsx);
+        bool csz = InspFloatBox(X, W, &y, sc, "size z", &nsz);
+        bool coh = InspFloatBox(X, W, &y, sc, "height", &noh);
         if (csx || csz || coh) {
             Eng_SetObstacleSize(&s->doc, s->selectedId, nsx, nsz, noh);
             EdHost_CommitEdit(h);
@@ -366,10 +408,10 @@ void PanelInspector(EdHost *h, Rectangle c, void *u) {
         Eng_GetSectorSize(&s->doc, s->selectedId, &sx, &sz);
         Eng_GetSectorHeights(&s->doc, s->selectedId, &yLow, &yHigh);
         float nsx = sx, nsz = sz, nyLow = yLow, nyHigh = yHigh;
-        bool csx   = InspFloatBox(X, W, &y, sc, "size x", &nsx,   0);
-        bool csz   = InspFloatBox(X, W, &y, sc, "size z", &nsz,   1);
-        bool cyLow = InspFloatBox(X, W, &y, sc, "y low",  &nyLow, 2);
-        bool cyHi  = InspFloatBox(X, W, &y, sc, "y high", &nyHigh,3);
+        bool csx   = InspFloatBox(X, W, &y, sc, "size x", &nsx);
+        bool csz   = InspFloatBox(X, W, &y, sc, "size z", &nsz);
+        bool cyLow = InspFloatBox(X, W, &y, sc, "y low",  &nyLow);
+        bool cyHi  = InspFloatBox(X, W, &y, sc, "y high", &nyHigh);
         if (csx || csz) {
             Eng_SetSectorSize(&s->doc, s->selectedId, nsx, nsz);
             EdHost_CommitEdit(h);

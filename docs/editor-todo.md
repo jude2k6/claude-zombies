@@ -62,24 +62,23 @@ whole wall by its center). Inspector exposes only a texture field for walls.
 
 ### Tier 2 — medium, mostly cheap (several easier after the split)
 
-**4. Undo spam from sliders / typed inspector edits.  [Medium-High]**
-Gizmo drags coalesce via a per-drag tag; inspector slider/color edits commit every
-frame with tag 0, so one slider drag = dozens of undo steps.
-- `src/editor/panel_inspector.c`: `InspSlider`, the fog sliders + GuiColorPicker in
-  the map-properties branch — all call `EdHost_CommitEdit(h)` (tag 0).
-- Fix: give an interaction a coalesce tag for its duration. Check whether
-  `EdHost_CommitEdit` exposes a tag; if not, the underlying call is
-  `EngMapHistory_Commit(&hist, &doc, tag)` (see `EdScene_Commit` / `UpdateGizmo`
-  `dragTag` in edscene.c). May need a small host API addition.
+**4. Undo spam from sliders / typed inspector edits.  [DONE]**
+Shipped: new host API `EdHost_CommitEditTagged` + `EdHost_NewEditTag` (over
+`EdScene_CommitTagged` / `EdScene_NextTag`, sharing the gizmo's `g_nextTag` well).
+The inspector's continuous widgets (prop yaw/scale sliders, fog colour/start/end,
+sky colour) commit via `InspCommitCont`, which holds one coalesce tag per drag
+(reset to 0 each frame the mouse is up, at the top of `PanelInspector`). Discrete
+edits (`InspFloatBox` toggle-out, text fields, toggles) keep tag 0. The two gizmo
+tag sites now also call `EdScene_NextTag`.
 
-**5. Inspector edit-buffer state is fragile function-statics.  [Medium]**
-`g_inspFloatEdit[4]` / `g_inspFloatBuf[4]` — only 4 float slots, and the sector
-inspector already uses all 4 (size x/z, y low/high). Add one field to any kind and
-indices silently collide. Multiple inspectors can't coexist.
-- `src/editor/panel_inspector.c`: `INSP_FLOAT_FIELDS`, `g_inspFloat*`, the per-kind
-  `InspFloatBox(..., idx)` calls; also `InspTexField`'s own `static lastId`, the
-  spawn-mob statics, the map-name statics.
-- Fix: a small per-field keyed edit-state struct owned by the panel.
+**5. Inspector edit-buffer state is fragile function-statics.  [DONE]**
+Shipped: `InspFloatBox` is now keyed by its field LABEL via `InspFloatSlot`
+(string-keyed `InspFloatState` table, 8 slots), replacing the 4-slot index array.
+This also fixed a live latent bug — `pos x/z` (old idx 0/1) collided with
+obstacle/sector `size x/z` (also idx 0/1) on the same entity. Slots are released
+on selection change. NOTE: `InspTexField`, the spawn-mob and map-name statics
+were left as-is (single-instance, no collision); fold them in only if a second
+inspector instance is ever needed.
 
 **6. No "frame all" / camera can get lost.  [Medium, small]**
 `F` frames the selection only. Open an off-origin map → you stare at empty space.
@@ -116,6 +115,7 @@ Weak for a multi-floor engine. Same `DrawSectorHandles` cluster as item 3.
   on next Open (`SettingsModal` in edmenus.c; `EngMapHistory_Init` in edscene.c).
 
 ## Recommended order for a fresh session
-Items **1** + **2** are done. Next: **4** + **5** (contained in
-panel_inspector.c). Tackle **3** (+ the `edgizmo.c` extraction) in its own
-dedicated session.
+Items **1**, **2**, **4**, **5** are done. Next high-value item is **3** (wall
+vertex editing) — tackle it together with the deferred `edgizmo.c` extraction in
+its own dedicated session. Items **6** (frame-all) and **7** (numeric validation)
+are good small standalone follow-ups.

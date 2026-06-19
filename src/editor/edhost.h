@@ -28,6 +28,7 @@
 #include "raylib.h"
 #include "mapdoc.h"
 #include <stdbool.h>
+#include <stdint.h>
 
 typedef struct EdHost  EdHost;
 typedef struct EdScene EdScene;   // concrete type in edscene.h
@@ -125,6 +126,11 @@ MapDoc  *EdHost_Doc(EdHost *h);
 int      EdHost_SelectedId(EdHost *h);
 void     EdHost_Select(EdHost *h, int id);
 void     EdHost_CommitEdit(EdHost *h);   // push one undo step + mark dirty
+// Coalescing commit for continuous edits (sliders / colour pickers): pass a tag
+// from EdHost_NewEditTag and reuse it for every frame of one drag so the whole
+// drag collapses to a single undo step. Tag 0 behaves like EdHost_CommitEdit.
+void     EdHost_CommitEditTagged(EdHost *h, uint32_t tag);
+uint32_t EdHost_NewEditTag(EdHost *h);   // fresh never-zero coalesce token
 EdScene *EdHost_Scene(EdHost *h);        // concrete context (in-tree plugins)
 float    EdHost_UiScale(EdHost *h);
 

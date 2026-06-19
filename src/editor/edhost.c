@@ -149,6 +149,8 @@ MapDoc  *EdHost_Doc(EdHost *h)        { return &h->scene->doc; }
 int      EdHost_SelectedId(EdHost *h) { return h->scene->selectedId; }
 void     EdHost_Select(EdHost *h, int id) { EdScene_SelectClick(h->scene, id, false); }
 void     EdHost_CommitEdit(EdHost *h) { EdScene_Commit(h->scene); }
+void     EdHost_CommitEditTagged(EdHost *h, uint32_t tag) { EdScene_CommitTagged(h->scene, tag); }
+uint32_t EdHost_NewEditTag(EdHost *h) { return EdScene_NextTag(h->scene); }
 EdScene *EdHost_Scene(EdHost *h)      { return h->scene; }
 float    EdHost_UiScale(EdHost *h)    { return h->scene->uiScale; }
 bool     EdHost_PanelsInteractive(EdHost *h) {

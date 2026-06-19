@@ -331,9 +331,27 @@ static void PickSelection(EdScene *s, bool additive) {
 
 // ---- commit + sector query (placement itself lives in edplace.c) -----------
 
-void EdScene_Commit(EdScene *s) {
-    EngMapHistory_Commit(&s->hist, &s->doc, 0);
+// Monotonic coalesce-token source; see EdScene_NextTag. Lives here (above the
+// first user) so both the commit helpers and the gizmo drag code can reach it.
+static uint32_t g_nextTag = 1;
+
+void EdScene_Commit(EdScene *s) { EdScene_CommitTagged(s, 0); }
+
+// Tagged commit: consecutive commits sharing a non-zero tag coalesce into one
+// undo step (the EngMapHistory protocol). Tag 0 always pushes a fresh step.
+void EdScene_CommitTagged(EdScene *s, uint32_t tag) {
+    EngMapHistory_Commit(&s->hist, &s->doc, tag);
     s->dirty = true;
+}
+
+// Hand out a fresh, never-zero coalesce token. Shared by every continuous edit
+// (gizmo drags, inspector sliders) so two unrelated interactions can never reuse
+// a tag and accidentally merge into one undo step.
+uint32_t EdScene_NextTag(EdScene *s) {
+    (void)s;
+    uint32_t t = g_nextTag++;
+    if (g_nextTag == 0) g_nextTag = 1;
+    return t;
 }
 
 // Strict variant for ramp link-picking: the sector whose footprint contains
@@ -469,8 +487,6 @@ void EdScene_Redo(EdScene *s) { if (EngMapHistory_Redo(&s->hist, &s->doc)) s->di
 
 // ---- gizmo drag (translate) → mapedit → history ----------------------------
 
-static uint32_t g_nextTag = 1;
-
 static float GizmoHandleSize(EdScene *s, Vector3 origin) {
     if (s->view == ED_VIEW_FLY)
         return Vector3Distance(s->cam.position, origin) * 0.12f + 0.5f;
@@ -518,8 +534,7 @@ static void UpdateGizmo(EdScene *s, bool allowGrab) {
                 }
                 Eng_GetYaw(&s->doc, s->selectedId, &s->dragStartYaw);
                 Eng_GetScale(&s->doc, s->selectedId, &s->dragStartScale);
-                s->dragTag = g_nextTag++;
-                if (g_nextTag == 0) g_nextTag = 1;
+                s->dragTag = EdScene_NextTag(s);
                 s->dragging = true;
             }
         }
@@ -620,7 +635,7 @@ static bool BeginSectorResize(EdScene *s) {
         case 3: s->resizeFixed = cz - sz * 0.5f; break;  // S moves, N fixed
     }
     s->resizeEdge = best;
-    s->dragTag = g_nextTag++; if (g_nextTag == 0) g_nextTag = 1;
+    s->dragTag = EdScene_NextTag(s);
     s->resizing = true;
     return true;
 }

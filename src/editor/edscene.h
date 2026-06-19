@@ -271,6 +271,11 @@ void EdScene_DrawViewport(EdScene *s, Rectangle vp);
 // ---- verbs (used by the shell, menus, and panels) --------------------------
 
 void EdScene_Commit(EdScene *s);             // push one undo step + mark dirty
+// Coalescing commit: consecutive commits with the same non-zero tag collapse to
+// one undo step (tag 0 = always a fresh step). EdScene_NextTag hands out fresh
+// never-zero tags shared across all continuous edits (gizmo + inspector sliders).
+void     EdScene_CommitTagged(EdScene *s, uint32_t tag);
+uint32_t EdScene_NextTag(EdScene *s);
 void EdScene_Undo(EdScene *s);
 void EdScene_Redo(EdScene *s);
 void EdScene_DeleteSelected(EdScene *s);     // delete the whole selection set

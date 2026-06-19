@@ -12,12 +12,10 @@
 #include "builtins.h"
 #include "builtins_internal.h"
 #include "edscene.h"
-#include "edthumb.h"    // EdThumb_Model — asset-browser model previews
 
 #include "raygui.h"
 #include "ui.h"
 #include "mapedit.h"
-#include "content.h"  // Eng_TextureGet / Eng_LoadTexture
 
 #include <stdio.h>
 #include <string.h>
@@ -263,14 +261,13 @@ static void PanelHierarchy(EdHost *h, Rectangle c, void *u) {
     }
 }
 
-// ---- Assets panel — browse maps / models / textures ------------------------
-// A scrollable index of the content overlay (EdScene.assets) — click a MAP to
-// open it (via the unsaved-changes guard); MODELS and TEXTURES are browse-only
-// previews (props are placed from the catalog-backed Props palette in the TOOLS
-// panel, not by arming a raw model stem), and models/textures show a thumbnail
-// (EdThumb_Model / the engine texture cache). Typing in the filter box narrows
-// the maps/models/textures lists. (Placement tools moved to their own always-on
-// left TOOLS panel — PanelTools — per TODO item 1.)
+// ---- Assets panel — browse maps --------------------------------------------
+// A scrollable index of the maps in the content overlay (EdScene.assets) — click
+// one to open it (via the unsaved-changes guard). The filter box narrows the
+// list. Trimmed to maps-only: the old Models/Textures browse lists were
+// click-to-log dead weight, and placement props come from the TOOLS palette, not
+// from arming a raw model stem. This panel is the seam for the planned
+// asset-import browser (games-as-projects); thumbnails return with that work.
 static float g_assetsScroll = 0;
 static char  g_assetFilter[64] = "";
 static bool  g_assetFilterEdit = false;
@@ -286,21 +283,17 @@ static bool ContainsCI(const char *hay, const char *needle) {
     return false;
 }
 
-// One asset row: thumbnail (optional) + name, hover/click. Returns true if the
-// row was left-clicked this frame. `thumb` with .id==0 draws a plain swatch.
+// One asset row: a colour swatch + name, hover/click. Returns true if the row
+// was left-clicked this frame. (Thumbnail support lived here for the old
+// Models/Textures browse lists; it returns with the asset-import work.)
 static bool AssetRow(EdHost *h, Rectangle area, float y, float rowH, float sc,
-                     Texture2D thumb, bool flip, const char *name, Color tint) {
+                     const char *name, Color tint) {
     Rectangle row = { area.x, y, area.width, rowH };
     bool hot = CheckCollisionPointRec(GetMousePosition(), row);
     if (hot) DrawRectangleRec(row, (Color){ 40, 46, 56, 255 });
     float th = rowH - 4 * sc;
     Rectangle dst = { area.x + 2 * sc, y + 2 * sc, th, th };
-    if (thumb.id) {
-        Rectangle srcR = { 0, 0, (float)thumb.width, flip ? -(float)thumb.height : (float)thumb.height };
-        DrawTexturePro(thumb, srcR, dst, (Vector2){ 0, 0 }, 0, WHITE);
-    } else {
-        DrawRectangleRec(dst, tint);
-    }
+    DrawRectangleRec(dst, tint);
     Eng_UiText(name, dst.x + th + 6 * sc, y + (rowH - 11 * sc) * 0.5f, 11, ENG_UI_TEXT);
     return hot && EdHost_PanelsInteractive(h) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
 }
@@ -317,17 +310,6 @@ static void PanelAssets(EdHost *h, Rectangle c, void *u) {
         g_assetFilterEdit = !g_assetFilterEdit;
     Rectangle area = { c.x, c.y + 22 * sc, c.width, c.height - 22 * sc };
 
-    // Pre-render model thumbnails with the panel scissor LIFTED. The host clips
-    // every panel draw to its content rect (edhost.c), and BeginTextureMode
-    // honours the active GL scissor — so rendering a thumbnail under that scissor
-    // clips the off-screen pass to the panel rect and produces an empty texture.
-    // Lift the host clip, render (EdThumb caches → one render per model), then
-    // restore it for the rest of this panel's drawing.
-    EndScissorMode();
-    for (int i = 0; i < ix->modelCount; i++)
-        if (ContainsCI(ix->models[i].name, g_assetFilter)) EdThumb_Model(ix->models[i].path, 64);
-    BeginScissorMode((int)c.x, (int)c.y, (int)c.width, (int)c.height);
-
     if (CheckCollisionPointRec(GetMousePosition(), area))
         g_assetsScroll -= GetMouseWheelMove() * rowH * 2.0f;
     static float prevTotal = 0;
@@ -337,7 +319,6 @@ static void PanelAssets(EdHost *h, Rectangle c, void *u) {
 
     BeginScissorMode((int)area.x, (int)area.y, (int)area.width, (int)area.height);
     float y = area.y - g_assetsScroll;
-    bool vis;   // a row at [y, y+rowH] overlaps the panel?
     #define ROW_VIS(hh) ((y + (hh) > area.y) && (y < area.y + area.height))
 
     // ---- Maps (click to open) ----
@@ -345,51 +326,9 @@ static void PanelAssets(EdHost *h, Rectangle c, void *u) {
     y += labelH;
     for (int i = 0; i < ix->mapCount; i++) {
         if (!ContainsCI(ix->maps[i].name, g_assetFilter)) continue;
-        vis = ROW_VIS(rowH);
-        if (vis && AssetRow(h, area, y, rowH, sc, (Texture2D){0}, false,
-                            ix->maps[i].name, (Color){ 90, 110, 150, 255 }))
+        if (ROW_VIS(rowH) && AssetRow(h, area, y, rowH, sc,
+                                      ix->maps[i].name, (Color){ 90, 110, 150, 255 }))
             RequestOpenMap(h, ix->maps[i].path);
-        y += rowH;
-    }
-
-    // ---- Models (browse-only preview) ----
-    // These are raw engine models from models/*.glb (characters, viewmodels,
-    // test rigs) — NOT placeable props. A prop is resolved as
-    // props/<id>/<id>.glb from a props/*.prop catalog entry (collision, tint,
-    // scale included), so arming a bare model stem here would place a "prop"
-    // that has no def and renders as a placeholder box. Place props from the
-    // catalog-driven Props palette above instead; this section is for browsing.
-    if (ROW_VIS(labelH)) GuiLabel((Rectangle){ area.x, y, area.width, labelH }, "Models");
-    y += labelH;
-    for (int i = 0; i < ix->modelCount; i++) {
-        if (!ContainsCI(ix->models[i].name, g_assetFilter)) continue;
-        vis = ROW_VIS(rowH);
-        if (vis) {
-            // Only render a (one-time) thumbnail when the row is actually on
-            // screen, so off-screen models never pay the render cost.
-            Texture2D t = EdThumb_Model(ix->models[i].path, 64);
-            if (AssetRow(h, area, y, rowH, sc, t, true, ix->models[i].name,
-                         (Color){ 70, 80, 70, 255 }))
-                EdHost_Log(h, ED_LOG_INFO, "model: %s (not a placeable prop — use the Props palette)",
-                           ix->models[i].name);
-        }
-        y += rowH;
-    }
-
-    // ---- Textures (browse-only preview) ----
-    if (ROW_VIS(labelH)) GuiLabel((Rectangle){ area.x, y, area.width, labelH }, "Textures");
-    y += labelH;
-    for (int i = 0; i < ix->textureCount; i++) {
-        if (!ContainsCI(ix->textures[i].name, g_assetFilter)) continue;
-        vis = ROW_VIS(rowH);
-        if (vis) {
-            Texture2D t = {0};
-            Texture2D *tp = Eng_TextureGet(Eng_LoadTexture(ix->textures[i].path));
-            if (tp) t = *tp;
-            if (AssetRow(h, area, y, rowH, sc, t, false, ix->textures[i].name,
-                         (Color){ 80, 70, 70, 255 }))
-                EdHost_Log(h, ED_LOG_INFO, "texture: %s", ix->textures[i].name);
-        }
         y += rowH;
     }
 

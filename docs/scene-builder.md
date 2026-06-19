@@ -30,8 +30,9 @@ loaded `.so` files in `./plugins`) extend it through the identical surface. See 
 > click a map to open it; models/textures are browse-only, props place from the Props
 > palette); the left column is now just
 > the HIERARCHY. There's also a **material mode** (`M`): textured floors/walls/obstacles/
-> props instead of proxy boxes (§5.7). Not yet: lighting in material mode (it draws unlit —
-> see §5.7) and copy-on-import of stock library assets into the game folder. See §5.
+> props instead of proxy boxes, now lit by a default editor lighting state (§5.7). A
+> **Play Test** action (`Ctrl+R`) saves and launches the game on the current map. Not yet:
+> copy-on-import of stock library assets into the game folder. See §5.
 
 > **Related docs.** This is the canonical reference for how the editor works today.
 > For *where it's going*: [editor-content-extensibility.md](editor-content-extensibility.md)
@@ -219,6 +220,7 @@ adds/removes from a multi-selection (the move gizmo then drags the whole set rig
 (an in-scene clipboard, repeated pastes fan out); **F** focuses the view on the selection;
 **M** toggles material mode (textured geometry vs proxy boxes, §5.7); **G** shows/hides the
 grid (independent of snapping — the grid can be hidden while snap stays on);
+**Ctrl+R** play-tests the map (save + launch the game on it);
 **Ctrl+Z / Ctrl+Y** undo / redo. Selection/drag is suppressed while a camera button
 (RMB/MMB) is held so navigation clicks don't double as edits. Rotate/scale drags
 coalesce into one undo step under a drag tag, exactly like translate. The document
@@ -231,7 +233,8 @@ The shell wraps the viewport in a Unity-style frame, all built by the `menus` / 
 `statusbar` / `maptools` built-in plugins:
 
 - **Menu bar** (top): **File** (New, Open… `Ctrl+O`, Save `Ctrl+S`, Save As…, recent
-  maps, a **Game project ▸** flyout with New/Open Game, Reload, Exit — see below), **Edit**
+  maps, **Play Test** `Ctrl+R`, a **Game project ▸** flyout with New/Open Game, Reload,
+  Exit — see below), **Edit**
   (Undo/Redo/Delete, enabled-state aware, **Preferences…**), **View** (Fly/Iso/Top with a
   check on the active one, Show grid (`G`), Snap to grid, a **Gizmo mode ▸** flyout:
   Move/Rotate/Scale),
@@ -372,7 +375,7 @@ Small, independently shippable steps; none blocks the game.
 6. ~~**Rotate / scale** drag~~ **Done** — gizmo modes 2/3 drag PROPs via
    `Eng_SetYaw` / `Eng_SetScale` (using the gizmo's `rotateRadians` / per-axis `scale`),
    coalesced under a drag tag like translate.
-7. ~~**Real scene rendering**~~ **Done (unlit)** — an additive **`M` "material mode"**
+7. ~~**Real scene rendering**~~ **Done (lit)** — an additive **`M` "material mode"**
    (`s->materialMode`, runtime-only, default OFF, proxy path unchanged) draws actual
    textured geometry in `EdScene_DrawViewport`: sector floors via `Eng_DrawTexturedFloorV`,
    walls/obstacles as `Eng_DrawTexturedBoxV` sized from their proxy boxes, props via
@@ -383,11 +386,16 @@ Small, independently shippable steps; none blocks the game.
    validation outlines stay drawn over both modes. *(Foundation, earlier: `Eng_DrawTextured*`
    were lifted out of the game's `render.c` into `gfx.{c,h}` taking a raw `Texture2D*` +
    `tileSize`, so the editor needs no `assets.h`.)*
-   **Remaining:** it draws **unlit** — the editor calls `Eng_RenderLoad` but never
-   `Eng_RenderSetLighting`, so wrapping in `Eng_RenderBeginWorld`/`EndWorld` would yield
-   black geometry; pushing a default editor lighting state to get the fog/sun shader is the
-   follow-up. A later `libgame_edbridge.so` plugin could register game-specific draws (perk
-   machines, wallbuys) for full parity without touching the editor binary.
+   **Lighting:** `editor_main` now calls `Eng_RenderLoad` once after the window opens (the
+   world/skinned shaders resolve from `library/shaders`; a missing shader degrades to unlit
+   gracefully), and `DrawMaterialWorld` pushes a fixed **bright editor lighting state**
+   (high ambient, fog pushed far past any editor map — deliberately not the game's night fog)
+   via `Eng_RenderSetLighting` and wraps the draws in `Eng_RenderBeginWorld`/`EndWorld`. The
+   immediate-mode floor/wall/obstacle draws pick up the bound world shader automatically;
+   prop **models** are stamped with `Eng_RenderWorldShader()` per draw (DrawModel uses the
+   per-material shader, not the batch shader) so they're lit too. A later
+   `libgame_edbridge.so` plugin could register game-specific draws (perk machines, wallbuys)
+   for full parity without touching the editor binary.
 7b. ~~**Asset browser**~~ **Done** — the **ASSETS** panel (`edassets.{c,h}` index +
    `edthumb.{c,h}` thumbnails) lists the overlay's maps/models/textures with a filter and
    opens a map on click (via the unsaved-changes guard); models/textures are browse-only
@@ -396,6 +404,14 @@ Small, independently shippable steps; none blocks the game.
    thumbnail pre-render lifts the scissor (`EndScissorMode`/restore) around it. Still
    future: drag-to-place props, texture-slot assignment from a texture click, and
    copy-on-import of stock assets into the game folder ([game-projects.md](game-projects.md)).
+7c. ~~**Play Test launch**~~ **Done** — `File ▸ Play Test` / **`Ctrl+R`** saves the current
+   map then `posix_spawn`s the game binary (resolved next to the editor binary via
+   `GetApplicationDirectory`) on it, detached (SIGCHLD ignored → auto-reaped) so the editor
+   keeps running. `EdScene_PlayTest` is the one entry point (menu + hotkey both call it);
+   untitled scratch maps are refused. The seam holds: the editor hands the game a **path
+   string**, never a header. Game side (`src/game/`): `main.c` treats a positional `.map`
+   arg as a boot map and `GameMod_Init` calls the new `Menu_StartSoloOnMap`, dropping
+   straight into solo play on it instead of the menu.
 8. **Docking polish** — tabbed panels + drag-to-rearrange + saved layouts (today's zones
    are fixed-position, splitter-resizable).
 9. **Packaging** — keep the standalone `editor` binary; later, optionally embed the same

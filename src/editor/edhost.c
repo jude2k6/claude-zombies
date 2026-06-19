@@ -578,6 +578,12 @@ void EdHost_Frame(EdHost *h, int W, int H) {
         else
             EdHost_Log(h, ED_LOG_ERROR, "save FAILED: %s", h->scene->path);
     }
+    // Ctrl+R: play test — save + launch the game on the current map (detached).
+    if (ctrl && IsKeyPressed(KEY_R)) {
+        char m[256];
+        bool ok = EdScene_PlayTest(h->scene, m, sizeof m);
+        EdHost_Log(h, ok ? ED_LOG_INFO : ED_LOG_ERROR, "%s", m);
+    }
     if (ctrl && (IsKeyPressed(KEY_EQUAL) || IsKeyPressed(KEY_KP_ADD)))
         h->scene->uiScale = (h->scene->uiScale + 0.1f > 3.0f) ? 3.0f : h->scene->uiScale + 0.1f;
     if (ctrl && (IsKeyPressed(KEY_MINUS) || IsKeyPressed(KEY_KP_SUBTRACT)))

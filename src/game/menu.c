@@ -151,11 +151,15 @@ void Menu_ToggleFullscreenSafe(void) {
     fullscreen = IsWindowFullscreen();
 }
 
-void Menu_StartSoloGame(void) {
+// Start a solo game. mapPath == NULL uses the menu's selected map; otherwise the
+// given file is loaded directly (the editor's Play Test boot path, which hands a
+// map that may not be in the scanned list).
+static void StartSolo(const char *mapPath) {
     netMode = NET_SOLO;
     localPlayerIdx = 0;
     for (int i = 0; i < NET_MAX_PLAYERS; i++) memset(&g_world.players[i], 0, sizeof g_world.players[i]);
-    LoadSelectedMap();
+    if (mapPath) { if (!Level_LoadFromFile(mapPath)) Level_Build(); }
+    else         LoadSelectedMap();
     Level_Reset();
     Player_ResetForGame(0, playerName);
     PowerUps_ClearAll();
@@ -169,6 +173,9 @@ void Menu_StartSoloGame(void) {
     roundBreakTimer = 3.0f;
     uiState = UI_PLAY;
 }
+
+void Menu_StartSoloGame(void)              { StartSolo(NULL); }
+void Menu_StartSoloOnMap(const char *path) { StartSolo(path); }
 
 void Menu_StartHosting(void) {
     if (!Net_InitHost(NET_PORT_DEFAULT)) {

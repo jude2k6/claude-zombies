@@ -37,6 +37,10 @@
 static float snapshotAccum = 0.0f;
 static float inputAccum    = 0.0f;
 
+// A .map path passed on the CLI (e.g. the editor's Play Test): boot straight
+// into solo play on it instead of the menu. Empty = normal menu start.
+static char s_bootMap[512] = "";
+
 // ---- Post-FX state ---------------------------------------------------------
 // hitFlash: spikes to 1.0 when the local player's HP drops in a single frame
 // (damage taken), then decays over ~0.35 s. Does NOT trigger on HP gains
@@ -218,6 +222,10 @@ static void GameMod_Init(void) {
     camera.up         = (Vector3){ 0.0f, 1.0f,  0.0f };
     camera.fovy       = fovSetting;
     camera.projection = CAMERA_PERSPECTIVE;
+
+    // Boot map (a .map path on the CLI, e.g. the editor's Play Test): skip the
+    // menu and drop straight into solo play on that map.
+    if (s_bootMap[0]) Menu_StartSoloOnMap(s_bootMap);
 }
 
 static void GameMod_Frame(float dt, int sw, int sh) {
@@ -535,6 +543,17 @@ int main(int argc, char **argv) {
     // handled in devtools.c. Each mode exits without opening the game window.
     int devExitCode = 0;
     if (Devtools_HandleCLI(argc, argv, &devExitCode)) return devExitCode;
+
+    // A positional .map path (e.g. the editor's Play Test) boots straight into
+    // solo play on it — GameMod_Init reads s_bootMap after the window is up.
+    for (int i = 1; i < argc; i++) {
+        const char *a = argv[i];
+        size_t n = strlen(a);
+        if (a[0] != '-' && n > 4 && strcmp(a + n - 4, ".map") == 0) {
+            snprintf(s_bootMap, sizeof s_bootMap, "%s", a);
+            break;
+        }
+    }
 
     EngConfig cfg = { .w = WINDOW_W_DEFAULT, .h = WINDOW_H_DEFAULT, .title = "Claude Zombies",
                       .vsync = true, .msaa4x = true, .resizable = true, .fpsCap = 60 };

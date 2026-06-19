@@ -18,18 +18,18 @@
 > **4.6 Inline Validation Indicators** (red proxy outlines, live), and
 > **3.1 Place All Entity Kinds** (the PLACE palette now covers every `EngMapEntKind`,
 > grouped Spawns / Geometry / Buyables; walls are two-click, the rest drop-and-snap).
-> **2.4 Game-Accurate Textured Rendering** shipped (unlit) — the `M` "material mode"
-> toggle draws textured floors/walls/obstacles/props; see [scene-builder.md](scene-builder.md)
-> §5.7. Also shipped:
+> **2.4 Game-Accurate Textured Rendering** shipped (now **lit**) — the `M` "material mode"
+> toggle draws textured floors/walls/obstacles/props under a default editor lighting state;
+> see [scene-builder.md](scene-builder.md) §5.7. Also shipped:
 > **5.3 Asset Browser Panel** (the ASSETS panel — maps/models/textures from the content
 > overlay, model thumbnails, click-a-map-to-open; `edassets.{c,h}` + `edthumb.{c,h}` —
 > models are browse-only, props place from the Props palette). A later wave shipped
 > **1.3 Multi-Select** (Shift-click; box-select still open), **1.4 Copy / Paste / Duplicate**
 > (Ctrl+C/X/V/D + Ctrl+A select-all), **inspector per-surface texture override** (the `tex`
-> field on walls/obstacles, §2.4-adjacent), and **autosave + crash recovery** (§4.7). Still
-> open from the Top 5: **5.1 Play-Test Launch**. (Beyond the editor backlog, the
-> games-as-projects **New/Open Game** UI also shipped — see
-> [game-projects.md](game-projects.md) §8 / §10.)
+> field on walls/obstacles, §2.4-adjacent), and **autosave + crash recovery** (§4.7). Then
+> **5.1 Play-Test Launch** (`Ctrl+R` — save + spawn the game on the current map) closed out
+> the Top 5. (Beyond the editor backlog, the games-as-projects **New/Open Game** UI also
+> shipped — see [game-projects.md](game-projects.md) §8 / §10.)
 
 ---
 
@@ -231,7 +231,7 @@ around" to "one keystroke" — exactly what Krunker's community map-making workf
 
 ---
 
-### 2.4 Game-Accurate Textured Rendering — ✅ SHIPPED (unlit)
+### 2.4 Game-Accurate Textured Rendering — ✅ SHIPPED (lit)
 Replace proxy boxes with actual sector floor/wall/obstacle/prop geometry rendered with the
 map's textures, behind an additive **`M` "material mode"** toggle (proxy path stays the
 default). Shipped in `EdScene_DrawViewport` — no content-registry hook was needed after all,
@@ -243,11 +243,14 @@ itself via `Eng_LoadTextureByName` from `doc.textures`, and loads prop models vi
 **Why it matters:** Placing entities relative to grey boxes is disorienting; placing them
 relative to the actual rendered floor/walls matches the player's experience.
 
-**Still open:** it draws **unlit** — the editor never calls `Eng_RenderSetLighting`, so the
-fog/sun world shader (`Eng_RenderBeginWorld`) would render black; pushing a default editor
-lighting state is the follow-up. And game-specific draws (perk machines, wallbuys rendered
-as their real models) would still want the `libgame_edbridge.so` plugin path for full
-parity — see [scene-builder.md](scene-builder.md) §5.7.
+**Lighting — ✅ SHIPPED (the former "still open"):** `editor_main` now calls `Eng_RenderLoad`
+once after the window opens, and `DrawMaterialWorld` pushes a fixed **bright editor lighting
+state** (high ambient, fog pushed far past any editor map) via `Eng_RenderSetLighting` and
+wraps the draws in `Eng_RenderBeginWorld`/`EndWorld`. Floor/wall/obstacle (immediate-mode)
+draws pick up the bound world shader automatically; prop models are stamped with
+`Eng_RenderWorldShader()` per draw so they're lit too. **Still open:** game-specific draws
+(perk machines, wallbuys rendered as their real models) would want the `libgame_edbridge.so`
+plugin path for full parity — see [scene-builder.md](scene-builder.md) §5.7.
 
 **Per-surface texture override — ✅ SHIPPED (companion to the above):** the Inspector now
 has a **`tex`** text field for `WALL` and `OBSTACLE` (walls previously had no inspector
@@ -522,20 +525,22 @@ here so the audit file could be retired (full audit + resolution log is in git):
 
 ## 5. Pipeline / Integration
 
-### 5.1 Play-Test the Map in the Game ("Launch Game")
-`File > Play Test` (or `Ctrl+R`) saves the current map then launches the game binary
-(`./shooter data/maps/<current>.map` or equivalent) as a child process. On exit the
-editor regains focus.
+### 5.1 Play-Test the Map in the Game ("Launch Game") — ✅ SHIPPED
+`File > Play Test` (`Ctrl+R`) saves the current map then launches the game binary on it as a
+detached child; the editor keeps running.
+
+**As built:** `EdScene_PlayTest` (one entry point — the menu item and the `Ctrl+R` global
+shortcut both call it) saves, resolves the game binary next to the editor binary via
+`GetApplicationDirectory()`, and `posix_spawn`s it with the map path as argv. `SIGCHLD` is
+set to `SIG_IGN` so finished play-tests are auto-reaped (no zombies) and the spawn never
+blocks the frame loop. Untitled scratch maps are refused (no on-disk file to hand the game).
+Game side: `src/game/main.c` treats a positional `.map` arg as a **boot map**, and
+`GameMod_Init` calls the new `Menu_StartSoloOnMap`, dropping straight into solo play on it
+instead of the menu. (POSIX-only for now; a Windows `CreateProcess` branch is the port.)
 
 **Why it matters:** The entire point of the editor is to make maps for the game. Every
 iteration cycle that requires "save, switch terminal, run game, quit, switch back" costs
-30 seconds of friction. A one-keystroke launch path cuts that to 5 seconds. This is how
-Krunker's in-game editor works (the distinction is packaging, not architecture — see
-`engine-layers.md §5`).
-
-**Effort:** S–M — on Linux/macOS this is `fork`+`execvp`; on Windows `CreateProcess`.
-The current `--check` headless mode in the editor binary is a similar lifecycle pattern.
-No new engine code needed; this is purely editor-side `posix_spawn` or equivalent.
+30 seconds of friction. A one-keystroke launch path cuts that to 5 seconds.
 
 **Seam:** The editor launches the game as a separate OS process — no include dependency,
 just a string path. Clean.
@@ -674,9 +679,15 @@ base `EngMapEntKind` enum.
 
 ---
 
-## Top 5 to Do Next
+## Top 5 to Do Next — ✅ ALL SHIPPED
 
-These are the five features that should ship before any others, ranked by the ratio of
+> The original Top 5 are all done: **#1 Editable Inspector**, **#2 Rotate/Scale Drag**,
+> **#3 Focus on Selection**, **#4 Place All Entity Kinds**, and **#5 Unsaved-Changes Guard +
+> Inline Validation** — plus the "surprise pick" **Play-Test Launch (5.1)**. The list below
+> is kept as the original rationale. For the *next* wave, pull from the medium backlog
+> (§1.5–§1.7, §2.2–§2.3, §3.2/§3.4/§3.5, §4.1/§4.3/§4.4) or the plugin seams (§6).
+
+These were the five features ranked by the ratio of
 (editing friction removed) / (implementation cost), with the Krunker north-star as the
 tiebreaker.
 
@@ -716,9 +727,8 @@ Technically already in the Top 5, but worth restating: **four lines of code, imm
 daily impact on every editing session**. If only one feature ships this sprint, make it
 this one.
 
-### Surprise high-value / low-effort pick: Play-Test Launch (5.1)
-Launching `./shooter <current_map>` as a child process is a `posix_spawn` call and a
-menu item — maybe 50 lines total including error handling. It collapses the edit/test
-cycle from a 30-second context switch to a single keystroke. In terms of perceived
-editor quality, nothing else at S effort comes close to the visceral "I pressed a button
-and my map is running" moment.
+### Surprise high-value / low-effort pick: Play-Test Launch (5.1) — ✅ SHIPPED
+Launching `shooter <current_map>` as a detached child turned out to be exactly the
+`posix_spawn` + menu-item it was predicted to be (plus a small game-side boot-map path). It
+collapses the edit/test cycle from a 30-second context switch to a single keystroke
+(`Ctrl+R`) — the visceral "I pressed a button and my map is running" moment. See §5.1.

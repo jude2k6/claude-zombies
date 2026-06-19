@@ -419,6 +419,15 @@ static void a_reload(EdHost *h, void *u) {
     else                       EdHost_Log(h, ED_LOG_ERROR, "reload FAILED: %s", path);
 }
 
+// Play Test: save + launch the game on the current map (detached child). Same
+// logic backs the Ctrl+R global shortcut in edhost.c.
+static void a_playtest(EdHost *h, void *u) {
+    (void)u;
+    char m[256];
+    bool ok = EdScene_PlayTest(EdHost_Scene(h), m, sizeof m);
+    EdHost_Log(h, ok ? ED_LOG_INFO : ED_LOG_ERROR, "%s", m);
+}
+
 static void a_exit(EdHost *h, void *u) {
     (void)u;
     if (EdHost_Scene(h)->dirty) { g_pending = PEND_EXIT; EdHost_SetModal(h, DirtyGuardModal, NULL); }
@@ -632,6 +641,7 @@ static void a_help_controls(EdHost *h, void *u) {
     EdHost_Log(h, ED_LOG_INFO, "Select: click   Shift+click add/remove   Ctrl+A all   move gizmo drags the set");
     EdHost_Log(h, ED_LOG_INFO, "Fly: RMB+WASDQE (Shift fast)   Ortho: RMB orbit / MMB pan / wheel zoom");
     EdHost_Log(h, ED_LOG_INFO, "Edit: Ctrl+Z undo / Ctrl+Y redo / Ctrl+S save   Ctrl+D dup / Ctrl+C copy / Ctrl+X cut / Ctrl+V paste");
+    EdHost_Log(h, ED_LOG_INFO, "File: Ctrl+O open / Ctrl+R play test (save + launch the game on this map)");
 }
 static void a_help_about(EdHost *h, void *u) {
     (void)u;
@@ -643,13 +653,15 @@ static void RegisterMenus(EdHost *h) {
     Recents_Load(EdHost_Scene(h)->cfg);
 
     // File menu:
-    //   New / Open... / Save / Save As... / ─ / [map recents] / ─ /
+    //   New / Open... / Save / Save As... / ─ / Play Test / ─ / [map recents] / ─ /
     //   New Game... / Open Game... / ─ / [game recents] / ─ /
     //   Reload / Exit
     EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="File", .label="New",        .onClick=a_new });
     EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="File", .label="Open...",    .shortcut="Ctrl+O", .onClick=a_open });
     EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="File", .label="Save",       .shortcut="Ctrl+S", .onClick=a_save });
     EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="File", .label="Save As...", .onClick=a_save_as });
+    EdHost_AddMenuSeparator(h, "File");
+    EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="File", .label="Play Test",  .shortcut="Ctrl+R", .onClick=a_playtest });
     EdHost_AddMenuSeparator(h, "File");
     // (map recents appear here via the dynamic hook — registered below)
     EdHost_AddMenuSeparator(h, "File");

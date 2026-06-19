@@ -279,6 +279,9 @@ bool EdScene_Save(EdScene *s);               // MapDoc_Save → s->path; clears 
 bool EdScene_Open(EdScene *s, const char *path);  // load a different map (resets history)
 void EdScene_New(EdScene *s);                // reset to a fresh empty document
 bool EdScene_SaveAs(EdScene *s, const char *path); // set path then Save; returns success
+// Save then launch the game on the current map as a detached child (Play Test).
+// Writes a result string into msg; returns whether the game launched.
+bool EdScene_PlayTest(EdScene *s, char *msg, int cap);
 
 // ---- autosave / crash recovery ---------------------------------------------
 // Autosave writes "<path>.autosave" while the document is dirty (every

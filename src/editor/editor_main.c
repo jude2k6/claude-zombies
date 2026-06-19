@@ -17,6 +17,7 @@
 #include "app.h"
 #include "ui.h"
 #include "cfg.h"
+#include "eng_render.h"   // Eng_RenderLoad — world shader for material-mode lighting
 #include "mapdoc.h"
 #include "content.h"   // Eng_ResolveAssetPath
 
@@ -89,6 +90,7 @@ static void EnterEditorForGame(const char *gameDir) {
 static void EdInit(void) {
     if (s_scene.uiScale <= 0.0f) s_scene.uiScale = Eng_UiRecommendedScale();  // 0 = absent in cfg
     Eng_UiApplyTheme();
+    Eng_RenderLoad();   // world/skinned shaders for material mode (graceful no-op if missing)
 
     if (s_editing) EnterEditor();                              // explicit map / --shot
     else           EdLauncher_Init(&s_launcher, &s_cfg, s_scene.uiScale);
@@ -140,6 +142,7 @@ static void EdDraw(int w, int h) {
 }
 
 static void EdShutdown(void) {
+    Eng_RenderUnloadPostFX();             // release the postFX RT (shaders freed at exit)
     if (!s_editing || !s_host) return;   // quit straight from the launcher: nothing to persist
     EdScene_SaveSettings(&s_scene, &s_cfg);   // persist tweaks made this session
     EdHost_Destroy(s_host);

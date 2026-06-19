@@ -17,6 +17,10 @@
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
+#include <spawn.h>     // posix_spawn — Play Test launches the game as a child
+#include <signal.h>    // SIG_IGN SIGCHLD — auto-reap finished play-test children
+
+extern char **environ;  // pass the editor's environment to the spawned game
 
 #define ED_WALL_H    3.0f   // assumed wall height for drawing/picking
 #define ED_MARKER    0.6f   // half-size of point-entity markers (spawn/perk/…)
@@ -1068,6 +1072,43 @@ bool EdScene_SaveAs(EdScene *s, const char *path) {
     return EdScene_Save(s);
 }
 
+// ---- play test -------------------------------------------------------------
+
+// Save the current map, then launch the game binary on it as a detached child
+// so the editor keeps running (the game boots straight into solo play on the
+// passed map — see src/game/main.c). The seam stays intact: we hand the game a
+// path string and never include a game header. Writes a human-readable result
+// into msg (success OR the reason it failed); returns whether the game launched.
+bool EdScene_PlayTest(EdScene *s, char *msg, int cap) {
+    if (!EdHasRealPath(s)) {                       // untitled scratch has no on-disk map
+        snprintf(msg, (size_t)cap, "play test: save the map first (untitled)");
+        return false;
+    }
+    if (!EdScene_Save(s)) {                        // play the latest edits
+        snprintf(msg, (size_t)cap, "play test: save FAILED: %s", s->path);
+        return false;
+    }
+    // The game binary sits next to the editor binary (same build/install dir).
+    char exe[1024];
+    snprintf(exe, sizeof exe, "%sshooter", GetApplicationDirectory());  // trailing slash incl.
+    if (!FileExists(exe)) {
+        snprintf(msg, (size_t)cap, "play test: game binary not found at %s", exe);
+        return false;
+    }
+    // Detach: ignore SIGCHLD so the finished child is auto-reaped (no zombies),
+    // then posix_spawn without waiting so the editor's frame loop is unblocked.
+    signal(SIGCHLD, SIG_IGN);
+    char *const argv[] = { exe, s->path, NULL };
+    pid_t pid;
+    int rc = posix_spawn(&pid, exe, NULL, NULL, argv, environ);
+    if (rc != 0) {
+        snprintf(msg, (size_t)cap, "play test: launch failed (errno %d)", rc);
+        return false;
+    }
+    snprintf(msg, (size_t)cap, "play test: launched on %s", s->path);
+    return true;
+}
+
 // ---- per-frame viewport ----------------------------------------------------
 
 void EdScene_UpdateViewport(EdScene *s, Rectangle vp, bool inputAllowed) {
@@ -1227,6 +1268,14 @@ static void DrawMatProps(EdScene *s) {
         EngModel mh = Eng_LoadModel(relPath);
         Model *m = Eng_ModelGet(mh);
         if (m && m->meshCount > 0) {
+            // Stamp the world shader onto the model's materials so props get the
+            // same fog/sun lighting as the immediate-mode floor/wall draws (which
+            // pick up the bound shader automatically). DrawModel uses the per-
+            // material shader, not the rlgl batch shader, so this is required.
+            if (Eng_RenderWorldShaderLoaded()) {
+                Shader ws = Eng_RenderWorldShader();
+                for (int k = 0; k < m->materialCount; k++) m->materials[k].shader = ws;
+            }
             // Yaw around Y axis (prop uses degrees).
             Vector3 axis  = { 0.0f, 1.0f, 0.0f };
             Vector3 scale = { p->scale, p->scale, p->scale };
@@ -1241,11 +1290,12 @@ static void DrawMatProps(EdScene *s) {
     }
 }
 
-// Draw the textured world geometry (material mode). We use unlit draws (no
-// Eng_RenderBeginWorld) because the editor calls Eng_RenderLoad at startup
-// but never calls Eng_RenderSetLighting, so the shader uniform state is
-// uninitialised and would produce black geometry.  Unlit textured draws are
-// correct and readable in the editor; adding lighting is a future polish step.
+// Push a fixed, bright editor lighting state and bind the world shader so the
+// material-mode draws get the same fog/sun/ambient program the game uses. The
+// editor calls Eng_RenderLoad once at startup (editor_main); when the shader is
+// missing the begin/end pair is a graceful no-op and the draws stay unlit but
+// correct. Unlike the game's night fog, these defaults are deliberately bright
+// (high ambient, fog pushed far past any editor map) so geometry reads clearly.
 static void DrawMaterialWorld(EdScene *s) {
     const MapDocTextures *tx = &s->doc.textures;
 
@@ -1253,10 +1303,20 @@ static void DrawMaterialWorld(EdScene *s) {
     Texture2D *floorTex = MatTex(tx->floor[0]   ? tx->floor    : "floor_concrete");
     Texture2D *wallTex  = MatTex(tx->wall_ext[0] ? tx->wall_ext : "wall_brick");
 
+    Eng_RenderSetLighting((EngLighting){
+        .sunDir       = (Vector3){ -0.35f, -0.88f, -0.32f },  // shader normalises
+        .sunColor     = (Vector3){ 1.00f,  0.98f,  0.92f },
+        .ambientColor = (Vector3){ 0.45f,  0.47f,  0.52f },   // high → no black faces
+        .fogColor     = (Color){ 18, 20, 26, 255 },           // matches the viewport clear
+        .fogStart     = 200.0f,                               // editor maps are small;
+        .fogEnd       = 2000.0f,                              // keep fog effectively off
+    });
+    Eng_RenderBeginWorld();
     DrawMatSectors(s, floorTex);
     DrawMatWalls(s, wallTex);
     DrawMatObstacles(s, wallTex);
     DrawMatProps(s);
+    Eng_RenderEndWorld();
 }
 
 // ---- per-frame draw --------------------------------------------------------

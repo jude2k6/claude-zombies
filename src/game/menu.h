@@ -34,6 +34,7 @@ void Menu_ScanMaps(void);
 void Menu_ToggleFullscreenSafe(void);
 
 void Menu_StartSoloGame(void);
+void Menu_StartSoloOnMap(const char *path);   // boot straight into solo on a given map (editor Play Test)
 void Menu_StartHosting(void);
 void Menu_StartHostedGame(void);
 void Menu_StartConnecting(void);

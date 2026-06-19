@@ -940,6 +940,63 @@ static void DrawSectorHandles(EdScene *s) {
     }
 }
 
+// ---- ramp visualization ----------------------------------------------------
+// Draw every RAMP sector's inclined surface as a wireframe (perimeter + slope
+// rungs) plus an uphill arrow, so ramps read as sloped in the viewport instead
+// of looking like a flat sector. Mirrors the game's interpolation (level.c
+// DocSectorY): axis 1 rises along +X, axis 2 along +Z; the -axis edge is yLow,
+// the +axis edge yHigh. The selected ramp draws brighter.
+static void DrawRampOverlay(EdScene *s) {
+    const MapDoc *d = &s->doc;
+    for (int i = 0; i < d->sectorCount; i++) {
+        const MapDocSector *sc = &d->sectors[i];
+        if (sc->kind != SECTOR_RAMP) continue;
+
+        float minX = sc->x - sc->sx * 0.5f, maxX = sc->x + sc->sx * 0.5f;
+        float minZ = sc->z - sc->sz * 0.5f, maxZ = sc->z + sc->sz * 0.5f;
+        bool  axisX = (sc->rampAxis != 2);   // default/1 = +X, 2 = +Z
+        if ((axisX ? sc->sx : sc->sz) < 1e-4f) continue;   // degenerate rise → skip (no div0)
+        bool  sel   = EdScene_IsSelected(s, sc->id);
+        Color col   = sel ? (Color){ 255, 210, 120, 255 } : (Color){ 235, 150, 40, 255 };
+
+        // Surface height at a footprint point (clamped t, like the game).
+        #define RAMP_Y(px, pz) (sc->yLow + (sc->yHigh - sc->yLow) * \
+            (axisX ? ((px) - minX) / sc->sx : ((pz) - minZ) / sc->sz))
+
+        Vector3 c00 = { minX, RAMP_Y(minX, minZ), minZ };
+        Vector3 c10 = { maxX, RAMP_Y(maxX, minZ), minZ };
+        Vector3 c11 = { maxX, RAMP_Y(maxX, maxZ), maxZ };
+        Vector3 c01 = { minX, RAMP_Y(minX, maxZ), maxZ };
+        Eng_GfxDrawLine3D(c00, c10, col);  Eng_GfxDrawLine3D(c10, c11, col);
+        Eng_GfxDrawLine3D(c11, c01, col);  Eng_GfxDrawLine3D(c01, c00, col);
+
+        // Slope rungs (constant-height lines) at 1/4, 1/2, 3/4 up the rise.
+        for (int r = 1; r <= 3; r++) {
+            float t = r * 0.25f;
+            if (axisX) {
+                float px = minX + sc->sx * t, py = sc->yLow + (sc->yHigh - sc->yLow) * t;
+                Eng_GfxDrawLine3D((Vector3){ px, py, minZ }, (Vector3){ px, py, maxZ }, col);
+            } else {
+                float pz = minZ + sc->sz * t, py = sc->yLow + (sc->yHigh - sc->yLow) * t;
+                Eng_GfxDrawLine3D((Vector3){ minX, py, pz }, (Vector3){ maxX, py, pz }, col);
+            }
+        }
+
+        // Uphill arrow along the rise centre line (low edge → high edge).
+        Vector3 base = axisX ? (Vector3){ minX, sc->yLow,  sc->z } : (Vector3){ sc->x, sc->yLow,  minZ };
+        Vector3 tip  = axisX ? (Vector3){ maxX, sc->yHigh, sc->z } : (Vector3){ sc->x, sc->yHigh, maxZ };
+        Eng_GfxDrawLine3D(base, tip, col);
+        Vector3 dir  = Vector3Normalize(Vector3Subtract(tip, base));
+        Vector3 side = Vector3Normalize(Vector3CrossProduct(dir, (Vector3){ 0, 1, 0 }));
+        float   hl   = fminf(2.0f, fminf(sc->sx, sc->sz) * 0.18f);
+        Vector3 back = Vector3Scale(dir, -hl);
+        Eng_GfxDrawLine3D(tip, Vector3Add(tip, Vector3Add(back, Vector3Scale(side,  hl * 0.6f))), col);
+        Eng_GfxDrawLine3D(tip, Vector3Add(tip, Vector3Add(back, Vector3Scale(side, -hl * 0.6f))), col);
+
+        #undef RAMP_Y
+    }
+}
+
 // ---- mob catalog scan (data/mobs/*/*.mob via the shared deffile reader) -----
 
 // Accumulator for one .mob file: we read only the editor-relevant fields.
@@ -1555,6 +1612,9 @@ void EdScene_DrawViewport(EdScene *s, Rectangle vp) {
 
     // Edge-resize handles for the selected sector (when no placement tool armed).
     DrawSectorHandles(s);
+
+    // Ramp slope wireframe + uphill arrow for every RAMP sector.
+    DrawRampOverlay(s);
 
     Eng_DebugDraw3D(s->cam);
     Eng_GfxEndMode3D();

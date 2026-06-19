@@ -39,6 +39,7 @@ void EdScene_LoadSettings(EdScene *s, EngCfg *cfg) {
     s->viewOrthoH         = EngCfg_Float(cfg, "view.orthoHeight", 40.0f);
     s->gridSpacing        = EngCfg_Float(cfg, "grid.spacing",   1.0f);
     s->gridSlices         = EngCfg_Int  (cfg, "grid.slices",    80);
+    s->gridVisible        = EngCfg_Bool (cfg, "grid.visible",   true);
     s->snapEnabled        = EngCfg_Bool (cfg, "grid.snap",      false);
     s->snapStep           = EngCfg_Float(cfg, "grid.snapStep",  1.0f);
     s->barricadeAutoSpawn = EngCfg_Bool (cfg, "edit.barricadeAutoSpawn", true);
@@ -70,6 +71,7 @@ void EdScene_PutSettingKeys(const EdScene *s, FILE *f) {
     EngCfg_PutFloat(f, "view.orthoHeight", s->viewOrthoH);
     EngCfg_PutFloat(f, "grid.spacing",  s->gridSpacing);
     EngCfg_PutInt  (f, "grid.slices",   s->gridSlices);
+    EngCfg_PutBool (f, "grid.visible",  s->gridVisible);
     EngCfg_PutBool (f, "grid.snap",     s->snapEnabled);
     EngCfg_PutFloat(f, "grid.snapStep", s->snapStep);
     EngCfg_PutBool (f, "edit.barricadeAutoSpawn", s->barricadeAutoSpawn);
@@ -1087,6 +1089,7 @@ void EdScene_UpdateViewport(EdScene *s, Rectangle vp, bool inputAllowed) {
         if (IsKeyPressed(KEY_THREE)) s->mode = ENG_GIZMO_SCALE;
 
         if (IsKeyPressed(KEY_M)) s->materialMode = !s->materialMode;
+        if (IsKeyPressed(KEY_G)) s->gridVisible = !s->gridVisible;
         if (IsKeyPressed(KEY_P)) {
             // Cancel any pending two-click wall when cycling away from WALL.
             s->wallPending = false;
@@ -1269,7 +1272,7 @@ void EdScene_DrawViewport(EdScene *s, Rectangle vp) {
     BeginTextureMode(s->vpTex);
     ClearBackground((Color){ 18, 20, 26, 255 });
     Eng_GfxBeginMode3D(s->cam);
-    Eng_GfxDrawGrid(s->gridSlices, s->gridSpacing);
+    if (s->gridVisible) Eng_GfxDrawGrid(s->gridSlices, s->gridSpacing);
 
     if (s->materialMode) {
         // Material mode: textured geometry instead of flat proxy boxes.

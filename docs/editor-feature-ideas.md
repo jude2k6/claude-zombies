@@ -22,9 +22,13 @@
 > toggle draws textured floors/walls/obstacles/props; see [scene-builder.md](scene-builder.md)
 > §5.7. Also shipped:
 > **5.3 Asset Browser Panel** (the ASSETS panel — maps/models/textures from the content
-> overlay, model thumbnails, click-a-map-to-open, click-a-model-to-place; `edassets.{c,h}`
-> + `edthumb.{c,h}`). Still open from the Top 5: **5.1 Play-Test Launch**. (Beyond the
-> editor backlog, the games-as-projects **New/Open Game** UI also shipped — see
+> overlay, model thumbnails, click-a-map-to-open; `edassets.{c,h}` + `edthumb.{c,h}` —
+> models are browse-only, props place from the Props palette). A later wave shipped
+> **1.3 Multi-Select** (Shift-click; box-select still open), **1.4 Copy / Paste / Duplicate**
+> (Ctrl+C/X/V/D + Ctrl+A select-all), **inspector per-surface texture override** (the `tex`
+> field on walls/obstacles, §2.4-adjacent), and **autosave + crash recovery** (§4.7). Still
+> open from the Top 5: **5.1 Play-Test Launch**. (Beyond the editor backlog, the
+> games-as-projects **New/Open Game** UI also shipped — see
 > [game-projects.md](game-projects.md) §8 / §10.)
 
 ---
@@ -68,12 +72,21 @@ already exist in `mapedit.h`. Two pages of code in `edscene.c`.
 
 ---
 
-### 1.3 Multi-Select (box-select + Shift-click)
+### 1.3 Multi-Select (Shift-click) — ✅ SHIPPED (box-select still open)
 Hold Shift and click to add/remove from a selection set; drag an empty area to rubber-band
 select all entities whose proxy AABBs intersect the 2D screen rectangle. Store
 `selectedId[]` array instead of a single `selectedId` int. Move/delete/cycle all operate
 on the set; gizmo shows at the centroid and translates all selected entities by the same
 delta.
+
+**As built:** `EdScene` now carries `selIds[]/selCount`; `selectedId` is the PRIMARY
+(gizmo pivot + inspector target, the last-added member). `EdScene_SelectClick(id, additive)`
+drives Shift-click in both the viewport and the Hierarchy panel; `Ctrl+A` =
+`EdScene_SelectAll`. The move gizmo snapshots each member's start pos at grab and translates
+the whole set by the primary's snapped delta (rigid group move, relative layout preserved).
+Delete operates on the set. Two **divergences** from the sketch: the gizmo pivots on the
+primary (not a computed centroid), and **rubber-band box-select is not done** — selection is
+click + Shift-click only. Rotate/scale still act on the primary alone.
 
 **Why it matters:** Real map editing is never one entity at a time. Placing a cluster of
 mob spawns, moving a row of obstacles, or deleting a whole wing of a map all require
@@ -90,12 +103,21 @@ support too.
 
 ---
 
-### 1.4 Copy / Paste / Duplicate
+### 1.4 Copy / Paste / Duplicate — ✅ SHIPPED
 `Ctrl+C` snapshots the selected entities' `MapDoc` data (positions, kinds, all fields)
 into an editor clipboard; `Ctrl+V` re-adds them via `EngMapEnt_Add` at a fixed offset
 from the original positions (e.g. +2 units X/Z) so they don't land exactly on top.
 `Ctrl+D` (duplicate-in-place) is copy+paste in one action. After paste, the new entities
 become the selection. All paste operations push one `EngMapHistory_Commit`.
+
+**As built:** `EdScene.clip[]` holds full entity structs (a per-kind union, absolute
+positions) so it never references live ids — cut-then-paste is safe. `Ctrl+C/X/V` =
+copy/cut/paste, `Ctrl+D` = duplicate; the nudge is one grid cell when snapping (else 2
+units), and `clipPasteSeq` steps each paste so repeated pastes fan out instead of stacking.
+The new entities become the selection and the op commits once. The clone primitive lives in
+the engine as `EngMapEnt_Clone` (used by duplicate); paste re-adds + copies the stored
+struct with a re-minted id. Walls offset both endpoints; all other kinds use `Eng_SetPos`.
+Also added: Edit-menu items + `Delete`-key binding alongside `X`.
 
 **Why it matters:** Community map-making lives and dies by copy/paste. Hallways, repeated
 rooms, symmetric layouts — all require it. This is table-stakes for any level editor.
@@ -226,6 +248,13 @@ fog/sun world shader (`Eng_RenderBeginWorld`) would render black; pushing a defa
 lighting state is the follow-up. And game-specific draws (perk machines, wallbuys rendered
 as their real models) would still want the `libgame_edbridge.so` plugin path for full
 parity — see [scene-builder.md](scene-builder.md) §5.7.
+
+**Per-surface texture override — ✅ SHIPPED (companion to the above):** the Inspector now
+has a **`tex`** text field for `WALL` and `OBSTACLE` (walls previously had no inspector
+fields at all). It reads/writes the `MapDoc` `TEX` field via the engine accessors
+`Eng_Get/SetSurfaceTex`; a blank string clears the override so the surface falls back to the
+map's `wall_ext` slot. Material mode already honoured `texName` when drawing — this removes
+the forced hand-edit of the `.map` text that was the only way to set it before.
 
 ---
 
@@ -450,6 +479,21 @@ already used for gizmos.
 
 ---
 
+### 4.7 Autosave + Crash Recovery — ✅ SHIPPED
+Periodically write a recovery copy of the document while it is dirty, and offer to restore
+it after a crash. **As built:** `EdScene_AutosaveTick` (called once per frame from
+`editor_main`) writes `<map>.autosave` every `ED_AUTOSAVE_SECS` (30s) of dirty edit-time;
+a clean manual save (`EdScene_Save`) deletes the file, so the on-disk map stays
+authoritative. On load, if a `<map>.autosave` is newer than the map itself,
+`EdBuiltins_RecoveryGuard` (also per-frame, idempotent per path → covers initial load *and*
+mid-session Open) raises a **RECOVER UNSAVED WORK** modal with Restore / Discard.
+`untitled.map` (the unsaved scratch name) is never autosaved or recovered. Helpers:
+`EdScene_RecoveryAvailable / RestoreRecovery / DiscardRecovery`.
+
+**Seam:** No constraint — `EdScene` + raylib FS (`GetFileModTime`/`FileExists`) only.
+
+---
+
 ### 4.x Residual layout polish (from the 2026-06-18 layout audit)
 
 The layout audit's P0/P1 findings were fixed (placement-only Tools panel, menu
@@ -520,8 +564,9 @@ A right-zone panel listing the available assets: maps, models (GLB), textures �
 from the **content overlay** (`Eng_ContentDirs`, game-over-library), not a hardcoded
 `data/` path. Implemented as `edassets.{c,h}` (the de-duped index, held on `EdScene`) +
 the `PanelAssets` built-in + `edthumb.{c,h}` (off-screen GLB thumbnail cache). Click a map
-to open it (through the unsaved-changes guard); click a model to arm prop placement with
-`name` = the file stem; per-model thumbnails render off-screen and cache.
+to open it (through the unsaved-changes guard); models/textures are browse-only previews
+(props place from the catalog-backed Props palette), with per-model thumbnails rendered
+off-screen and cached.
 
 > **Implementation note worth keeping:** the host wraps every panel `draw` in a
 > `BeginScissorMode` (edhost.c). `BeginTextureMode` honours the active GL scissor, so an
@@ -529,18 +574,19 @@ to open it (through the unsaved-changes guard); click a model to arm prop placem
 > an empty texture. `PanelAssets` pre-renders thumbnails with the scissor **lifted**
 > (`EndScissorMode` → render → restore), before its own list draw.
 
-Still future (the literal-doc wishlist beyond what shipped): true **drag**-to-place (today
-it is click-to-arm, reusing the prop tool), texture-slot assignment from a texture click,
+Still future (the literal-doc wishlist beyond what shipped): true **drag**-to-place props
+(today the Props palette is click-to-arm), texture-slot assignment from a texture click,
 and a copy-on-import action (stock library asset → game folder, the
 [game-projects.md](game-projects.md) overlay's writable side).
 
-**Known seam gap — model-as-prop:** clicking a Models row stamps `prop.name` = the model
-file stem, but the game only renders props whose name resolves in the `.prop` catalog
-(`Props_IndexByName`); an unmatched name is **silently skipped at game load** (`level.c`:
-"unknown prop — skipping"), so a raw `.glb` with no `.prop` previews in the editor but
-vanishes in-game. Resolve by scaffolding a `.prop` on placement, restricting the Models
-section to catalog-backed models, or a game-side raw-model fallback. (The catalog **Props**
-palette section is unaffected — those always render.)
+**Resolved — model-as-prop seam gap:** an earlier build let a Models-row click stamp
+`prop.name` = the model file stem, which the game **silently skipped at load** when no
+matching `.prop` existed (`Props_IndexByName`; `level.c`: "unknown prop — skipping"). This
+is now closed by **restricting placement to catalog-backed props**: the Models section is
+**browse-only** (clicking just logs a hint pointing at the Props palette), so the only way
+to place a prop is the catalog **Props** palette section — which always resolves and always
+renders in-game. Raw-`.glb` placement (scaffold a `.prop` on drop, or a game-side raw-model
+fallback) remains a possible future convenience, not a correctness gap.
 
 **Why it matters:** Currently the only asset navigation is via the native file picker.
 An in-editor browser keeps the author's hands in the tool, is filterable/searchable, and

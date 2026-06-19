@@ -187,6 +187,7 @@ typedef struct EdScene {
     float         viewOrthoH;
     float         gridSpacing;
     int           gridSlices;
+    bool          gridVisible;   // draw the grid? (independent of snapEnabled)
     bool          snapEnabled;
     float         snapStep;
     bool          barricadeAutoSpawn;

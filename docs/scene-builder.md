@@ -27,7 +27,8 @@ loaded `.so` files in `./plugins`) extend it through the identical surface. See 
 > Wallbuys/Perks scanned from content catalogs), submenu support, and a dynamic plugin
 > loader, plus an **ASSETS panel** that hosts both those placement tools and an asset
 > browser (maps/models/textures scanned from the content overlay, with model thumbnails —
-> click a map to open it, click a model to place it as a prop); the left column is now just
+> click a map to open it; models/textures are browse-only, props place from the Props
+> palette); the left column is now just
 > the HIERARCHY. There's also a **material mode** (`M`): textured floors/walls/obstacles/
 > props instead of proxy boxes (§5.7). Not yet: lighting in material mode (it draws unlit —
 > see §5.7) and copy-on-import of stock library assets into the game folder. See §5.
@@ -175,12 +176,14 @@ error.
 The **Tools** menu carries two map utilities (a built-in plugin, `maptools`):
 
 - **Settings…** — a modal dialog: camera speeds/sensitivity, default view + FOV + zoom,
-  grid spacing/extent, **grid snapping** (toggle + step; snaps both ground placement and
-  gizmo drags), barricade auto-spawn, undo depth, and window/vsync/FPS (applied on
-  restart). Persisted to **`editor.cfg`** via the engine's `cfg.{c,h}` key=value helper —
+  grid spacing/extent, **grid visibility** (`Show grid` / **`G`** — hide the grid without
+  affecting snapping), **grid snapping** (toggle + step; snaps both ground placement and
+  gizmo drags, independent of grid visibility), barricade auto-spawn, undo depth, and
+  window/vsync/FPS (applied on restart). Persisted to **`editor.cfg`** via the engine's `cfg.{c,h}` key=value helper —
   searched from the CWD like the game's `settings.cfg`, loaded before the window opens,
   and saved on demand or at shutdown. `ui.scale` falls back to the display recommendation
-  when absent. (`View ▸ Snap to grid` toggles snapping straight from the menu.)
+  when absent. (`View ▸ Snap to grid` toggles snapping and `View ▸ Show grid` / `G` toggles
+  grid visibility straight from the menu — the two are independent.)
 - **Validate map** — runs `MapDoc_Validate` and prints each issue to the **Console**
   panel (errors red, warnings gold). The same check backs `--check`.
 
@@ -208,13 +211,19 @@ and the gizmo work unchanged under it because `Eng_PickRayFromScreen`
 (`GetScreenToWorldRayEx`) builds a correct ray for an ortho camera, and handle sizing
 switches from distance-based (fly) to zoom-based (ortho).
 
-**Editing controls (all views):** **LMB** select or drag a gizmo handle; **1/2/3**
-switch gizmo mode — translate drags any entity, **rotate/scale drag PROPs** (the only
-kind with a yaw/scale, per `mapedit.h`); **F** focuses the view on the selection;
-**M** toggles material mode (textured geometry vs proxy boxes, §5.7);
+**Editing controls (all views):** **LMB** select or drag a gizmo handle; **Shift+LMB**
+adds/removes from a multi-selection (the move gizmo then drags the whole set rigidly);
+**Ctrl+A** selects all; **1/2/3** switch gizmo mode — translate drags any entity,
+**rotate/scale drag PROPs** (the only kind with a yaw/scale, per `mapedit.h`); **X** or
+**Delete** removes the selection; **Ctrl+D** duplicates it, **Ctrl+C/X/V** copy/cut/paste
+(an in-scene clipboard, repeated pastes fan out); **F** focuses the view on the selection;
+**M** toggles material mode (textured geometry vs proxy boxes, §5.7); **G** shows/hides the
+grid (independent of snapping — the grid can be hidden while snap stays on);
 **Ctrl+Z / Ctrl+Y** undo / redo. Selection/drag is suppressed while a camera button
 (RMB/MMB) is held so navigation clicks don't double as edits. Rotate/scale drags
-coalesce into one undo step under a drag tag, exactly like translate.
+coalesce into one undo step under a drag tag, exactly like translate. The document
+**autosaves** to `<map>.autosave` every 30 s while dirty; a newer autosave than the map
+on load raises a **Recover unsaved work** prompt (Restore / Discard).
 
 ### The IDE frame (menu bar, panels, status bar)
 
@@ -224,7 +233,8 @@ The shell wraps the viewport in a Unity-style frame, all built by the `menus` / 
 - **Menu bar** (top): **File** (New, Open… `Ctrl+O`, Save `Ctrl+S`, Save As…, recent
   maps, a **Game project ▸** flyout with New/Open Game, Reload, Exit — see below), **Edit**
   (Undo/Redo/Delete, enabled-state aware, **Preferences…**), **View** (Fly/Iso/Top with a
-  check on the active one, Snap to grid, a **Gizmo mode ▸** flyout: Move/Rotate/Scale),
+  check on the active one, Show grid (`G`), Snap to grid, a **Gizmo mode ▸** flyout:
+  Move/Rotate/Scale),
   **Tools** (Validate map), **Help** (Controls, About — they print to the Console). Click
   a title to open; hover-switches between open menus; hovering a **`▸` item** opens its
   flyout submenu; click an item or click away to close. While a menu is open the viewport
@@ -267,16 +277,15 @@ registered once; recents change at runtime, hence the hook.)
     the View/Edit menus, and the Settings dialog, never here.)*
   - **Asset browser**: the content overlay's maps / models / textures (scanned at load into
     `EdScene.assets` by `edassets.{c,h}`, de-duped game-over-library) — **click a map to open
-    it** (through the same unsaved-changes guard as `File ▸ Open`), **click a model to arm
-    prop placement** with that model's name, with a thumbnail per model rendered off-screen
-    by `edthumb.{c,h}` (textures preview-only for now).
-    > **Caveat:** a model placed this way stamps `prop.name` = the model's file stem. The
-    > game resolves that against the `.prop` catalog (`Props_IndexByName`) at load — a prop
-    > whose name has **no matching `.prop`** is placeable + previews in the editor (and in
-    > material mode, §5.7) but is **silently skipped in the actual game** (`level.c`: "unknown
-    > prop — skipping"). Place from the **Props** palette section (catalog-backed) for props
-    > guaranteed to render in-game; resolving this seam (scaffold a `.prop`, or a game-side
-    > raw-model fallback) is open — see [editor-feature-ideas.md](editor-feature-ideas.md) §5.3.
+    it** (through the same unsaved-changes guard as `File ▸ Open`); **models and textures are
+    browse-only previews**, each with a thumbnail per model rendered off-screen by
+    `edthumb.{c,h}`.
+    > **Why models don't place:** props are placed only from the catalog-backed **Props**
+    > palette section, which always resolves against the `.prop` catalog (`Props_IndexByName`)
+    > and is therefore guaranteed to render in-game. Arming a *raw* model stem here would stamp
+    > a `prop.name` with no matching `.prop`, which `level.c` **silently skips at game load**
+    > ("unknown prop — skipping") — so clicking a Models row only logs a hint pointing you at
+    > the Props palette. Texture-slot assignment from a texture click is still future.
   - The **filter box** at the top is a global asset search: while it has text the placement
     tools are hidden and the maps/models/textures lists narrow to matches.
 - **Bottom zone**: **CONSOLE** — log output (plugin loads, save/validate results, Help),
@@ -380,12 +389,13 @@ Small, independently shippable steps; none blocks the game.
    follow-up. A later `libgame_edbridge.so` plugin could register game-specific draws (perk
    machines, wallbuys) for full parity without touching the editor binary.
 7b. ~~**Asset browser**~~ **Done** — the **ASSETS** panel (`edassets.{c,h}` index +
-   `edthumb.{c,h}` thumbnails) lists the overlay's maps/models/textures with a filter,
-   opens a map on click (via the unsaved-changes guard), and arms prop placement from a
-   model. Thumbnails render off-screen; note the host clips every panel draw, so the
+   `edthumb.{c,h}` thumbnails) lists the overlay's maps/models/textures with a filter and
+   opens a map on click (via the unsaved-changes guard); models/textures are browse-only
+   previews (props place from the catalog-backed Props palette, not by arming a raw model
+   stem). Thumbnails render off-screen; note the host clips every panel draw, so the
    thumbnail pre-render lifts the scissor (`EndScissorMode`/restore) around it. Still
-   future: drag-to-place (vs click-to-arm), texture-slot assignment, and copy-on-import of
-   stock assets into the game folder ([game-projects.md](game-projects.md)).
+   future: drag-to-place props, texture-slot assignment from a texture click, and
+   copy-on-import of stock assets into the game folder ([game-projects.md](game-projects.md)).
 8. **Docking polish** — tabbed panels + drag-to-rearrange + saved layouts (today's zones
    are fixed-position, splitter-resizable).
 9. **Packaging** — keep the standalone `editor` binary; later, optionally embed the same

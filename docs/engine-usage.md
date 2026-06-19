@@ -377,6 +377,8 @@ Eng_SetYaw(&doc, id, deg); Eng_SetScale(&doc, id, s);   // prop; obstacle/sector
 Eng_SetSpawnMob(&doc, id, "ZOMBIE");              // spawn tag: "PLAYER" or any mob name
 Eng_SetWindowDir(&doc, id, "-z");                 // barricade facing (+x/-x/+z/-z)
 Eng_SetSector(&doc, id, sectorIdx);               // owning sector — REQUIRED before save (see below)
+Eng_SetSurfaceTex(&doc, id, "wall_brick");        // per-surface TEX override (wall/obstacle; "" clears)
+int copy = EngMapEnt_Clone(&doc, id);             // same-kind copy, fresh id (editor duplicate/paste)
 EngMapEnt_Delete(&doc, id);                        // compacts the array; fixes sector index refs
 
 EngMapHistory h; EngMapHistory_Init(&h, ENGMAPHISTORY_DEFAULT_DEPTH);
@@ -395,8 +397,10 @@ custom edits.
 Field mutators are per-kind (each returns false for the wrong kind): `Eng_Set/GetPos`
 (all kinds), `Eng_Set/GetYaw` + `Eng_Set/GetScale` (prop), `Eng_Set/GetObstacleSize`,
 `Eng_Set/GetSectorSize` + `Eng_Set/GetSectorHeights`, `Eng_Set/GetSpawnMob` (spawn),
-`Eng_Set/GetWindowDir` (window), and `Eng_Set/GetSector` (every placed kind except
-SECTOR). **Save gotcha:** `MapDoc_Save` only emits entities *inside a SECTOR block* —
+`Eng_Set/GetWindowDir` (window), `Eng_Set/GetSurfaceTex` (wall/obstacle TEX override; ""
+clears), and `Eng_Set/GetSector` (every placed kind except SECTOR). `EngMapEnt_Clone`
+appends a same-kind copy with a fresh id (source untouched) — the duplicate/paste
+primitive. **Save gotcha:** `MapDoc_Save` only emits entities *inside a SECTOR block* —
 the `.map` grammar has no ungrouped entities — so an entity left at `sectorId == -1`
 (the `EngMapEnt_Add` default) is **silently dropped on save**. Always `Eng_SetSector`
 anything you add to a real sector (e.g. the one under the cursor).

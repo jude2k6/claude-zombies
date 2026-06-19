@@ -294,9 +294,11 @@ cursor** (fallback sector 0), since `.map` has no ungrouped entities (`Eng_SetSe
 
 A parallel registry. **Shipped:** the editor **scans the content overlay for maps, models
 (`.glb`) and textures** (`edassets.{c,h}` → `EdScene.assets`, game-over-library de-duped)
-and shows an **ASSETS browser** panel; adding an asset = drop a file in the folder. Clicking
-a model arms prop placement with that model's name (written into `prop.name`); models show an
-off-screen thumbnail (`edthumb.{c,h}`); see [scene-builder.md](scene-builder.md) §"IDE frame"
+and shows an **ASSETS browser** panel; adding an asset = drop a file in the folder. Models and
+textures are **browse-only previews** there (props place from the catalog-backed Props
+palette, not by arming a raw model stem — an unmatched `prop.name` is silently skipped at game
+load); models show an off-screen thumbnail (`edthumb.{c,h}`); see
+[scene-builder.md](scene-builder.md) §"IDE frame"
 + §5.7b. Material mode (§5.7) renders those assets in the viewport via the engine asset-load
 APIs, so the browser and game-accurate rendering converge on the same asset path.
 
@@ -333,7 +335,8 @@ copy-on-import of stock library assets into the game folder.
    Tier-2 `.so` no-rebuild path is wired and ready to validate with a sample plugin.
    **Asset browser + picker** ~~is still open~~ **landed** — the ASSETS panel
    (`edassets.{c,h}` overlay scan + `edthumb.{c,h}` model thumbnails) browses maps/models/
-   textures, opens a map on click, and arms prop placement from a model; see
+   textures and opens a map on click; models/textures are browse-only (props place from the
+   catalog-backed Props palette, not a raw model stem); see
    [scene-builder.md](scene-builder.md) §5.7b and [editor-feature-ideas.md](editor-feature-ideas.md) §5.3.
 6. ~~**Prop catalog (the second def slice, after mobs)**~~ **Done** — `props/<id>/<id>.prop`
    files (deffile format: `id`, `name`, `model`, `model_scale`, `collide_half`, `foot_y`)

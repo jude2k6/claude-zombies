@@ -314,6 +314,7 @@ static bool q_view_fly(EdHost *h, void *u) { (void)u; return EdHost_Scene(h)->vi
 static bool q_view_iso(EdHost *h, void *u) { (void)u; return EdHost_Scene(h)->view == ED_VIEW_ORBIT; }
 static bool q_view_top(EdHost *h, void *u) { (void)u; return EdHost_Scene(h)->view == ED_VIEW_TOP; }
 static bool q_snap    (EdHost *h, void *u) { (void)u; return EdHost_Scene(h)->snapEnabled; }
+static bool q_grid    (EdHost *h, void *u) { (void)u; return EdHost_Scene(h)->gridVisible; }
 static bool q_giz_move (EdHost *h, void *u) { (void)u; return EdHost_Scene(h)->mode == ENG_GIZMO_TRANSLATE; }
 static bool q_giz_rot  (EdHost *h, void *u) { (void)u; return EdHost_Scene(h)->mode == ENG_GIZMO_ROTATE; }
 static bool q_giz_scale(EdHost *h, void *u) { (void)u; return EdHost_Scene(h)->mode == ENG_GIZMO_SCALE; }
@@ -619,13 +620,14 @@ static void a_view_fly(EdHost *h, void *u) { (void)u; EdScene_SwitchView(EdHost_
 static void a_view_iso(EdHost *h, void *u) { (void)u; EdScene_SwitchView(EdHost_Scene(h), ED_VIEW_ORBIT); }
 static void a_view_top(EdHost *h, void *u) { (void)u; EdScene_SwitchView(EdHost_Scene(h), ED_VIEW_TOP); }
 static void a_snap(EdHost *h, void *u)     { (void)u; EdScene *s = EdHost_Scene(h); s->snapEnabled = !s->snapEnabled; }
+static void a_grid(EdHost *h, void *u)     { (void)u; EdScene *s = EdHost_Scene(h); s->gridVisible = !s->gridVisible; }
 static void a_giz_move (EdHost *h, void *u) { (void)u; EdHost_Scene(h)->mode = ENG_GIZMO_TRANSLATE; }
 static void a_giz_rot  (EdHost *h, void *u) { (void)u; EdHost_Scene(h)->mode = ENG_GIZMO_ROTATE; }
 static void a_giz_scale(EdHost *h, void *u) { (void)u; EdHost_Scene(h)->mode = ENG_GIZMO_SCALE; }
 
 static void a_help_controls(EdHost *h, void *u) {
     (void)u;
-    EdHost_Log(h, ED_LOG_INFO, "View: F1 fly / F2 iso / F3 top   Gizmo: 1 move 2 rot 3 scale");
+    EdHost_Log(h, ED_LOG_INFO, "View: F1 fly / F2 iso / F3 top   Gizmo: 1 move 2 rot 3 scale   G show/hide grid");
     EdHost_Log(h, ED_LOG_INFO, "Place: P cycle tool, click ground   R retag/rotate   X/Del delete");
     EdHost_Log(h, ED_LOG_INFO, "Select: click   Shift+click add/remove   Ctrl+A all   move gizmo drags the set");
     EdHost_Log(h, ED_LOG_INFO, "Fly: RMB+WASDQE (Shift fast)   Ortho: RMB orbit / MMB pan / wheel zoom");
@@ -680,6 +682,7 @@ static void RegisterMenus(EdHost *h) {
     EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="View", .label="Isometric camera", .shortcut="F2", .onClick=a_view_iso, .checked=q_view_iso });
     EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="View", .label="Top-down camera",  .shortcut="F3", .onClick=a_view_top, .checked=q_view_top });
     EdHost_AddMenuSeparator(h, "View");
+    EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="View", .label="Show grid",    .shortcut="G", .onClick=a_grid, .checked=q_grid });
     EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="View", .label="Snap to grid", .onClick=a_snap, .checked=q_snap });
     // Gizmo mode (audit P1-B): menu-discoverable counterpart to keys 1/2/3, now
     // that the panel toggle is gone.
@@ -910,9 +913,10 @@ static void PanelHierarchy(EdHost *h, Rectangle c, void *u) {
 // The editor's single content surface (the left column is just HIERARCHY now).
 // Top: the PLACEMENT tools (DrawPlaceTools — Select / Spawns / Geometry / Props /
 // Wallbuys / Perks). Below: a scrollable index of the content overlay
-// (EdScene.assets) — click a MAP to open it (via the unsaved-changes guard),
-// click a MODEL to arm prop placement with that model's name, TEXTURES are
-// browse-only previews; models/textures show a thumbnail (EdThumb_Model / the
+// (EdScene.assets) — click a MAP to open it (via the unsaved-changes guard);
+// MODELS and TEXTURES are browse-only previews (props are placed from the
+// catalog-backed Props palette, not by arming a raw model stem), and
+// models/textures show a thumbnail (EdThumb_Model / the
 // engine texture cache). Typing in the filter box is a global asset search: it
 // hides the placement tools and narrows the maps/models/textures lists.
 static float g_assetsScroll = 0;
@@ -1494,6 +1498,7 @@ static void SettingsModal(EdHost *h, Rectangle area, void *u) {
     OvSlider(X, W, &y, sc, "Grid spacing", &s->gridSpacing, 0.25f, 10, "%.2f");
     float slices = (float)s->gridSlices;
     OvSlider(X, W, &y, sc, "Grid extent",  &slices, 10, 400, "%.0f"); s->gridSlices = (int)slices;
+    OvCheck(X, &y, sc, " Show grid",    &s->gridVisible);
     OvCheck(X, &y, sc, " Snap to grid", &s->snapEnabled);
     OvSlider(X, W, &y, sc, "Snap step",    &s->snapStep, 0.1f, 10, "%.2f");
 
@@ -1554,7 +1559,8 @@ static void st_view(EdHost *h, char *out, int cap, void *u) {
     // here so the active transform mode (keys 1/2/3) stays discoverable.
     const char *g = s->mode == ENG_GIZMO_TRANSLATE ? "move"
                   : s->mode == ENG_GIZMO_ROTATE    ? "rotate" : "scale";
-    snprintf(out, cap, "view: %s  %s%s", v, g, s->snapEnabled ? "  snap" : "");
+    snprintf(out, cap, "view: %s  %s%s%s", v, g,
+             s->snapEnabled ? "  snap" : "", s->gridVisible ? "" : "  no-grid");
 }
 static void st_sel(EdHost *h, char *out, int cap, void *u) {
     (void)u; EdScene *s = EdHost_Scene(h);

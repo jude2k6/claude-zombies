@@ -252,6 +252,30 @@ static void ViewBasis(Vector3 fwd, Vector3 *right, Vector3 *up) {
     *up    = Vector3Normalize(Vector3CrossProduct(*right, fwd));
 }
 
+// Derive the raylib camera purely from view state (focus/orthoH/yaw/pitch/view),
+// no input. Shared by the interactive camera updates and the off-viewport path so
+// the camera always tracks focus/orthoH (frame-all, menu view-switch, --shot).
+static void DeriveCamera(EdScene *s) {
+    if (s->view == ED_VIEW_FLY) {
+        Vector3 fwd = ForwardFrom(s->yaw, s->pitch);
+        s->cam.target     = Vector3Add(s->cam.position, fwd);
+        s->cam.up         = (Vector3){ 0, 1, 0 };
+        s->cam.fovy       = s->viewFov;
+        s->cam.projection = CAMERA_PERSPECTIVE;
+        s->focus = Vector3Add(s->cam.position, Vector3Scale(fwd, 20.0f));
+    } else {
+        Vector3 fwd = (s->view == ED_VIEW_TOP) ? (Vector3){ 0, -1, 0 }
+                                               : ForwardFrom(s->yaw, s->pitch);
+        Vector3 right, up;
+        ViewBasis(fwd, &right, &up);
+        s->cam.position   = Vector3Subtract(s->focus, Vector3Scale(fwd, ED_ORBIT_DIST));
+        s->cam.target     = s->focus;
+        s->cam.up         = up;
+        s->cam.fovy       = s->orthoH;
+        s->cam.projection = CAMERA_ORTHOGRAPHIC;
+    }
+}
+
 void EdScene_SwitchView(EdScene *s, EdViewMode m) {
     if (m == s->view) return;
     if (m == ED_VIEW_FLY) {
@@ -308,11 +332,7 @@ static void UpdateCamFly(EdScene *s, float dt, Rectangle vp) {
     if (Vector3LengthSqr(move) > 1e-4f)
         s->cam.position = Vector3Add(s->cam.position, Vector3Scale(Vector3Normalize(move), speed * dt));
 
-    s->cam.target     = Vector3Add(s->cam.position, fwd);
-    s->cam.up         = up;
-    s->cam.fovy       = s->viewFov;
-    s->cam.projection = CAMERA_PERSPECTIVE;
-    s->focus = Vector3Add(s->cam.position, Vector3Scale(fwd, 20.0f));
+    DeriveCamera(s);
 }
 
 static void UpdateCamOrtho(EdScene *s, bool allowRotate) {
@@ -343,18 +363,21 @@ static void UpdateCamOrtho(EdScene *s, bool allowRotate) {
         if (s->orthoH > 400.0f) s->orthoH = 400.0f;
     }
 
-    s->cam.position   = Vector3Subtract(s->focus, Vector3Scale(fwd, ED_ORBIT_DIST));
-    s->cam.target     = s->focus;
-    s->cam.up         = up;
-    s->cam.fovy       = s->orthoH;
-    s->cam.projection = CAMERA_ORTHOGRAPHIC;
+    DeriveCamera(s);
 }
 
-static void EdUpdateCamera(EdScene *s, float dt, Rectangle vp) {
-    switch (s->view) {
-        case ED_VIEW_FLY:   UpdateCamFly(s, dt, vp);     break;
-        case ED_VIEW_ORBIT: UpdateCamOrtho(s, true);      break;
-        case ED_VIEW_TOP:   UpdateCamOrtho(s, false);     break;
+static void EdUpdateCamera(EdScene *s, float dt, Rectangle vp, bool allowInput) {
+    if (allowInput) {
+        switch (s->view) {
+            case ED_VIEW_FLY:   UpdateCamFly(s, dt, vp);  break;
+            case ED_VIEW_ORBIT: UpdateCamOrtho(s, true);  break;
+            case ED_VIEW_TOP:   UpdateCamOrtho(s, false); break;
+        }
+    } else {
+        // Mouse isn't driving the camera this frame, but still re-derive it from
+        // focus/orthoH/view so a frame-all or menu view-switch made off-viewport
+        // is reflected immediately (and so headless --shot framing works).
+        DeriveCamera(s);
     }
 }
 
@@ -739,6 +762,88 @@ static void DrawSectorHandles(EdScene *s) {
     }
 }
 
+// ---- wall endpoint handles -------------------------------------------------
+// Walls are two-point segments, so (unlike point entities) the translate gizmo
+// can only shift the whole wall. Endpoint handles — one cube per end — let each
+// vertex be dragged on the ground plane, mirroring the sector edge-handle flow.
+
+// Primary selection is a wall? Return its typed pointer (NULL if not / not found).
+static MapDocWall *SelectedWall(EdScene *s) {
+    if (s->selectedId < 0) return NULL;
+    EngMapEntKind k;
+    void *p = EngMapEnt_Ptr(&s->doc, EngMapEnt_Find(&s->doc, s->selectedId), &k);
+    return (p && k == ENGMAPENT_WALL) ? (MapDocWall *)p : NULL;
+}
+
+// The 2 endpoint-handle boxes, cubes of half-extent `half` at each end (y=0).
+static void WallHandleBoxes(const MapDocWall *w, float half, BoundingBox out[2]) {
+    Vector3 end[2] = { { w->x1, 0, w->z1 }, { w->x2, 0, w->z2 } };
+    for (int i = 0; i < 2; i++) {
+        out[i].min = (Vector3){ end[i].x - half, -half, end[i].z - half };
+        out[i].max = (Vector3){ end[i].x + half,  half, end[i].z + half };
+    }
+}
+
+// On press over a wall endpoint handle: begin an endpoint drag. Returns true if a
+// handle was hit (caller then skips selection-picking).
+static bool BeginWallEdit(EdScene *s) {
+    MapDocWall *w = SelectedWall(s);
+    if (!w) return false;
+    float half = SectorHandleHalf(s, 0.5f * (w->x1 + w->x2), 0.5f * (w->z1 + w->z2));
+    BoundingBox bb[2];
+    WallHandleBoxes(w, half, bb);
+    Ray ray = Eng_PickRayFromScreen(s->cam, s->vpMouse, s->vpW, s->vpH);
+    int best = -1; float bestT = 1e30f, t;
+    for (int i = 0; i < 2; i++)
+        if (Eng_PickRayAABB(ray, bb[i], &t) && t < bestT) { bestT = t; best = i; }
+    if (best < 0) return false;
+    s->wallVert = best;
+    s->dragTag = EdScene_NextTag(s);
+    s->wallEditing = true;
+    return true;
+}
+
+static void UpdateWallEdit(EdScene *s) {
+    MapDocWall *w = SelectedWall(s);
+    if (!w) { s->wallEditing = false; return; }
+    Vector3 g;
+    Ray ray = Eng_PickRayFromScreen(s->cam, s->vpMouse, s->vpW, s->vpH);
+    if (Eng_PickRayGroundY(ray, 0.0f, &g)) {
+        g.x = EdSnap(s, g.x); g.z = EdSnap(s, g.z);
+        if (s->wallVert == 0) { w->x1 = g.x; w->z1 = g.z; }
+        else                  { w->x2 = g.x; w->z2 = g.z; }
+        EngMapHistory_Commit(&s->hist, &s->doc, s->dragTag);
+        s->dirty = true;
+    }
+    if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) s->wallEditing = false;
+}
+
+// Draw the selected wall's endpoint handles (skipped while a placement tool is
+// armed). Highlights the hovered handle, or the active one mid-drag.
+static void DrawWallHandles(EdScene *s) {
+    if (s->placeTool != ED_PLACE_NONE) return;
+    MapDocWall *w = SelectedWall(s);
+    if (!w) return;
+    float half = SectorHandleHalf(s, 0.5f * (w->x1 + w->x2), 0.5f * (w->z1 + w->z2));
+    BoundingBox bb[2];
+    WallHandleBoxes(w, half, bb);
+    int hover = -1;
+    if (!s->wallEditing) {
+        Ray ray = Eng_PickRayFromScreen(s->cam, s->vpMouse, s->vpW, s->vpH);
+        float bestT = 1e30f, t;
+        for (int i = 0; i < 2; i++)
+            if (Eng_PickRayAABB(ray, bb[i], &t) && t < bestT) { bestT = t; hover = i; }
+    }
+    for (int i = 0; i < 2; i++) {
+        Color c = (s->wallEditing && i == s->wallVert) ? (Color){ 255, 255, 120, 255 }
+                : (i == hover)                          ? (Color){ 130, 235, 255, 255 }
+                :                                         (Color){ 210, 150, 90, 255 };
+        Vector3 ctr = Vector3Scale(Vector3Add(bb[i].min, bb[i].max), 0.5f);
+        Vector3 sz3 = Vector3Subtract(bb[i].max, bb[i].min);
+        Eng_GfxDrawCubeWiresV(ctr, sz3, c);
+    }
+}
+
 // ---- ramp visualization ----------------------------------------------------
 // Draw every RAMP sector's inclined surface as a wireframe (perimeter + slope
 // rungs) plus an uphill arrow, so ramps read as sloped in the viewport instead
@@ -814,6 +919,7 @@ void EdScene_Init(EdScene *s) {
     s->pitch  = -0.6f;
     s->focus  = (Vector3){ 0, 0, 0 };
     s->orthoH = s->viewOrthoH;
+    s->framePending = true;   // fit the camera to the startup map (deferred: needs vpW/vpH)
     EdScene_ClearSelection(s);
     s->mode = ENG_GIZMO_TRANSLATE;
     s->placeTool = ED_PLACE_NONE;
@@ -1012,11 +1118,14 @@ void EdScene_UpdateViewport(EdScene *s, Rectangle vp, bool inputAllowed) {
     // viewport is sized (vpW/vpH above), fit the camera to the map.
     if (s->framePending) EdScene_FrameAll(s);
 
+    // Always re-derive the camera (input-gated inside) so a frame-all or an
+    // off-viewport view switch is reflected even when the mouse isn't driving it.
+    EdUpdateCamera(s, dt, vp, inputAllowed);
+
     if (inputAllowed) {
         if (IsKeyPressed(KEY_F1)) EdScene_SwitchView(s, ED_VIEW_FLY);
         if (IsKeyPressed(KEY_F2)) EdScene_SwitchView(s, ED_VIEW_ORBIT);
         if (IsKeyPressed(KEY_F3)) EdScene_SwitchView(s, ED_VIEW_TOP);
-        EdUpdateCamera(s, dt, vp);
 
         if (IsKeyPressed(KEY_ONE))   s->mode = ENG_GIZMO_TRANSLATE;
         if (IsKeyPressed(KEY_TWO))   s->mode = ENG_GIZMO_ROTATE;
@@ -1087,7 +1196,7 @@ void EdScene_UpdateViewport(EdScene *s, Rectangle vp, bool inputAllowed) {
                 if (SelectedOrigin(s, &origin))
                     hot = Eng_GizmoHitTest(s->cam, s->vpMouse, s->vpW, s->vpH, origin, s->mode,
                                            GizmoHandleSize(s, origin));
-                if (hot == ENG_GIZMO_AXIS_NONE && !BeginSectorResize(s)) {
+                if (hot == ENG_GIZMO_AXIS_NONE && !BeginSectorResize(s) && !BeginWallEdit(s)) {
                     bool additive = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
                     PickSelection(s, additive);
                 }
@@ -1100,6 +1209,9 @@ void EdScene_UpdateViewport(EdScene *s, Rectangle vp, bool inputAllowed) {
     } else if (s->resizing) {
         if (inputAllowed && !camBusy) UpdateSectorResize(s);
         else                          s->resizing = false;   // focus/camera took over mid-drag
+    } else if (s->wallEditing) {
+        if (inputAllowed && !camBusy) UpdateWallEdit(s);
+        else                          s->wallEditing = false;
     } else {
         UpdateGizmo(s, inputAllowed && !camBusy && s->placeTool == ED_PLACE_NONE);
     }
@@ -1175,8 +1287,10 @@ void EdScene_DrawViewport(EdScene *s, Rectangle vp) {
         Eng_DebugBox(bb, (Color){ 90, 200, 255, 255 });
     }
 
-    // Edge-resize handles for the selected sector (when no placement tool armed).
+    // Edge-resize handles for the selected sector / endpoint handles for the
+    // selected wall (when no placement tool armed).
     DrawSectorHandles(s);
+    DrawWallHandles(s);
 
     // Ramp slope wireframe + uphill arrow for every RAMP sector.
     DrawRampOverlay(s);

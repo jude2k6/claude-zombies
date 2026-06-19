@@ -399,8 +399,23 @@ void PanelInspector(EdHost *h, Rectangle c, void *u) {
         }
 
     } else if (k == ENGMAPENT_WALL) {
-        // Walls carry only a per-surface texture override in the inspector;
-        // their geometry is edited by dragging the move gizmo / endpoints.
+        // Wall endpoints (x1,z1)–(x2,z2): editable here AND via the two viewport
+        // endpoint handles. The generic pos x/z block above moves the whole wall
+        // (its midpoint); these set one end. Written through the typed pointer.
+        MapDocWall *w = (MapDocWall *)EngMapEnt_Ptr(&s->doc,
+                            EngMapEnt_Find(&s->doc, s->selectedId), NULL);
+        if (w) {
+            float x1 = w->x1, z1 = w->z1, x2 = w->x2, z2 = w->z2;
+            bool c1 = InspFloatBox(h, X, W, &y, sc, "x1", &x1);
+            bool d1 = InspFloatBox(h, X, W, &y, sc, "z1", &z1);
+            bool c2 = InspFloatBox(h, X, W, &y, sc, "x2", &x2);
+            bool d2 = InspFloatBox(h, X, W, &y, sc, "z2", &z2);
+            if (c1 || d1 || c2 || d2) {
+                w->x1 = x1; w->z1 = z1; w->x2 = x2; w->z2 = z2;
+                EdHost_CommitEdit(h);
+            }
+            y += 4 * sc;
+        }
         InspTexField(h, s, X, W, &y, sc);
 
     } else if (k == ENGMAPENT_OBSTACLE) {

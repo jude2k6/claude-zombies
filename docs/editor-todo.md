@@ -47,18 +47,24 @@ Shipped: `PanelTools` in `ED_DOCK_LEFT` above HIERARCHY; Assets is browse-only.
 **2. Rotate/Scale gizmos silently no-op on most kinds.  [DONE]**
 Shipped: `EdScene_GizmoModeApplies` gates the gizmo draw + status-bar "(n/a)" hint.
 
-**3. Walls can't be edited at their vertices.  [High, bigger]**
-Sectors got edge handles (`DrawSectorHandles`/`BeginSectorResize` in edscene.c);
-walls did not. Only way to move a wall endpoint is the translate gizmo (moves the
-whole wall by its center). Inspector exposes only a texture field for walls.
-- `src/editor/edscene.c`: sector-handle pattern to mirror (`SectorHandleBoxes`,
-  `BeginSectorResize`, `UpdateSectorResize`, `DrawSectorHandles`).
-- `src/editor/panel_inspector.c`: wall branch (`k == ENGMAPENT_WALL`) — add
-  x1/z1/x2/z2 fields.
-- Wall endpoints live on `MapDocWall` (x1,z1,x2,z2); set via the typed pointer
-  like `edplace.c` PlaceAt's ED_PLACE_WALL case does.
-- This is the natural moment to extract `edgizmo.c` (the deferred split): pull
-  UpdateGizmo + sector-resize + new wall-handle code into one geometry-edit unit.
+**3. Walls can't be edited at their vertices.  [DONE]**
+Shipped: wall endpoint editing both ways. Viewport — two endpoint handles
+(`SelectedWall`/`WallHandleBoxes`/`BeginWallEdit`/`UpdateWallEdit`/`DrawWallHandles`
+in edscene.c, mirroring the sector edge-handle flow; new `s->wallEditing`/`wallVert`
+state). Inspector — `x1/z1/x2/z2` fields in the WALL branch (the generic pos x/z
+block still moves the whole wall). Verified via `--shot --select <id>`.
+DEFERRED: the `edgizmo.c` extraction — a large mechanical move of the interaction
+seam with no user-visible payoff, and its drag paths can't be regression-tested by
+the screenshot harness. Do it as a focused refactor when the seam next changes.
+
+**Camera fix (found while doing 3/6).** `EdUpdateCamera` was gated behind
+`inputAllowed`, so the camera froze at the `Init` pose whenever the mouse wasn't
+over the viewport — meaning frame-all (item 6) and off-viewport menu view-switches
+silently didn't apply, and `--shot` could never show framing. Split out
+`DeriveCamera` (pure derivation from focus/orthoH/view) and run it every frame;
+only the mouse-driven mutation stays gated. Also added a `--select <id>` CLI hook
+(with `--shot`) that preselects + frames an entity, so CI can verify
+selection-dependent UI (inspector, gizmo, edit handles).
 
 ### Tier 2 — medium, mostly cheap (several easier after the split)
 
@@ -115,8 +121,7 @@ Weak for a multi-floor engine. Same `DrawSectorHandles` cluster as item 3.
   on next Open (`SettingsModal` in edmenus.c; `EngMapHistory_Init` in edscene.c).
 
 ## Recommended order for a fresh session
-Items **1**, **2**, **4**, **5**, **6**, **7** are done. Remaining Tier 1/2 work:
-**3** (wall vertex editing, + the deferred `edgizmo.c` extraction) and **8**
-(vertical sector handles) — best done together in a dedicated geometry-editing
-session since both extend the same `DrawSectorHandles`/gizmo seam. After that,
-only the Tier 3 tail remains.
+Items **1**–**7** are done. Remaining: **8** (vertical sector height handle — no
+proven sibling to mirror, since sector-resize is ground-plane only; design a
+vertical drag axis à la the gizmo Y) and the Tier 3 tail. The `edgizmo.c`
+extraction (deferred under item 3) is the one larger refactor left.

@@ -151,6 +151,12 @@ typedef struct EdScene {
     int           resizeEdge;
     float         resizeFixed;
 
+    // Wall endpoint drag (selected wall only): wallVert 0 = endpoint (x1,z1),
+    // 1 = endpoint (x2,z2). The translate gizmo still moves the whole wall;
+    // these handles move one endpoint, mirroring the sector edge-handle flow.
+    bool          wallEditing;
+    int           wallVert;
+
     // Ramp link-pick mode: 0 = off, 1 = picking link A, 2 = picking link B. Armed
     // from the Inspector; the next viewport click on a sector sets that link on
     // the selected ramp. The Inspector reads/sets this directly on EdScene.

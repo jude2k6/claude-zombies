@@ -28,6 +28,7 @@
 #include "edproject.h"
 
 #include <stdio.h>
+#include <stdlib.h>   // atoi — --select <id>
 #include <string.h>
 
 // Single-document tool: one scene, one host. The GameModule vtable is plain
@@ -48,6 +49,7 @@ static bool       s_editing = false;
 static int  s_shotAt = -1;     // frame to capture on; -1 = normal interactive run
 static int  s_frame  = 0;
 static char s_shotPath[256];
+static int  s_selectId = -1;   // --select <id>: preselect this entity for the shot
 
 // Build the IDE shell for the map at s_scene.path (already set by the caller).
 // Factored out so it can run either at startup (explicit map / --shot) or in
@@ -118,6 +120,21 @@ static void EdDraw(int w, int h) {
             break;
         }
         return;
+    }
+
+    // --select: apply the preselection once, before the first frame is drawn, so
+    // the inspector / edit handles render for the capture. Also frame the entity
+    // up close (overriding the open-time frame-all) so its handles are legible.
+    static bool s_selectApplied = false;
+    if (s_selectId >= 0 && !s_selectApplied) {
+        EdScene_SelectClick(&s_scene, s_selectId, false);
+        float ex, ez;
+        if (Eng_GetPos(&s_scene.doc, s_selectId, &ex, &ez)) {
+            s_scene.focus = (Vector3){ ex, 0, ez };
+            s_scene.orthoH = 36.0f;
+            s_scene.framePending = false;
+        }
+        s_selectApplied = true;
     }
 
     EdBuiltins_RecoveryGuard(s_host);   // offer to restore a crash autosave on (re)load
@@ -210,6 +227,11 @@ int main(int argc, char **argv) {
             if      (strcmp(argv[i], "fly") == 0) viewOverride = (int)ED_VIEW_FLY;
             else if (strcmp(argv[i], "iso") == 0) viewOverride = (int)ED_VIEW_ORBIT;
             else if (strcmp(argv[i], "top") == 0) viewOverride = (int)ED_VIEW_TOP;
+        }
+        // --select <id>: preselect an entity by stable id (with --shot, lets CI
+        // verify selection-dependent UI — inspector fields, gizmo, edit handles).
+        else if (strcmp(argv[i], "--select") == 0 && i + 1 < argc) {
+            s_selectId = atoi(argv[++i]);
         }
         else { path = argv[i]; hasMapArg = true; }   // last non-flag arg = map path
     }

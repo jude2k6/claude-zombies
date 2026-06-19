@@ -260,6 +260,35 @@ bool Eng_SetWindowDir(MapDoc *doc, int id, const char *dir) {
     return true;
 }
 
+/* Address-of the texName field for the two kinds that carry one (NULL else). */
+static char *SurfaceTexPtr(void *p, EngMapEntKind kind) {
+    switch (kind) {
+        case ENGMAPENT_WALL:     return ((MapDocWall     *)p)->texName;
+        case ENGMAPENT_OBSTACLE: return ((MapDocObstacle *)p)->texName;
+        default:                 return NULL;
+    }
+}
+
+bool Eng_GetSurfaceTex(const MapDoc *doc, int id, char *outTex, int cap) {
+    if (!outTex || cap <= 0) return false;
+    EngMapEntKind kind;
+    void *p = (void *)EngMapEnt_PtrConst(doc, EngMapEnt_Find(doc, id), &kind);
+    char *t = SurfaceTexPtr(p, kind);
+    if (!t) { outTex[0] = '\0'; return false; }
+    snprintf(outTex, (size_t)cap, "%s", t);
+    return true;
+}
+
+bool Eng_SetSurfaceTex(MapDoc *doc, int id, const char *tex) {
+    if (!tex) return false;
+    EngMapEntKind kind;
+    void *p = EngMapEnt_Ptr(doc, EngMapEnt_Find(doc, id), &kind);
+    char *t = SurfaceTexPtr(p, kind);
+    if (!t) return false;
+    snprintf(t, MAPDOC_TEX_NAME_LEN, "%s", tex);   /* "" clears the override */
+    return true;
+}
+
 /* Address-of the sectorId field for any kind that has one (NULL for SECTOR). */
 static int *SectorIdPtr(void *p, EngMapEntKind kind) {
     switch (kind) {
@@ -444,6 +473,31 @@ bool EngMapEnt_Delete(MapDoc *doc, int id) {
 }
 
 #undef COMPACT
+
+int EngMapEnt_Clone(MapDoc *doc, int id) {
+    EngMapEntHandle h = EngMapEnt_Find(doc, id);
+    if (h.kind == ENGMAPENT_NONE) return -1;
+
+    int nid = EngMapEnt_Add(doc, h.kind);   /* appends; does not move arr[h.index] */
+    if (nid < 0) return -1;
+    EngMapEntHandle nh = EngMapEnt_Find(doc, nid);
+
+    /* Copy the whole source struct over the freshly-added one, then restore the
+       clone's minted id so the two entities stay distinct. */
+    switch (h.kind) {
+        case ENGMAPENT_SPAWN:    doc->spawns[nh.index]    = doc->spawns[h.index];    doc->spawns[nh.index].id    = nid; break;
+        case ENGMAPENT_WALL:     doc->walls[nh.index]     = doc->walls[h.index];     doc->walls[nh.index].id     = nid; break;
+        case ENGMAPENT_WINDOW:   doc->windows[nh.index]   = doc->windows[h.index];   doc->windows[nh.index].id   = nid; break;
+        case ENGMAPENT_OBSTACLE: doc->obstacles[nh.index] = doc->obstacles[h.index]; doc->obstacles[nh.index].id = nid; break;
+        case ENGMAPENT_PROP:     doc->props[nh.index]     = doc->props[h.index];     doc->props[nh.index].id     = nid; break;
+        case ENGMAPENT_WALLBUY:  doc->wallbuys[nh.index]  = doc->wallbuys[h.index];  doc->wallbuys[nh.index].id  = nid; break;
+        case ENGMAPENT_PERK:     doc->perks[nh.index]     = doc->perks[h.index];     doc->perks[nh.index].id     = nid; break;
+        case ENGMAPENT_SECTOR:   doc->sectors[nh.index]   = doc->sectors[h.index];   doc->sectors[nh.index].id   = nid; break;
+        case ENGMAPENT_NONE:
+        default: return -1;
+    }
+    return nid;
+}
 
 /* ---- undo/redo history ----
  *

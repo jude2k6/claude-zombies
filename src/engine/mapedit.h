@@ -175,6 +175,13 @@ bool Eng_SetSpawnMob(MapDoc *doc, int id, const char *mob);
 bool Eng_GetWindowDir(const MapDoc *doc, int id, char *outDir, int cap);
 bool Eng_SetWindowDir(MapDoc *doc, int id, const char *dir);
 
+/* Per-surface texture override (the TEX field). WALL and OBSTACLE only. ""
+ * clears the override (the surface falls back to the map's wall_ext slot).
+ * Set accepts an empty string (unlike Eng_SetSpawnMob); truncates to
+ * MAPDOC_TEX_NAME_LEN. Returns false for any other kind. */
+bool Eng_GetSurfaceTex(const MapDoc *doc, int id, char *outTex, int cap);
+bool Eng_SetSurfaceTex(MapDoc *doc, int id, const char *tex);
+
 /* Owning sector index (-1 = ungrouped). Supported by every placed kind EXCEPT
  * SECTOR itself. NOTE: an entity must belong to a real sector to be saved —
  * MapDoc_Save only emits entities inside a SECTOR/RAMP block, and the grammar
@@ -206,6 +213,15 @@ int EngMapEnt_Add(MapDoc *doc, EngMapEntKind kind);
  * Returns false if `id` does not exist.
  */
 bool EngMapEnt_Delete(MapDoc *doc, int id);
+
+/*
+ * EngMapEnt_Clone — append a copy of the entity with `id` (same kind, same
+ * fields) and mint a fresh id for the copy. The clone lands at the SAME world
+ * position as the source; callers that want it visibly offset should nudge it
+ * afterwards via Eng_SetPos. Returns the new id, or -1 if `id` does not exist
+ * or that kind's array is at its MAPDOC_MAX_* cap.
+ */
+int EngMapEnt_Clone(MapDoc *doc, int id);
 
 /* ---- undo/redo history ---- */
 

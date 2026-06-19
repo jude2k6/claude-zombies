@@ -313,4 +313,9 @@ void EdScene_DiscardRecovery(EdScene *s);         // delete the .autosave
 
 const char *EdScene_KindName(EngMapEntKind k);
 
+// True if the active gizmo mode (s->mode) can act on the current selection.
+// TRANSLATE applies to every kind; ROTATE/SCALE only to PROPs. Drives both the
+// "don't draw a dead gizmo" suppression and the status-bar "(n/a)" hint.
+bool EdScene_GizmoModeApplies(const EdScene *s);
+
 #endif // SHOOTER_EDSCENE_H

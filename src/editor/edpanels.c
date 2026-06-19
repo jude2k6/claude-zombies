@@ -1,9 +1,9 @@
 // ============================================================================
 //  edpanels.c — Tools palette / Hierarchy / Assets / Console panels + status bar.
 //
-//  Split out of builtins.c. Contributes two plugins: EdBuiltin_Panels (the four
-//  docked panels, including the placement palette drawn into the Assets panel)
-//  and EdBuiltin_StatusBar (the bottom-bar segments). The Inspector lives in its
+//  Split out of builtins.c. Contributes two plugins: EdBuiltin_Panels (the
+//  docked panels — TOOLS + HIERARCHY left, ASSETS right, CONSOLE bottom) and
+//  EdBuiltin_StatusBar (the bottom-bar segments). The Inspector lives in its
 //  own file (panel_inspector.c) and is registered here via the PanelInspector
 //  declaration in builtins_internal.h; clicking a map row opens it through the
 //  unsaved-changes guard (RequestOpenMap, edmenus.c).
@@ -36,9 +36,10 @@ static bool ToolRowVisible(Rectangle c, float y, float hh) {
 }
 
 // Draw the PLACEMENT tools (Select / Spawns / Geometry / Props / Wallbuys /
-// Perks) into the ASSETS panel's running layout, advancing *yp. Placement used
-// to be its own left-column TOOLS panel; it now shares the asset-browser surface
-// so the left column is just HIERARCHY (see docs/scene-builder.md §"IDE frame").
+// Perks) into a panel's running layout, advancing *yp. These live in their own
+// always-visible left-column TOOLS panel (PanelTools below) so placement is never
+// hidden behind the asset filter — the single biggest "user will fumble" issue
+// from the 2026-06-19 review (TODO item 1).
 // Every section is data-driven off the scanned catalogs (mobs/props/perks/
 // weapons), so a new catalog file is a new button with no rebuild. `area` is the
 // panel content rect; rows scrolled out of it are skipped (ToolRowVisible) so an
@@ -160,6 +161,30 @@ static void DrawPlaceTools(EdHost *h, Rectangle area, float *yp, float sc) {
     *yp = y;
 }
 
+// ---- Tools palette panel (left dock, always visible) -----------------------
+// Wraps DrawPlaceTools with its own scroll + scissor, mirroring PanelAssets'
+// browse list. Lives in ED_DOCK_LEFT above HIERARCHY so the placement tools are
+// always reachable regardless of the asset filter (TODO item 1).
+static float g_toolsScroll = 0;
+
+static void PanelTools(EdHost *h, Rectangle c, void *u) {
+    (void)u;
+    float sc = EdHost_UiScale(h);
+
+    if (CheckCollisionPointRec(GetMousePosition(), c))
+        g_toolsScroll -= GetMouseWheelMove() * 22 * sc * 2.0f;
+    static float prevTotal = 0;
+    float maxScroll = prevTotal - c.height; if (maxScroll < 0) maxScroll = 0;
+    if (g_toolsScroll < 0) g_toolsScroll = 0;
+    if (g_toolsScroll > maxScroll) g_toolsScroll = maxScroll;
+
+    BeginScissorMode((int)c.x, (int)c.y, (int)c.width, (int)c.height);
+    float y = c.y - g_toolsScroll;
+    DrawPlaceTools(h, c, &y, sc);
+    EndScissorMode();
+    prevTotal = (y + g_toolsScroll) - c.y;
+}
+
 // ---- Hierarchy — Feature 2: filter input -----------------------------------
 static float g_hierScroll = 0;
 static char  g_hierFilter[64]  = "";
@@ -238,16 +263,14 @@ static void PanelHierarchy(EdHost *h, Rectangle c, void *u) {
     }
 }
 
-// ---- Assets panel — placement tools + browse maps / models / textures ------
-// The editor's single content surface (the left column is just HIERARCHY now).
-// Top: the PLACEMENT tools (DrawPlaceTools — Select / Spawns / Geometry / Props /
-// Wallbuys / Perks). Below: a scrollable index of the content overlay
-// (EdScene.assets) — click a MAP to open it (via the unsaved-changes guard);
-// MODELS and TEXTURES are browse-only previews (props are placed from the
-// catalog-backed Props palette, not by arming a raw model stem), and
-// models/textures show a thumbnail (EdThumb_Model / the
-// engine texture cache). Typing in the filter box is a global asset search: it
-// hides the placement tools and narrows the maps/models/textures lists.
+// ---- Assets panel — browse maps / models / textures ------------------------
+// A scrollable index of the content overlay (EdScene.assets) — click a MAP to
+// open it (via the unsaved-changes guard); MODELS and TEXTURES are browse-only
+// previews (props are placed from the catalog-backed Props palette in the TOOLS
+// panel, not by arming a raw model stem), and models/textures show a thumbnail
+// (EdThumb_Model / the engine texture cache). Typing in the filter box narrows
+// the maps/models/textures lists. (Placement tools moved to their own always-on
+// left TOOLS panel — PanelTools — per TODO item 1.)
 static float g_assetsScroll = 0;
 static char  g_assetFilter[64] = "";
 static bool  g_assetFilterEdit = false;
@@ -316,14 +339,6 @@ static void PanelAssets(EdHost *h, Rectangle c, void *u) {
     float y = area.y - g_assetsScroll;
     bool vis;   // a row at [y, y+rowH] overlaps the panel?
     #define ROW_VIS(hh) ((y + (hh) > area.y) && (y < area.y + area.height))
-
-    bool filtering = (g_assetFilter[0] != '\0');
-
-    // ---- Placement tools (hidden while the filter narrows the asset lists) --
-    if (!filtering) {
-        DrawPlaceTools(h, area, &y, sc);
-        y += 6 * sc;   // breathing room before the browse sections
-    }
 
     // ---- Maps (click to open) ----
     if (ROW_VIS(labelH)) GuiLabel((Rectangle){ area.x, y, area.width, labelH }, "Maps");
@@ -432,6 +447,7 @@ static void PanelConsole(EdHost *h, Rectangle c, void *u) {
 }
 
 static void RegisterPanels(EdHost *h) {
+    EdHost_AddPanel(h, &(EdPanel){ .id="tools",     .title="TOOLS",     .zone=ED_DOCK_LEFT,   .draw=PanelTools });
     EdHost_AddPanel(h, &(EdPanel){ .id="hierarchy", .title="HIERARCHY", .zone=ED_DOCK_LEFT,   .draw=PanelHierarchy });
     EdHost_AddPanel(h, &(EdPanel){ .id="inspector", .title="INSPECTOR", .zone=ED_DOCK_RIGHT,  .draw=PanelInspector });
     EdHost_AddPanel(h, &(EdPanel){ .id="assets",    .title="ASSETS",    .zone=ED_DOCK_RIGHT,  .draw=PanelAssets });
@@ -456,7 +472,10 @@ static void st_view(EdHost *h, char *out, int cap, void *u) {
     // here so the active transform mode (keys 1/2/3) stays discoverable.
     const char *g = s->mode == ENG_GIZMO_TRANSLATE ? "move"
                   : s->mode == ENG_GIZMO_ROTATE    ? "rotate" : "scale";
-    snprintf(out, cap, "view: %s  %s%s%s", v, g,
+    // Flag a rotate/scale mode that can't act on the current selection so the
+    // user sees why no gizmo appears, instead of a silent no-op (TODO item 2).
+    const char *na = (s->selectedId >= 0 && !EdScene_GizmoModeApplies(s)) ? " (n/a)" : "";
+    snprintf(out, cap, "view: %s  %s%s%s%s", v, g, na,
              s->snapEnabled ? "  snap" : "", s->gridVisible ? "" : "  no-grid");
 }
 static void st_sel(EdHost *h, char *out, int cap, void *u) {

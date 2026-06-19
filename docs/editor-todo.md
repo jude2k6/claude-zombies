@@ -5,6 +5,19 @@ captures the findings as actionable work, ranked. Each item has file pointers so
 a cold session can act without re-deriving context. Line numbers may have drifted
 since the review — grep the named function if a number is stale.
 
+## Just done (items 1 + 2)
+
+- **1. Placement palette → its own LEFT dock.** `DrawPlaceTools` now lives in a
+  dedicated always-visible `PanelTools` registered in `ED_DOCK_LEFT` above
+  HIERARCHY (with its own scroll + scissor, mirroring `PanelAssets`). Removed
+  from `PanelAssets`, which is now browse-only (Maps/Models/Textures) and no
+  longer hides anything behind the asset filter. (`src/editor/edpanels.c`)
+- **2. Rotate/Scale gizmos no longer silent no-op.** New
+  `EdScene_GizmoModeApplies(s)` (edscene.c/.h) gates the gizmo: `UpdateGizmo`
+  early-returns without drawing when the mode can't act on the selection
+  (rotate/scale on a non-prop), and the status bar (`st_view`, edpanels.c)
+  appends " (n/a)" so the user sees why no handle appears.
+
 ## Just done (commit a51d11b)
 
 Split the two god-files into focused translation units (pure mechanical, no
@@ -28,25 +41,11 @@ when doing the wall-endpoint work (item 3), designed around real usage.
 
 ### Tier 1 — high value, do first
 
-**1. Placement palette → its own persistent LEFT dock.  [High, low risk]**
-Currently `DrawPlaceTools` is drawn INSIDE the Assets panel on the RIGHT, and is
-hidden entirely while the asset filter is non-empty. The left column is just
-HIERARCHY. This is the single biggest "user will fumble" issue.
-- `src/editor/edpanels.c`: `DrawPlaceTools` (drawn from `PanelAssets`, gated by
-  `if (!filtering)`), `RegisterPanels` (panel zones: hierarchy LEFT, inspector +
-  assets RIGHT, console BOTTOM).
-- Fix: register a dedicated always-visible Tools panel in `ED_DOCK_LEFT`; keep
-  Assets for browsing only. `DrawPlaceTools` already takes an `area` rect, so it
-  can become its own panel draw fn with minor scroll/scissor plumbing.
+**1. Placement palette → its own persistent LEFT dock.  [DONE]**
+Shipped: `PanelTools` in `ED_DOCK_LEFT` above HIERARCHY; Assets is browse-only.
 
-**2. Rotate/Scale gizmos silently no-op on most kinds.  [High, small]**
-Pressing 2/3 shows a rotate/scale gizmo and updates the status bar, but a drag is
-rejected for anything that isn't a PROP — no feedback. Obstacles have size but no
-yaw so can't rotate at all.
-- `src/editor/edscene.c`: `UpdateGizmo` — `modeOk` only true for TRANSLATE or PROP.
-- Fix: hide the rotate/scale gizmo for kinds that don't support it (don't draw it),
-  OR surface a status hint ("rotate not available for sector"). Status text comes
-  from `st_view` in `src/editor/edpanels.c`.
+**2. Rotate/Scale gizmos silently no-op on most kinds.  [DONE]**
+Shipped: `EdScene_GizmoModeApplies` gates the gizmo draw + status-bar "(n/a)" hint.
 
 **3. Walls can't be edited at their vertices.  [High, bigger]**
 Sectors got edge handles (`DrawSectorHandles`/`BeginSectorResize` in edscene.c);
@@ -117,6 +116,6 @@ Weak for a multi-floor engine. Same `DrawSectorHandles` cluster as item 3.
   on next Open (`SettingsModal` in edmenus.c; `EngMapHistory_Init` in edscene.c).
 
 ## Recommended order for a fresh session
-Items **1** then **2** (high-visibility, low-risk, no deferred-split needed), then
-**4** + **5** (contained in panel_inspector.c). Tackle **3** (+ the `edgizmo.c`
-extraction) in its own dedicated session.
+Items **1** + **2** are done. Next: **4** + **5** (contained in
+panel_inspector.c). Tackle **3** (+ the `edgizmo.c` extraction) in its own
+dedicated session.

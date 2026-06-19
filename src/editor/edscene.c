@@ -477,6 +477,18 @@ static float GizmoHandleSize(EdScene *s, Vector3 origin) {
     return s->orthoH * 0.06f + 0.5f;
 }
 
+// Does the active gizmo mode apply to the current selection? TRANSLATE works for
+// every kind; ROTATE/SCALE only make sense for PROPs (the only kind carrying yaw
+// + scale). Used to suppress a dead rotate/scale gizmo here and to flag "(n/a)"
+// in the status bar (st_view, edpanels.c) so the no-op is no longer silent.
+bool EdScene_GizmoModeApplies(const EdScene *s) {
+    if (s->selectedId < 0) return false;
+    if (s->mode == ENG_GIZMO_TRANSLATE) return true;
+    EngMapEntKind k;
+    EngMapEnt_PtrConst(&s->doc, EngMapEnt_Find(&s->doc, s->selectedId), &k);
+    return (k == ENGMAPENT_PROP);
+}
+
 static void UpdateGizmo(EdScene *s, bool allowGrab) {
     Vector3 origin;
     if (!SelectedOrigin(s, &origin)) { s->dragging = false; return; }
@@ -485,35 +497,30 @@ static void UpdateGizmo(EdScene *s, bool allowGrab) {
     Vector2 mouse = s->vpMouse;
 
     if (!s->dragging) {
+        // Don't draw or arm a gizmo the selection can't use (rotate/scale on a
+        // non-prop) — a phantom handle that rejects every drag is worse than none.
+        if (!EdScene_GizmoModeApplies(s)) return;
+
         EngGizmoAxis hot = Eng_GizmoHitTest(s->cam, mouse, s->vpW, s->vpH, origin, s->mode, handleSize);
         Eng_GizmoDebugDraw(origin, s->mode, handleSize, hot);
 
         if (allowGrab && hot != ENG_GIZMO_AXIS_NONE && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-            // ROTATE and SCALE only make sense for props; TRANSLATE works for all kinds.
-            bool modeOk = (s->mode == ENG_GIZMO_TRANSLATE);
-            if (!modeOk) {
-                EngMapEntKind k;
-                EngMapEnt_Ptr(&s->doc, EngMapEnt_Find(&s->doc, s->selectedId), &k);
-                modeOk = (k == ENGMAPENT_PROP);
-            }
-            if (modeOk) {
-                s->drag = Eng_GizmoBeginDrag(s->cam, mouse, s->vpW, s->vpH, origin, s->mode, hot);
-                if (s->drag.axis != ENG_GIZMO_AXIS_NONE) {
-                    float x, z; Eng_GetPos(&s->doc, s->selectedId, &x, &z);
-                    s->dragStartPos = (Vector3){ x, origin.y, z };
-                    // Snapshot every selected entity's start pos so a TRANSLATE
-                    // drag moves the whole set rigidly by the primary's delta.
-                    for (int i = 0; i < s->selCount; i++) {
-                        float sx = 0, sz = 0;
-                        Eng_GetPos(&s->doc, s->selIds[i], &sx, &sz);
-                        s->dragStart[i] = (Vector3){ sx, 0, sz };
-                    }
-                    Eng_GetYaw(&s->doc, s->selectedId, &s->dragStartYaw);
-                    Eng_GetScale(&s->doc, s->selectedId, &s->dragStartScale);
-                    s->dragTag = g_nextTag++;
-                    if (g_nextTag == 0) g_nextTag = 1;
-                    s->dragging = true;
+            s->drag = Eng_GizmoBeginDrag(s->cam, mouse, s->vpW, s->vpH, origin, s->mode, hot);
+            if (s->drag.axis != ENG_GIZMO_AXIS_NONE) {
+                float x, z; Eng_GetPos(&s->doc, s->selectedId, &x, &z);
+                s->dragStartPos = (Vector3){ x, origin.y, z };
+                // Snapshot every selected entity's start pos so a TRANSLATE
+                // drag moves the whole set rigidly by the primary's delta.
+                for (int i = 0; i < s->selCount; i++) {
+                    float sx = 0, sz = 0;
+                    Eng_GetPos(&s->doc, s->selIds[i], &sx, &sz);
+                    s->dragStart[i] = (Vector3){ sx, 0, sz };
                 }
+                Eng_GetYaw(&s->doc, s->selectedId, &s->dragStartYaw);
+                Eng_GetScale(&s->doc, s->selectedId, &s->dragStartScale);
+                s->dragTag = g_nextTag++;
+                if (g_nextTag == 0) g_nextTag = 1;
+                s->dragging = true;
             }
         }
         return;

@@ -3,8 +3,9 @@
 // ============================================================================
 #include "edlauncher.h"
 
-#include "edproject.h"      // EdProject_Read — recent-game display names
+#include "edproject.h"      // EdProject_Read — recent-game display names; EdProject_CopyTree
 #include "edfiledialog.h"   // folder / file pickers
+#include "content.h"        // Eng_LocateRoot — locate the packs/ tier for Install Pack
 #include "ui.h"             // Eng_Ui* chrome + theme colours
 #include "raylib.h"
 #include "raygui.h"
@@ -137,8 +138,35 @@ EdLauncherResult EdLauncher_Draw(EdLauncher *L, int w, int h) {
         }
     }
     by += bh + 10 * sc;
+    // Install Pack — copy a pack source folder into packs/ so it's importable for
+    // every project. Self-contained (no game needed), so it runs inline here and
+    // stays on the launch screen; feedback goes to the status line below.
+    // (docs/content-packs.md §4 — mirrors File ▸ Game project ▸ Install Pack…)
+    if (GuiButton((Rectangle){ leftX, by, leftW, bh }, "#80#  Install Pack...")) {
+        char packsRoot[512];
+        if (!Eng_LocateRoot("packs", packsRoot, sizeof packsRoot)) {
+            snprintf(L->status, sizeof L->status, "Install failed: packs/ not found next to editor");
+        } else {
+            char start[512]; EdProject_DefaultGamesDir(start, sizeof start);
+            char dir[512];
+            if (EdFileDialog_SelectFolder(dir, sizeof dir,
+                                          "Install Pack — choose a pack folder", start)) {
+                const char *name = GetFileName(dir);
+                if (name && name[0]) {
+                    char dst[768]; snprintf(dst, sizeof dst, "%s/%s", packsRoot, name);
+                    EdProject_CopyTree(dir, dst);
+                    snprintf(L->status, sizeof L->status, "Installed pack '%s' into packs/", name);
+                }
+            }
+        }
+    }
+    by += bh + 10 * sc;
     if (GuiButton((Rectangle){ leftX, by, leftW, bh }, "#159#  Quit"))
         res.action = EDL_QUIT;
+
+    // Status line (Install Pack feedback) under the action column.
+    if (L->status[0])
+        Eng_UiText(L->status, leftX, by + bh + 12 * sc, 12, ENG_UI_GOLD);
 
     // ---- right column: recent games ---------------------------------------
     Eng_UiText("RECENT GAMES", rightX, top - 26 * sc, 13, ENG_UI_GOLD);

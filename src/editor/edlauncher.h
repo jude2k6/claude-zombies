@@ -34,6 +34,7 @@ typedef struct {
     int     recentCount;
     char    recentDir [EDL_MAX_RECENT][512];   // from game.0..7
     char    recentName[EDL_MAX_RECENT][128];   // display name from each game.project
+    char    status[256];                       // transient feedback line (e.g. Install Pack)
 } EdLauncher;
 
 typedef struct {

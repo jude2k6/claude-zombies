@@ -134,7 +134,9 @@ missing folder is fine, and a `.so` without `eng_plugin_main` is skipped — so 
 what's loaded. *(There is no engine-side **service/context** API yet — e.g. positional
 voice wants peer identity + player positions the engine doesn't model; a plugin reads
 those from `Net_*`/`Audio_*` today, and a small shared-context hook is the natural next
-step. See [engine-layers.md](engine-layers.md).)*
+step. See [engine-layers.md](engine-layers.md), and [voice-chat.md](voice-chat.md) for a
+worked design of voice chat on this host — incl. the one real gotcha, mic **capture** is
+not in raylib's public API and needs miniaudio.)*
 
 ### stats — `stats.h` (per-frame instrumentation)
 Frame timing, the fixed-step count drained this frame, and a draw tally — driven by

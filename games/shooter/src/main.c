@@ -29,6 +29,7 @@
 #include "anim.h"
 #include "app.h"      // engine host: Eng_Run + GameModule vtable
 #include "content.h"  // Eng_LocateRoot / Eng_Set{Library,Game}Root — content overlay
+#include "plugin.h"   // engine plugin host: Eng_PluginLoadDir (dynamic .so plugins)
 
 #include <stdio.h>
 #include <stdint.h>
@@ -554,6 +555,11 @@ int main(int argc, char **argv) {
             break;
         }
     }
+
+    // Dynamic engine plugins: drop a .so exporting eng_plugin_main into ./plugins
+    // and the engine runs it alongside the game (voice chat, friends overlay, …).
+    // A missing folder is fine; .so's without the entry symbol are skipped.
+    Eng_PluginLoadDir("plugins");
 
     EngConfig cfg = { .w = WINDOW_W_DEFAULT, .h = WINDOW_H_DEFAULT, .title = "Claude Zombies",
                       .vsync = true, .msaa4x = true, .resizable = true, .fpsCap = 60 };

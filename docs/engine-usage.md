@@ -98,6 +98,44 @@ historical module prefix (`Audio_*`, `Net_*`, `Pad_*`, `Anim_*`, `Fx_*`,
 raylib's `SetConfigFlags`/`SetTargetFPS` before window creation (a zero-init config
 is windowed / no-vsync / no-MSAA / fixed-size / uncapped, so set what you want).
 
+### plugin — `plugin.h` (extend the engine without modifying it)
+A plugin is **"a second `GameModule`"**: the engine runs it *alongside* the game,
+calling its `init/frame/fixed/draw/shutdown` at the matching points in `Eng_Run`.
+It uses ordinary engine services (`Net_*`, `Audio_*`, `Eng_Ui*`, `Eng_Input*`, …)
+to do its work and draws its overlay on top of the game — the seam for optional,
+self-contained features any game might want (voice chat, a friends/presence system,
+a debug console, a recorder) added **without touching the engine or the game**.
+
+```c
+// A .so exports:  const EngPluginDesc *eng_plugin_main(void);  (ABI = ENG_PLUGIN_ABI)
+static const EngPluginDesc DESC = { .name="friends", .abiVersion=ENG_PLUGIN_ABI,
+                                    .init=Init, .frame=Frame, .draw=Draw, .shutdown=Down };
+const EngPluginDesc *eng_plugin_main(void) { return &DESC; }
+
+// Host side (before Eng_Run):
+Eng_PluginRegister(&DESC);          // compiled-in, OR
+int n = Eng_PluginLoadDir("plugins"); // scan *.so, dlopen, ABI-check, register
+```
+
+This is the engine-level analogue of the editor plugin host (`edhost.h`) and the
+game behaviour registry (`mob_ai.h`), and stays game-clean (§1) — the descriptor is
+plain function pointers, so a plugin hooks the loop with no game header. Two load
+paths converge on one `EngPluginDesc`: **compiled-in** (`Eng_PluginRegister`, before
+`Eng_Run`) and **dynamic** (`Eng_PluginLoadDir(dir)` → dlopen each `*.so` exporting
+`eng_plugin_main`, version-checked against `ENG_PLUGIN_ABI`). The host binary must be
+linked `-rdynamic` (`ENABLE_EXPORTS` — the `shooter` target already is, for Tier-2
+behaviour `.so`s) so a plugin's `Eng_*` calls resolve against the host. **Call order:**
+plugins run *after* the game for `init`/`frame`/`fixed` and `draw` (overlays land on
+top of the HUD), and *before* the game on `shutdown` (reverse registration order); the
+fixed accumulator drains if **either** the game or any plugin has a `fixed` hook.
+POSIX-only for the dynamic path (a no-op on Windows; compiled-in works everywhere). A
+missing folder is fine, and a `.so` without `eng_plugin_main` is skipped — so the
+`plugins/` folder may be shared with editor plugins. `Eng_PluginCount()`/`Name(i)` list
+what's loaded. *(There is no engine-side **service/context** API yet — e.g. positional
+voice wants peer identity + player positions the engine doesn't model; a plugin reads
+those from `Net_*`/`Audio_*` today, and a small shared-context hook is the natural next
+step. See [engine-layers.md](engine-layers.md).)*
+
 ### stats — `stats.h` (per-frame instrumentation)
 Frame timing, the fixed-step count drained this frame, and a draw tally — driven by
 the engine each frame; read the getters anywhere (debug HUD, devtools).

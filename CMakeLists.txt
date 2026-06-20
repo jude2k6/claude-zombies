@@ -57,6 +57,7 @@ add_library(engine STATIC
     src/engine/anim.c
     src/engine/gfx.c
     src/engine/app.c
+    src/engine/plugin.c
     src/engine/content.c
     src/engine/pack.c
     src/engine/eng_render.c

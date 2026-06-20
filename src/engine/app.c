@@ -8,6 +8,7 @@
 
 #include "audio.h"   // engine audio mixer
 #include "stats.h"   // per-frame instrumentation
+#include "plugin.h"  // engine plugin host (runs alongside the game module)
 
 // Set by Eng_RequestClose() to break the frame loop from inside a callback.
 static bool g_engCloseRequested = false;
@@ -27,6 +28,7 @@ void Eng_Run(const EngConfig *cfg, GameModule game) {
     Audio_Init();
 
     if (game.init) game.init();
+    Eng_PluginInitAll();   // plugins init after the game (engine + game state are up)
 
     // Fixed-timestep accumulator. Real elapsed time is banked here and drained
     // in constant ENG_FIXED_DT steps so the authoritative sim is frame-rate
@@ -45,14 +47,18 @@ void Eng_Run(const EngConfig *cfg, GameModule game) {
         // Per-frame work (input, prediction, camera, visuals) first, so input
         // sampled this frame is consumed by this frame's fixed steps below.
         if (game.frame) game.frame(dt, sw, sh);
+        Eng_PluginFrameAll(dt, sw, sh);   // plugins after the game's frame
 
-        // Drain the accumulator in fixed steps.
+        // Drain the accumulator in fixed steps. Run if EITHER the game or any
+        // plugin has a fixed() hook, so a plugin's sim still ticks when the game
+        // has none (and vice-versa).
         int fixedSteps = 0;
-        if (game.fixed) {
+        if (game.fixed || Eng_PluginAnyFixed()) {
             simAccum += dt;
             if (simAccum > MAX_ACCUM) simAccum = MAX_ACCUM;
             while (simAccum >= ENG_FIXED_DT) {
-                game.fixed(ENG_FIXED_DT);
+                if (game.fixed) game.fixed(ENG_FIXED_DT);
+                Eng_PluginFixedAll(ENG_FIXED_DT);
                 simAccum -= ENG_FIXED_DT;
                 fixedSteps++;
             }
@@ -60,11 +66,13 @@ void Eng_Run(const EngConfig *cfg, GameModule game) {
 
         BeginDrawing();
         if (game.draw) game.draw(sw, sh);
+        Eng_PluginDrawAll(sw, sh);        // overlays land on top of the game's draw
         EndDrawing();
 
         Eng_StatsEndFrame(fixedSteps);
     }
 
+    Eng_PluginShutdownAll();   // plugins down before the game (reverse of init)
     if (game.shutdown) game.shutdown();
     Audio_Shutdown();
     CloseWindow();

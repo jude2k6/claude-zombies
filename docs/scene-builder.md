@@ -45,8 +45,10 @@ loaded `.so` files in `./plugins`) extend it through the identical surface. See 
 > For *where it's going*: [editor-content-extensibility.md](editor-content-extensibility.md)
 > (the `.mob`/`.prop`/`.perk` catalog + behaviour-registry design) and
 > [editor-feature-ideas.md](editor-feature-ideas.md) (the backlog, incl. remaining
-> layout polish). The content-overlay architecture the editor's game projects sit on is
-> [game-projects.md](game-projects.md).
+> layout polish). For a critical UI/UX teardown + proposed redesign (viewport-first frame,
+> a Unity-style bottom-docked content browser replacing the TOOLS palette, a sector-tree
+> Hierarchy), see [editor-ux-review.md](editor-ux-review.md). The content-overlay
+> architecture the editor's game projects sit on is [game-projects.md](game-projects.md).
 
 ## 1. What it is (and is not)
 

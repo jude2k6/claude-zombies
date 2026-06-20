@@ -183,89 +183,322 @@ static void PanelTools(EdHost *h, Rectangle c, void *u) {
     prevTotal = (y + g_toolsScroll) - c.y;
 }
 
-// ---- Hierarchy — Feature 2: filter input -----------------------------------
+// ---- Hierarchy — sector tree (§6 of editor-ux-review.md) ------------------
+//
+// Two-level tree: each sector is a collapsible parent row; under it sit the
+// entities whose sectorId (sector array index) matches the sector's position
+// in doc.sectors[].  Collapsed state is tracked per-sector-id in a small flat
+// array (g_hierCollapsed / g_hierCollapsedCount).
+//
+// Descriptor strings per kind:
+//   SPAWN   → "PLAYER" or "MOB (tag)"
+//   WALL    → "wall" (or "wall [door]" when a door is embedded)
+//   WINDOW  → "window dir"
+//   OBSTACLE→ "obstacle SxZ"
+//   PROP    → "prop name"
+//   WALLBUY → "wallbuy weapon"
+//   PERK    → "perk name"
+//   SECTOR  → rendered as the parent row, not a child
+// -------------------------------------------------------------------------
+
+// Collapsed-sector tracking: up to MAPDOC_MAX_SECTORS distinct sector ids.
+static int  g_hierCollapsed[MAPDOC_MAX_SECTORS];
+static int  g_hierCollapsedCount = 0;
+
+static bool HierIsSectorCollapsed(int sectorId) {
+    for (int i = 0; i < g_hierCollapsedCount; i++)
+        if (g_hierCollapsed[i] == sectorId) return true;
+    return false;
+}
+static void HierToggleSectorCollapse(int sectorId) {
+    for (int i = 0; i < g_hierCollapsedCount; i++) {
+        if (g_hierCollapsed[i] == sectorId) {
+            // remove by swapping with last
+            g_hierCollapsed[i] = g_hierCollapsed[--g_hierCollapsedCount];
+            return;
+        }
+    }
+    if (g_hierCollapsedCount < MAPDOC_MAX_SECTORS)
+        g_hierCollapsed[g_hierCollapsedCount++] = sectorId;
+}
+
+// Build the descriptor label for a non-sector entity proxy.
+// Returns a pointer to a TextFormat() buffer (static, valid until next call).
+static const char *HierDescriptor(const MapDoc *doc, const EdProxy *p) {
+    switch (p->kind) {
+    case ENGMAPENT_SPAWN: {
+        char mob[MAPDOC_SPAWN_MOB_LEN] = "";
+        Eng_GetSpawnMob(doc, p->id, mob, sizeof mob);
+        if (strcmp(mob, "PLAYER") == 0) return "PLAYER";
+        return TextFormat("MOB (%s)", mob);
+    }
+    case ENGMAPENT_WALL: {
+        // Check if the wall has an embedded door by searching the wall array.
+        for (int i = 0; i < doc->wallCount; i++) {
+            if (doc->walls[i].id == p->id)
+                return doc->walls[i].door.present ? "wall [door]" : "wall";
+        }
+        return "wall";
+    }
+    case ENGMAPENT_WINDOW: {
+        char dir[8] = "";
+        Eng_GetWindowDir(doc, p->id, dir, sizeof dir);
+        return TextFormat("window %s", dir);
+    }
+    case ENGMAPENT_OBSTACLE: {
+        float sx = 0, sz = 0, h = 0;
+        Eng_GetObstacleSize(doc, p->id, &sx, &sz, &h);
+        return TextFormat("obstacle %.0fx%.0f", (double)sx, (double)sz);
+    }
+    case ENGMAPENT_PROP: {
+        for (int i = 0; i < doc->propCount; i++)
+            if (doc->props[i].id == p->id) return TextFormat("prop %s", doc->props[i].name);
+        return "prop";
+    }
+    case ENGMAPENT_WALLBUY: {
+        for (int i = 0; i < doc->wallbuyCount; i++)
+            if (doc->wallbuys[i].id == p->id) return TextFormat("wallbuy %s", doc->wallbuys[i].weapon);
+        return "wallbuy";
+    }
+    case ENGMAPENT_PERK: {
+        for (int i = 0; i < doc->perkCount; i++)
+            if (doc->perks[i].id == p->id) return TextFormat("perk %s", doc->perks[i].perk);
+        return "perk";
+    }
+    default:
+        return EdScene_KindName(p->kind);
+    }
+}
+
+// Case-insensitive substring search (same logic as ContainsCI).
+static bool HierContainsCI(const char *hay, const char *needle) {
+    if (!needle[0]) return true;
+    for (int i = 0; hay[i]; i++) {
+        int j = 0;
+        while (needle[j] && tolower((unsigned char)hay[i + j]) == tolower((unsigned char)needle[j])) j++;
+        if (!needle[j]) return true;
+    }
+    return false;
+}
+
 static float g_hierScroll = 0;
 static char  g_hierFilter[64]  = "";
 static bool  g_hierFilterEdit  = false;
 
 static void PanelHierarchy(EdHost *h, Rectangle c, void *u) {
     (void)u; EdScene *s = EdHost_Scene(h);
-    float sc = EdHost_UiScale(h);
-    float rowH   = 16 * sc;
+    const MapDoc *doc = &s->doc;
+    float sc      = EdHost_UiScale(h);
+    float rowH    = 16 * sc;
     float filterH = 20 * sc;
 
     // --- filter text box ---
     Rectangle filterRect = { c.x, c.y, c.width, filterH };
-    if (GuiTextBox(filterRect, g_hierFilter, sizeof g_hierFilter, g_hierFilterEdit)) {
+    if (GuiTextBox(filterRect, g_hierFilter, sizeof g_hierFilter, g_hierFilterEdit))
         g_hierFilterEdit = !g_hierFilterEdit;
-    }
 
-    // shift the list area down past the filter box
-    Rectangle listArea = { c.x, c.y + filterH + 2 * sc, c.width, c.height - filterH - 2 * sc };
+    // List area below the filter box.
+    Rectangle listArea = { c.x, c.y + filterH + 2 * sc,
+                           c.width, c.height - filterH - 2 * sc };
 
-    // Build the filtered index list (stack-allocated, max ED_MAX_ENTS).
-    int filtered[ED_MAX_ENTS];
-    int nFiltered = 0;
     bool hasFilter = (g_hierFilter[0] != '\0');
-    for (int i = 0; i < s->proxyCount; i++) {
-        EdProxy *p = &s->proxies[i];
-        if (hasFilter) {
-            // Build the display string and do a case-insensitive substring check.
-            const char *rowStr = TextFormat("#%d %s", p->id, EdScene_KindName(p->kind));
-            // Simple tolower strstr via manual scan.
-            const char *haystack = rowStr;
-            const char *needle   = g_hierFilter;
-            bool found = false;
-            for (int hi = 0; haystack[hi]; hi++) {
-                int ni = 0;
-                while (needle[ni] && tolower((unsigned char)haystack[hi + ni]) == tolower((unsigned char)needle[ni]))
-                    ni++;
-                if (!needle[ni]) { found = true; break; }
+
+    // ---- Build the virtual row list ----------------------------------------
+    // Each row is one of:
+    //   type=0 → sector header row     (sectorIdx = index in doc->sectors[])
+    //   type=1 → entity child row      (proxyIdx  = index in s->proxies[])
+    // We lay these out ahead of time so we know the total height for scrolling.
+    typedef struct { int type; int idx; } HierRow;
+    HierRow rows[ED_MAX_ENTS + MAPDOC_MAX_SECTORS];
+    int nRows = 0;
+
+    for (int si = 0; si < doc->sectorCount; si++) {
+        const MapDocSector *sec = &doc->sectors[si];
+        bool collapsed = HierIsSectorCollapsed(sec->id);
+
+        // When filtering: only show a sector row if it has at least one
+        // matching child (or if the sector name itself matches).
+        bool sectorNameMatch = hasFilter
+            ? HierContainsCI(sec->name, g_hierFilter)
+            : true;
+
+        // Gather matching children.
+        int childProxies[ED_MAX_ENTS];
+        int nChildren = 0;
+        for (int pi = 0; pi < s->proxyCount; pi++) {
+            EdProxy *p = &s->proxies[pi];
+            if (p->kind == ENGMAPENT_SECTOR) continue;  // sectors are parent rows
+            // sectorId field is an array index matching si.
+            int ownerIdx = -1;
+            Eng_GetSector(doc, p->id, &ownerIdx);
+            if (ownerIdx != si) continue;
+            if (hasFilter) {
+                // Build search string: "#id descriptor"
+                const char *desc = HierDescriptor(doc, p);
+                char search[128];
+                snprintf(search, sizeof search, "#%d %s", p->id, desc);
+                if (!HierContainsCI(search, g_hierFilter)) continue;
             }
-            if (!found) continue;
+            childProxies[nChildren++] = pi;
         }
-        filtered[nFiltered++] = i;
+
+        // When filtering: skip this sector if neither its name matches nor it
+        // has matching children.
+        if (hasFilter && !sectorNameMatch && nChildren == 0) continue;
+
+        // Emit sector header row.
+        if (nRows < (int)(sizeof rows / sizeof rows[0])) {
+            rows[nRows].type = 0;
+            rows[nRows].idx  = si;
+            nRows++;
+        }
+
+        // Emit child rows (only when not collapsed — or when filtering,
+        // always expand so matches are visible).
+        bool showChildren = (!collapsed || hasFilter);
+        if (showChildren) {
+            for (int ci = 0; ci < nChildren; ci++) {
+                if (nRows < (int)(sizeof rows / sizeof rows[0])) {
+                    rows[nRows].type = 1;
+                    rows[nRows].idx  = childProxies[ci];
+                    nRows++;
+                }
+            }
+        }
     }
 
-    float total = nFiltered * rowH;
+    // ---- Scroll ------------------------------------------------------------
+    float total = nRows * rowH;
     if (CheckCollisionPointRec(GetMousePosition(), listArea))
         g_hierScroll -= GetMouseWheelMove() * rowH * 3.0f;
     float maxScroll = total - listArea.height; if (maxScroll < 0) maxScroll = 0;
     if (g_hierScroll < 0) g_hierScroll = 0;
     if (g_hierScroll > maxScroll) g_hierScroll = maxScroll;
 
-    BeginScissorMode((int)listArea.x, (int)listArea.y, (int)listArea.width, (int)listArea.height);
+    // ---- Draw --------------------------------------------------------------
+    BeginScissorMode((int)listArea.x, (int)listArea.y,
+                     (int)listArea.width, (int)listArea.height);
     bool interactive = EdHost_PanelsInteractive(h);
-    for (int fi = 0; fi < nFiltered; fi++) {
-        float ry = listArea.y - g_hierScroll + fi * rowH;
+
+    // Double-click state (preserved across frames via statics).
+    static int    s_lastClickId = -1;
+    static double s_lastClickT  = -1.0;
+
+    for (int ri = 0; ri < nRows; ri++) {
+        float ry = listArea.y - g_hierScroll + ri * rowH;
         if (ry + rowH < listArea.y || ry > listArea.y + listArea.height) continue;
-        EdProxy *p = &s->proxies[filtered[fi]];
+
         Rectangle row = { listArea.x, ry, listArea.width, rowH };
-        bool sel = EdScene_IsSelected(s, p->id);
         bool hot = CheckCollisionPointRec(GetMousePosition(), row);
-        if (sel)      DrawRectangleRec(row, (Color){ 60, 70, 90, 255 });
-        else if (hot) DrawRectangleRec(row, (Color){ 40, 46, 56, 255 });
-        Color dot = p->col; dot.a = 255;
-        DrawRectangle((int)(listArea.x + 2 * sc), (int)(ry + 4 * sc), (int)(8 * sc), (int)(8 * sc), dot);
-        Eng_UiText(TextFormat("#%d %s", p->id, EdScene_KindName(p->kind)),
-                   listArea.x + 14 * sc, ry + 1 * sc, 11, sel ? ENG_UI_GOLD : ENG_UI_TEXT);
-        if (interactive && hot && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-            bool shift = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
-            EdScene_SelectClick(s, p->id, shift);
-            // Double-click the same row → frame that entity in the viewport.
-            static int    lastId = -1;
-            static double lastT  = -1.0;
-            double now = GetTime();
-            if (p->id == lastId && now - lastT < 0.35) {
-                EdScene_FrameSelected(s);
-                lastId = -1;   // consume, so a third click starts a new pair
+
+        if (rows[ri].type == 0) {
+            // ---- Sector parent row -----------------------------------------
+            int si = rows[ri].idx;
+            const MapDocSector *sec = &doc->sectors[si];
+            bool collapsed = HierIsSectorCollapsed(sec->id) && !hasFilter;
+
+            // Find this sector's proxy id for selection.
+            int secProxyId = -1;
+            for (int pi = 0; pi < s->proxyCount; pi++) {
+                if (s->proxies[pi].kind == ENGMAPENT_SECTOR &&
+                    s->proxies[pi].id == sec->id) {
+                    secProxyId = sec->id;
+                    break;
+                }
+            }
+
+            bool sel = (secProxyId >= 0) && EdScene_IsSelected(s, secProxyId);
+            if (sel)      DrawRectangleRec(row, (Color){ 60, 70, 90, 255 });
+            else if (hot) DrawRectangleRec(row, (Color){ 40, 46, 56, 255 });
+
+            // Toggle triangle: ▸/▾ — drawn left of the label.
+            float tx = listArea.x + 2 * sc;
+            float ty = ry + rowH * 0.5f;
+            // Small triangle: 7×7 px scaled.
+            float ts = 6 * sc;
+            Color triCol = ENG_UI_DIM;
+            if (collapsed) {
+                // ▸ right-pointing triangle
+                Vector2 t0 = { tx,      ty - ts * 0.5f };
+                Vector2 t1 = { tx,      ty + ts * 0.5f };
+                Vector2 t2 = { tx + ts, ty };
+                DrawTriangle(t0, t1, t2, triCol);
             } else {
-                lastId = p->id; lastT = now;
+                // ▾ down-pointing triangle
+                Vector2 t0 = { tx,            ty };
+                Vector2 t1 = { tx + ts * 0.5f, ty - ts };
+                Vector2 t2 = { tx + ts,        ty };
+                DrawTriangle(t1, t0, t2, triCol);
+            }
+
+            // Sector label: name + id.
+            float labelX = tx + ts + 4 * sc;
+            const char *label = TextFormat("\"%s\"  (#%d)", sec->name, sec->id);
+            Eng_UiText(label, labelX, ry + 1 * sc, 11,
+                       sel ? ENG_UI_GOLD : ENG_UI_TEXT);
+
+            if (interactive && hot && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                // Clicking the toggle triangle collapses/expands.
+                // Clicking elsewhere selects the sector.
+                Rectangle toggleHit = { listArea.x, ry, ts + 6 * sc, rowH };
+                bool onToggle = CheckCollisionPointRec(GetMousePosition(), toggleHit);
+                if (onToggle) {
+                    HierToggleSectorCollapse(sec->id);
+                } else {
+                    // Select the sector entity.
+                    if (secProxyId >= 0) {
+                        bool shift = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
+                        EdScene_SelectClick(s, secProxyId, shift);
+                        // Double-click → frame
+                        double now = GetTime();
+                        if (secProxyId == s_lastClickId && now - s_lastClickT < 0.35) {
+                            EdScene_FrameSelected(s);
+                            s_lastClickId = -1;
+                        } else {
+                            s_lastClickId = secProxyId;
+                            s_lastClickT  = now;
+                        }
+                    }
+                }
+            }
+
+        } else {
+            // ---- Entity child row ------------------------------------------
+            EdProxy *p = &s->proxies[rows[ri].idx];
+            bool sel = EdScene_IsSelected(s, p->id);
+            if (sel)      DrawRectangleRec(row, (Color){ 60, 70, 90, 255 });
+            else if (hot) DrawRectangleRec(row, (Color){ 40, 46, 56, 255 });
+
+            // Colour dot (indented by 14 sc to show nesting).
+            float indent = 14 * sc;
+            Color dot = p->col; dot.a = 255;
+            DrawRectangle((int)(listArea.x + indent),
+                          (int)(ry + 4 * sc),
+                          (int)(7 * sc), (int)(7 * sc), dot);
+
+            // Descriptor label.
+            const char *desc = HierDescriptor(doc, p);
+            Eng_UiText(desc,
+                       listArea.x + indent + 10 * sc, ry + 1 * sc,
+                       11, sel ? ENG_UI_GOLD : ENG_UI_TEXT);
+
+            if (interactive && hot && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                bool shift = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
+                EdScene_SelectClick(s, p->id, shift);
+                double now = GetTime();
+                if (p->id == s_lastClickId && now - s_lastClickT < 0.35) {
+                    EdScene_FrameSelected(s);
+                    s_lastClickId = -1;
+                } else {
+                    s_lastClickId = p->id;
+                    s_lastClickT  = now;
+                }
             }
         }
     }
     EndScissorMode();
-    if (nFiltered == 0) {
+
+    if (nRows == 0) {
         const char *msg = (s->proxyCount == 0) ? "(empty map)" : "(no match)";
         Eng_UiText(msg, listArea.x + 4 * sc, listArea.y + 2 * sc, 11, ENG_UI_DIM);
     }

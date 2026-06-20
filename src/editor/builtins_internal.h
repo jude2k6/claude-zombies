@@ -35,5 +35,8 @@ void RequestOpenMap(EdHost *h, const char *path);
 // --- panel_inspector.c ------------------------------------------------------
 // The Inspector panel draw callback (registered by edpanels.c's RegisterPanels).
 void PanelInspector(EdHost *h, Rectangle c, void *u);
+// Map-property editor body (name + atmosphere + textures). Called from the
+// Map Settings… modal in edmenus.c. `area` is the available content rectangle.
+void PanelInspector_DrawMapProps(EdHost *h, Rectangle area);
 
 #endif // SHOOTER_EDITOR_BUILTINS_INTERNAL_H

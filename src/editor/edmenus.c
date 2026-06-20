@@ -568,9 +568,8 @@ static void RegisterMenus(EdHost *h) {
     EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="View", .submenu="Gizmo mode", .label="Move",   .shortcut="1", .onClick=a_giz_move,  .checked=q_giz_move });
     EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="View", .submenu="Gizmo mode", .label="Rotate", .shortcut="2", .onClick=a_giz_rot,   .checked=q_giz_rot });
     EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="View", .submenu="Gizmo mode", .label="Scale",  .shortcut="3", .onClick=a_giz_scale, .checked=q_giz_scale });
-
-    EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="Help", .label="Controls", .onClick=a_help_controls });
-    EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="Help", .label="About",    .onClick=a_help_about });
+    // NOTE: Help menu is registered in RegisterMapTools (after Tools) so the
+    // bar order is File / Edit / View / Tools / Help (Fix #8).
 }
 
 // ============================================================================
@@ -647,6 +646,33 @@ static void SettingsModal(EdHost *h, Rectangle area, void *u) {
 
 static void a_settings(EdHost *h, void *u) { (void)u; EdHost_SetModal(h, SettingsModal, NULL); }
 
+// ---- Map Settings modal (Fix #3) --------------------------------------------
+// Shows the map-property editor (name / atmosphere / textures) in a modal panel
+// so the Inspector's default empty state can be a quiet "Nothing selected" hint.
+
+static void MapSettingsModal(EdHost *h, Rectangle area, void *u) {
+    (void)u;
+    float sc = EdHost_UiScale(h);
+    Eng_UiSetScale(sc); Eng_UiApplyFont(13);
+    float pw = 380 * sc, ph = 500 * sc;
+    float px = (area.width  - pw) / 2.0f;
+    float py = (area.height - ph) / 2.0f; if (py < 6 * sc) py = 6 * sc;
+    Eng_UiPanelBg((Rectangle){ px - 2, py - 2, pw + 4, ph + 4 }, (Color){ 60, 66, 80, 255 });
+    Eng_UiPanelBg((Rectangle){ px, py, pw, ph },                 (Color){ 24, 27, 34, 255 });
+
+    float X = px + 16 * sc, W = pw - 32 * sc, y = py + 12 * sc;
+    Eng_UiText("MAP SETTINGS", X, y, 18, ENG_UI_GOLD); y += 28 * sc;
+
+    Rectangle body = { X, y, W, py + ph - 40 * sc - y };
+    PanelInspector_DrawMapProps(h, body);
+
+    float by = py + ph - 32 * sc;
+    if (GuiButton((Rectangle){ X + (W - 100 * sc) / 2.0f, by, 100 * sc, 24 * sc }, "Close"))
+        EdHost_SetModal(h, NULL, NULL);
+}
+
+static void a_map_settings(EdHost *h, void *u) { (void)u; EdHost_SetModal(h, MapSettingsModal, NULL); }
+
 static void a_validate(EdHost *h, void *u) {
     (void)u; EdScene *s = EdHost_Scene(h);
     MapDocIssue issues[64];
@@ -659,11 +685,19 @@ static void a_validate(EdHost *h, void *u) {
 }
 
 static void RegisterMapTools(EdHost *h) {
-    // Tools leads with its map operation; editor preferences move to the bottom
-    // of Edit (the conventional home), renamed from "Settings…" (audit P1-D).
+    // Tools: Map Settings first (Fix #3), then Validate. Editor preferences stay
+    // at the bottom of Edit (audit P1-D). Help is registered here — after Tools —
+    // so the bar order is File / Edit / View / Tools / Help (Fix #8).
+    EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="Tools", .label="Map Settings...", .onClick=a_map_settings });
+    EdHost_AddMenuSeparator(h, "Tools");
     EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="Tools", .label="Validate map", .onClick=a_validate });
     EdHost_AddMenuSeparator(h, "Edit");
     EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="Edit", .label="Preferences...", .onClick=a_settings });
+
+    // Help is last in the bar (Fix #8). RegisterMenus owns File/Edit/View; we
+    // own Tools, so we register Help here to ensure it follows Tools.
+    EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="Help", .label="Controls", .onClick=a_help_controls });
+    EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="Help", .label="About",    .onClick=a_help_about });
 }
 
 // ============================================================================

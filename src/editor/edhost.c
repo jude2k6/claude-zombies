@@ -164,9 +164,9 @@ EdHost *EdHost_Create(EdScene *scene) {
     h->scene    = scene;
     h->openMenu = -1;
     h->openSubmenu = -1;
-    h->leftW    = 210;
-    h->rightW   = 240;
-    h->bottomH  = 150;
+    h->leftW    = 160;
+    h->rightW   = 180;
+    h->bottomH  = 80;
     return h;
 }
 
@@ -246,20 +246,25 @@ static EdLayout ComputeLayout(EdHost *h, int W, int H) {
     float midTop = mh, midBot = H - sh;
     L.menuBar   = (Rectangle){ 0, 0, (float)W, mh };
     L.statusBar = (Rectangle){ 0, (float)H - sh, (float)W, sh };
-    L.left      = (Rectangle){ 0, midTop, lw, midBot - midTop };
-    L.right     = (Rectangle){ (float)W - rw, midTop, rw, midBot - midTop };
+    // Bottom zone spans the FULL window width, sitting at the very bottom (above
+    // the status bar). Side docks end above it so they never overlap the console.
+    L.bottom    = (Rectangle){ 0, midBot - bh, (float)W, bh };
+    float sideH = midBot - bh - midTop;  // dock height stops at top of bottom zone
+    L.left      = (Rectangle){ 0, midTop, lw, sideH };
+    L.right     = (Rectangle){ (float)W - rw, midTop, rw, sideH };
     float cx = lw, cw = (float)W - lw - rw;
-    L.bottom    = (Rectangle){ cx, midBot - bh, cw, bh };
-    L.viewport  = (Rectangle){ cx, midTop, cw, (midBot - bh) - midTop };
+    L.viewport  = (Rectangle){ cx, midTop, cw, sideH };
     return L;
 }
 
 // Splitter rects sit just inside each zone boundary, over the viewport edge.
 static void SplitterRects(const EdLayout *L, Rectangle *sl, Rectangle *sr, Rectangle *sb) {
     float w = ED_SPLITTER * L->s;
-    *sl = (Rectangle){ L->left.x + L->left.width - w * 0.5f, L->viewport.y, w, L->viewport.height + L->bottom.height };
-    *sr = (Rectangle){ L->right.x - w * 0.5f, L->viewport.y, w, L->viewport.height + L->bottom.height };
-    *sb = (Rectangle){ L->viewport.x, L->bottom.y - w * 0.5f, L->viewport.width, w };
+    // Left/right splitters run alongside the side docks only (not over the bottom zone).
+    *sl = (Rectangle){ L->left.x + L->left.width - w * 0.5f, L->viewport.y, w, L->viewport.height };
+    *sr = (Rectangle){ L->right.x - w * 0.5f, L->viewport.y, w, L->viewport.height };
+    // Bottom splitter spans the full window width (the bottom zone is now full-width).
+    *sb = (Rectangle){ L->bottom.x, L->bottom.y - w * 0.5f, L->bottom.width, w };
 }
 
 static void UpdateSplitters(EdHost *h, const EdLayout *L, int W, int H) {

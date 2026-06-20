@@ -6,6 +6,11 @@
 > entry notes effort (S/M/L), ties the feature to the editing workflow or the Krunker
 > north-star, and flags any engine/game-seam constraint.
 >
+> **See also** [editor-ux-review.md](editor-ux-review.md) (2026-06-20) — a critical IA/UX
+> teardown + proposed redesign that supersedes the §4.x layout-polish items here where they
+> overlap (viewport-first frame, a Unity-style bottom-docked content browser replacing the
+> TOOLS palette, a sector-tree Hierarchy, MAP PROPERTIES → a modal).
+>
 > **Seam rule reminder:** The editor links `libengine.a` only — it must never `#include` a
 > `src/game/` header. Features that need game-specific knowledge go through a
 > content-registry hook (a registration function the game calls into the editor, never the

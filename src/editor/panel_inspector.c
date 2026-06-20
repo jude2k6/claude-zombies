@@ -3,9 +3,10 @@
 //
 //  Split out of builtins.c — by far its largest single piece. Draws editable
 //  fields for the selected entity (a per-kind ladder) or, when nothing is
-//  selected, whole-map properties (name + atmosphere + textures). Registered as
-//  a panel by edpanels.c's RegisterPanels via the PanelInspector declaration in
-//  builtins_internal.h.
+//  selected, a quiet "Nothing selected" hint. The map-property editing UI is
+//  factored into PanelInspector_DrawMapProps so it can be called from the
+//  Map Settings… modal in edmenus.c. Registered as a panel by edpanels.c's
+//  RegisterPanels via the PanelInspector declaration in builtins_internal.h.
 // ============================================================================
 
 #include "builtins.h"
@@ -168,141 +169,178 @@ static int CycleSectorLink(const MapDoc *d, int selfIdx, int cur) {
     return (next >= d->sectorCount) ? -1 : next;
 }
 
-// ---- Inspector — Feature 1: editable fields / Feature 3: map metadata ------
+// ============================================================================
+//  PanelInspector_DrawMapProps — Fix #3: the map-property editor body.
+//
+//  Called both by the Map Settings… modal in edmenus.c. `area` is the
+//  available content rectangle; draws name / atmosphere / textures advancing
+//  top-to-bottom. Declared in builtins_internal.h.
+// ============================================================================
+void PanelInspector_DrawMapProps(EdHost *h, Rectangle area) {
+    EdScene *s = EdHost_Scene(h);
+    float sc = EdHost_UiScale(h);
+    float X = area.x, W = area.width, y = area.y;
+
+    // Map name (doc.name) — keyed on selectedId == -1 sentinel so the buffer
+    // resets after an Open/New (same logic as the old inline block).
+    Eng_UiText("Name", X, y + 1 * sc, 12, ENG_UI_TEXT);
+    static char g_mapNameBuf[MAPDOC_NAME_LEN] = "";
+    static bool g_mapNameEdit = false;
+    static int  g_mapNameLastId = -2; // use -2 as "uninitialised sentinel"
+    EdScene *ms = EdHost_Scene(h);
+    if (g_mapNameLastId != ms->selectedId) {
+        g_mapNameLastId = ms->selectedId;
+        snprintf(g_mapNameBuf, sizeof g_mapNameBuf, "%s", ms->doc.name);
+        g_mapNameEdit = false;
+    }
+    bool wasNameEdit = g_mapNameEdit;
+    if (GuiTextBox((Rectangle){ X + 60 * sc, y, W - 60 * sc, 18 * sc },
+                   g_mapNameBuf, sizeof g_mapNameBuf, wasNameEdit)) {
+        g_mapNameEdit = !wasNameEdit;
+        if (wasNameEdit && strcmp(g_mapNameBuf, s->doc.name) != 0) {
+            snprintf(s->doc.name, sizeof s->doc.name, "%s", g_mapNameBuf);
+            EdHost_CommitEdit(h);
+        }
+    }
+    y += 22 * sc;
+
+    // ---- Atmosphere -------------------------------------------------------
+    MapDocAtmosphere *atm = &s->doc.atmosphere;
+    y += 4 * sc;
+    Eng_UiText("ATMOSPHERE", X, y, 13, (Color){ 200, 205, 215, 255 }); y += 18 * sc;
+
+    // Fog color — stored as float 0-255 components.
+    Color fogCol = { (unsigned char)atm->fogR, (unsigned char)atm->fogG,
+                     (unsigned char)atm->fogB, 255 };
+    Color newFogCol = fogCol;
+    // GuiColorPicker needs a square-ish area; give it a compact block.
+    float cpSz = 80 * sc;
+    Eng_UiText("Fog color", X, y + 1 * sc, 12, ENG_UI_TEXT);
+    GuiColorPicker((Rectangle){ X + 80 * sc, y, cpSz, cpSz }, NULL, &newFogCol);
+    if (newFogCol.r != fogCol.r || newFogCol.g != fogCol.g || newFogCol.b != fogCol.b) {
+        atm->fogR = (float)newFogCol.r;
+        atm->fogG = (float)newFogCol.g;
+        atm->fogB = (float)newFogCol.b;
+        atm->present = true;
+        InspCommitCont(h);
+    }
+    y += cpSz + 4 * sc;
+
+    // Fog range sliders.
+    float oldFogStart = atm->fogStart, oldFogEnd = atm->fogEnd;
+    Eng_UiText("Fog start", X, y + 1 * sc, 12, ENG_UI_TEXT);
+    char fsBuf[32]; snprintf(fsBuf, sizeof fsBuf, "%.1f", atm->fogStart);
+    GuiSlider((Rectangle){ X + 80 * sc, y, W - 120 * sc, 16 * sc }, "", fsBuf, &atm->fogStart, 0, 500);
+    y += 22 * sc;
+    Eng_UiText("Fog end", X, y + 1 * sc, 12, ENG_UI_TEXT);
+    char feBuf[32]; snprintf(feBuf, sizeof feBuf, "%.1f", atm->fogEnd);
+    GuiSlider((Rectangle){ X + 80 * sc, y, W - 120 * sc, 16 * sc }, "", feBuf, &atm->fogEnd, 0, 2000);
+    y += 22 * sc;
+    if (atm->fogStart != oldFogStart || atm->fogEnd != oldFogEnd) {
+        atm->present = true;
+        InspCommitCont(h);
+    }
+
+    // Sky tint (only shown when hasSkyTint or to enable it).
+    y += 4 * sc;
+    Eng_UiText("Sky tint", X, y + 1 * sc, 12, ENG_UI_TEXT);
+    GuiCheckBox((Rectangle){ X + 80 * sc, y, 14 * sc, 14 * sc }, " enable", &atm->hasSkyTint);
+    y += 20 * sc;
+    if (atm->hasSkyTint) {
+        Color skyCol    = { (unsigned char)atm->skyR, (unsigned char)atm->skyG,
+                            (unsigned char)atm->skyB, 255 };
+        Color newSkyCol = skyCol;
+        GuiColorPicker((Rectangle){ X + 80 * sc, y, cpSz, cpSz }, NULL, &newSkyCol);
+        if (newSkyCol.r != skyCol.r || newSkyCol.g != skyCol.g || newSkyCol.b != skyCol.b) {
+            atm->skyR = (float)newSkyCol.r;
+            atm->skyG = (float)newSkyCol.g;
+            atm->skyB = (float)newSkyCol.b;
+            atm->present = true;
+            InspCommitCont(h);
+        }
+        y += cpSz + 4 * sc;
+    }
+
+    // ---- Textures (read-only display) ------------------------------------
+    MapDocTextures *tex = &s->doc.textures;
+    if (tex->present) {
+        y += 4 * sc;
+        Eng_UiText("TEXTURES", X, y, 13, (Color){ 200, 205, 215, 255 }); y += 18 * sc;
+        const struct { const char *lbl; const char *val; } slots[] = {
+            { "floor",    tex->floor    },
+            { "ground",   tex->ground   },
+            { "wall_ext", tex->wall_ext },
+            { "wall_int", tex->wall_int },
+            { "ceiling",  tex->ceiling  },
+        };
+        for (int i = 0; i < 5; i++) {
+            Eng_UiText(TextFormat("%s: %s", slots[i].lbl,
+                       slots[i].val[0] ? slots[i].val : "(default)"),
+                       X, y, 11, ENG_UI_DIM);
+            y += 15 * sc;
+        }
+    }
+    (void)y;   // final y not used by caller; suppress unused-variable warning
+}
+
+// ---- Inspector — Fix #3: quiet empty state; Fix #4: scrollable fields ------
+
+// Scroll state for the per-entity inspector field list (Fix #4).
+static float g_inspScroll = 0;
+
 void PanelInspector(EdHost *h, Rectangle c, void *u) {
     (void)u; EdScene *s = EdHost_Scene(h);
     float sc = EdHost_UiScale(h);
-    float X = c.x, W = c.width, y = c.y;
+    float X = c.x, W = c.width;
 
     // Release every float-field slot when the selection changes, so a new entity
     // (possibly a different kind with different labels) starts from fresh buffers.
     if (s->selectedId != g_inspLastId) {
         g_inspLastId = s->selectedId;
         for (int i = 0; i < INSP_FLOAT_FIELDS; i++) g_inspFloat[i].key = NULL;
+        g_inspScroll = 0;   // reset scroll when selection changes
     }
 
     // End any continuous-edit coalescing run once the mouse is released, so the
     // next slider/picker drag starts a fresh undo step (see InspCommitCont).
     if (!IsMouseButtonDown(MOUSE_BUTTON_LEFT)) g_inspContTag = 0;
 
-    // ---- Map properties when nothing is selected (audit P1-A) --------------
+    // ---- Fix #3: nothing selected → quiet hint only -------------------------
     if (s->selectedId < 0) {
-        Eng_UiText("MAP PROPERTIES", X, y, 14, ENG_UI_GOLD); y += 16 * sc;
-        Eng_UiText("Nothing selected — editing the whole map.", X, y, 10, ENG_UI_DIM); y += 16 * sc;
-
-        // Map name (doc.name)
-        Eng_UiText("Name", X, y + 1 * sc, 12, ENG_UI_TEXT);
-        static char g_mapNameBuf[MAPDOC_NAME_LEN] = "";
-        static bool g_mapNameEdit = false;
-        static int  g_mapNameLastId = -2; // use -2 as "uninitialised sentinel"
-        // Reset buffer when we come back to the no-selection state and the doc
-        // name might have changed from an Open/New.
-        if (g_mapNameLastId != s->selectedId) {
-            g_mapNameLastId = s->selectedId;
-            snprintf(g_mapNameBuf, sizeof g_mapNameBuf, "%s", s->doc.name);
-            g_mapNameEdit = false;
-        }
-        bool wasNameEdit = g_mapNameEdit;
-        if (GuiTextBox((Rectangle){ X + 60 * sc, y, W - 60 * sc, 18 * sc },
-                       g_mapNameBuf, sizeof g_mapNameBuf, wasNameEdit)) {
-            g_mapNameEdit = !wasNameEdit;
-            if (wasNameEdit && strcmp(g_mapNameBuf, s->doc.name) != 0) {
-                snprintf(s->doc.name, sizeof s->doc.name, "%s", g_mapNameBuf);
-                EdHost_CommitEdit(h);
-            }
-        }
-        y += 22 * sc;
-
-        // ---- Atmosphere -------------------------------------------------------
-        MapDocAtmosphere *atm = &s->doc.atmosphere;
-        y += 4 * sc;
-        Eng_UiText("ATMOSPHERE", X, y, 13, (Color){ 200, 205, 215, 255 }); y += 18 * sc;
-
-        // Fog color — stored as float 0-255 components.
-        Color fogCol = { (unsigned char)atm->fogR, (unsigned char)atm->fogG,
-                         (unsigned char)atm->fogB, 255 };
-        Color newFogCol = fogCol;
-        // GuiColorPicker needs a square-ish area; give it a compact block.
-        float cpSz = 80 * sc;
-        Eng_UiText("Fog color", X, y + 1 * sc, 12, ENG_UI_TEXT);
-        GuiColorPicker((Rectangle){ X + 80 * sc, y, cpSz, cpSz }, NULL, &newFogCol);
-        if (newFogCol.r != fogCol.r || newFogCol.g != fogCol.g || newFogCol.b != fogCol.b) {
-            atm->fogR = (float)newFogCol.r;
-            atm->fogG = (float)newFogCol.g;
-            atm->fogB = (float)newFogCol.b;
-            atm->present = true;
-            InspCommitCont(h);
-        }
-        y += cpSz + 4 * sc;
-
-        // Fog range sliders.
-        float oldFogStart = atm->fogStart, oldFogEnd = atm->fogEnd;
-        Eng_UiText("Fog start", X, y + 1 * sc, 12, ENG_UI_TEXT);
-        char fsBuf[32]; snprintf(fsBuf, sizeof fsBuf, "%.1f", atm->fogStart);
-        GuiSlider((Rectangle){ X + 80 * sc, y, W - 120 * sc, 16 * sc }, "", fsBuf, &atm->fogStart, 0, 500);
-        y += 22 * sc;
-        Eng_UiText("Fog end", X, y + 1 * sc, 12, ENG_UI_TEXT);
-        char feBuf[32]; snprintf(feBuf, sizeof feBuf, "%.1f", atm->fogEnd);
-        GuiSlider((Rectangle){ X + 80 * sc, y, W - 120 * sc, 16 * sc }, "", feBuf, &atm->fogEnd, 0, 2000);
-        y += 22 * sc;
-        if (atm->fogStart != oldFogStart || atm->fogEnd != oldFogEnd) {
-            atm->present = true;
-            InspCommitCont(h);
-        }
-
-        // Sky tint (only shown when hasSkyTint or to enable it).
-        y += 4 * sc;
-        Eng_UiText("Sky tint", X, y + 1 * sc, 12, ENG_UI_TEXT);
-        GuiCheckBox((Rectangle){ X + 80 * sc, y, 14 * sc, 14 * sc }, " enable", &atm->hasSkyTint);
-        y += 20 * sc;
-        if (atm->hasSkyTint) {
-            Color skyCol    = { (unsigned char)atm->skyR, (unsigned char)atm->skyG,
-                                (unsigned char)atm->skyB, 255 };
-            Color newSkyCol = skyCol;
-            GuiColorPicker((Rectangle){ X + 80 * sc, y, cpSz, cpSz }, NULL, &newSkyCol);
-            if (newSkyCol.r != skyCol.r || newSkyCol.g != skyCol.g || newSkyCol.b != skyCol.b) {
-                atm->skyR = (float)newSkyCol.r;
-                atm->skyG = (float)newSkyCol.g;
-                atm->skyB = (float)newSkyCol.b;
-                atm->present = true;
-                InspCommitCont(h);
-            }
-            y += cpSz + 4 * sc;
-        }
-
-        // ---- Textures (read-only display) ------------------------------------
-        MapDocTextures *tex = &s->doc.textures;
-        if (tex->present) {
-            y += 4 * sc;
-            Eng_UiText("TEXTURES", X, y, 13, (Color){ 200, 205, 215, 255 }); y += 18 * sc;
-            const struct { const char *lbl; const char *val; } slots[] = {
-                { "floor",    tex->floor    },
-                { "ground",   tex->ground   },
-                { "wall_ext", tex->wall_ext },
-                { "wall_int", tex->wall_int },
-                { "ceiling",  tex->ceiling  },
-            };
-            for (int i = 0; i < 5; i++) {
-                Eng_UiText(TextFormat("%s: %s", slots[i].lbl,
-                           slots[i].val[0] ? slots[i].val : "(default)"),
-                           X, y, 11, ENG_UI_DIM);
-                y += 15 * sc;
-            }
-        }
+        Eng_UiText("Nothing selected", X + 4 * sc, c.y + 8 * sc, 12, ENG_UI_DIM);
+        Eng_UiText("Use Tools \xe2\x80\xba Map Settings\xe2\x80\xa6 to edit map properties.",
+                   X + 4 * sc, c.y + 24 * sc, 10, ENG_UI_DIM);
         return;
     }
 
-    // ---- Editable inspector for the selected entity ------------------------
-    // Affordance to reach the map-properties view without hunting for empty
-    // space to click (audit P1-A): deselect → the no-selection branch above.
-    if (GuiButton((Rectangle){ X, y, W, 18 * sc }, "#185# Map properties...")) {
-        s->selectedId = -1;
-        return;
-    }
-    y += 24 * sc;
+    // ---- Fix #4: scrollable per-entity field list --------------------------
+    // Mouse-wheel scroll when the cursor is inside the panel.
+    if (CheckCollisionPointRec(GetMousePosition(), c))
+        g_inspScroll -= GetMouseWheelMove() * 22 * sc * 2.0f;
 
     EngMapEntKind k;
     EngMapEnt_Ptr(&s->doc, EngMapEnt_Find(&s->doc, s->selectedId), &k);
+
+    // First pass: measure total content height by running a virtual layout.
+    // We do this with a dummy y that we don't clip — just accumulate.
+    // This is cheap (no draw calls) and keeps the scrollbar accurate.
+    // (A simpler alternative: fixed estimated heights per kind — but measuring
+    //  is exact and handles ramp links which vary by kind.)
+    //
+    // For simplicity we cap the scroll by a generous estimate instead of a full
+    // two-pass render; fields never exceed ~600 virtual px for any entity kind.
+    // The scroll is clamped once content is drawn below.
+
+    // Clamp scroll (conservative: allow scrolling down up to 600 virtual px).
+    float maxScroll = 600 * sc;
+    if (g_inspScroll < 0) g_inspScroll = 0;
+    if (g_inspScroll > maxScroll) g_inspScroll = maxScroll;
+
+    // Scissor to the panel rect so content below the fold is invisible.
+    BeginScissorMode((int)c.x, (int)c.y, (int)c.width, (int)c.height);
+
+    float y = c.y - g_inspScroll;
+
     Eng_UiText(TextFormat("#%d  %s", s->selectedId, EdScene_KindName(k)), X, y, 13, ENG_UI_GOLD);
     if (EdScene_SelCount(s) > 1)
         Eng_UiText(TextFormat("%d selected (editing primary)", EdScene_SelCount(s)),
@@ -536,4 +574,12 @@ void PanelInspector(EdHost *h, Rectangle c, void *u) {
                     ? (Color){ 235, 110, 110, 255 } : ENG_UI_GOLD;
         Eng_UiText(issues[i].msg, X, y, 10, col); y += 13 * sc;
     }
+
+    EndScissorMode();
+
+    // Now clamp scroll to the actual content height so it can't over-scroll.
+    float contentH = (y + g_inspScroll) - c.y;
+    float realMax = contentH - c.height;
+    if (realMax < 0) realMax = 0;
+    if (g_inspScroll > realMax) g_inspScroll = realMax;
 }

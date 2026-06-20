@@ -193,17 +193,21 @@ add_custom_target(seam-check
 add_dependencies(engine seam-check)
 
 # ---- content (overlay roots) -----------------------------------------------
-# Copy the read-only stock library/ and the bundled games/ next to the
-# executable so the content overlay (game-over-library) resolves from a path
-# relative to the binary. See docs/game-projects.md. Re-runs whenever something
-# under either tree changes — but ONLY when the `shooter` target itself relinks,
-# so a content-only edit needs a touched source or a manual copy (as data/ did).
+# Copy the content trees next to the executable so the overlay resolves from a
+# path relative to the binary (see docs/game-projects.md, docs/content-packs.md):
+#   stdlib/ — the read-only universal base (runtime fallback, game-over-stdlib)
+#   packs/  — importable pack SOURCES (not runtime-loaded; the editor imports from them)
+#   games/  — the per-game folders (writable; game content wins)
+# Re-runs whenever something under a tree changes — but ONLY when the `shooter`
+# target itself relinks, so a content-only edit needs a touched source.
 add_custom_command(TARGET shooter POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
-        ${CMAKE_SOURCE_DIR}/library $<TARGET_FILE_DIR:shooter>/library
+        ${CMAKE_SOURCE_DIR}/stdlib $<TARGET_FILE_DIR:shooter>/stdlib
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        ${CMAKE_SOURCE_DIR}/packs $<TARGET_FILE_DIR:shooter>/packs
     COMMAND ${CMAKE_COMMAND} -E copy_directory
         ${CMAKE_SOURCE_DIR}/games $<TARGET_FILE_DIR:shooter>/games
-    COMMENT "Copying library/ + games/ next to shooter binary"
+    COMMENT "Copying stdlib/ + packs/ + games/ next to shooter binary"
 )
 
 # ---- per-OS bits -----------------------------------------------------------

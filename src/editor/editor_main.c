@@ -199,7 +199,7 @@ int main(int argc, char **argv) {
     // resolving anything. Defaults to the bundled "shooter" game; Open Game /
     // New Game will repoint the game root at runtime.
     char rootBuf[512];
-    if (Eng_LocateRoot("library",       rootBuf, sizeof rootBuf)) Eng_SetLibraryRoot(rootBuf);
+    if (Eng_LocateRoot("stdlib",        rootBuf, sizeof rootBuf)) Eng_SetLibraryRoot(rootBuf);
     if (Eng_LocateRoot("games/shooter", rootBuf, sizeof rootBuf)) Eng_SetGameRoot(rootBuf);
 
     // Resolve the default map via the engine's root stack so that, once a game

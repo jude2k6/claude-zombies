@@ -536,7 +536,7 @@ int main(int argc, char **argv) {
     // defaults to the bundled "shooter" game (a positional <gamedir> override
     // comes with Open Game).
     char rootBuf[512];
-    if (Eng_LocateRoot("library",       rootBuf, sizeof rootBuf)) Eng_SetLibraryRoot(rootBuf);
+    if (Eng_LocateRoot("stdlib",        rootBuf, sizeof rootBuf)) Eng_SetLibraryRoot(rootBuf);
     if (Eng_LocateRoot("games/shooter", rootBuf, sizeof rootBuf)) Eng_SetGameRoot(rootBuf);
 
     // CLI dev modes (--validate, --screenshot-*, --anim-test, --sim-tick) are

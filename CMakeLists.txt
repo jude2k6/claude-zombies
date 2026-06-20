@@ -58,6 +58,7 @@ add_library(engine STATIC
     src/engine/gfx.c
     src/engine/app.c
     src/engine/content.c
+    src/engine/pack.c
     src/engine/eng_render.c
     src/engine/pick.c
     src/engine/debugdraw.c
@@ -132,6 +133,7 @@ add_executable(editor
     src/editor/edthumb.c
     src/editor/edfiledialog.c
     src/editor/edproject.c
+    src/editor/edimport.c
     src/editor/edlauncher.c
     src/editor/vendor/tinyfiledialogs.c
 )

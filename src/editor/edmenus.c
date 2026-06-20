@@ -12,7 +12,10 @@
 #include "builtins_internal.h"
 #include "edscene.h"
 #include "edfiledialog.h"
-#include "edproject.h"  // EdProject_Open, EdProject_New, EdProject_Read
+#include "edproject.h"  // EdProject_Open, EdProject_New, EdProject_Read, EdProject_CopyTree
+#include "edimport.h"   // EdImport_Pack — copy-on-import core
+#include "pack.h"       // Eng_PackList, EngPackInfo
+#include "content.h"    // Eng_GetGameRoot, Eng_LocateRoot
 
 #include "raygui.h"
 #include "ui.h"
@@ -680,6 +683,73 @@ static void a_open_recent_game(EdHost *h, void *u) {
     GameRecents_Push(s, dir);
 }
 
+// ---- Content-pack import (docs/content-packs.md §4-§6) ----------------------
+
+#define ED_PACK_MAX 16
+// Installed packs discovered at menu-registration time (the quick-import list).
+// Their .dir paths back the a_import_installed_pack onClicks; labels need
+// persistent storage since the menu keeps the pointers.
+static EngPackInfo g_installedPacks[ED_PACK_MAX];
+static int         g_installedPackCount;
+static char        g_packLabels[ED_PACK_MAX][96];
+
+// Shared: copy every placeable in `packDir` into the current game, then refresh
+// the palette so the imported content is immediately placeable.
+static void ImportPackInto(EdHost *h, const char *packDir) {
+    const char *gameDir = Eng_GetGameRoot();
+    if (!gameDir || !gameDir[0]) {
+        EdHost_Log(h, ED_LOG_ERROR, "import pack: no game open (use File ▸ Game project ▸ Open Game)");
+        return;
+    }
+    int n = EdImport_Pack(packDir, gameDir);
+    if (n > 0) {
+        EdScene_RescanContent(EdHost_Scene(h));
+        EdHost_Log(h, ED_LOG_INFO, "imported pack '%s' — %d files copied into %s",
+                   GetFileName(packDir), n, gameDir);
+    } else {
+        EdHost_Log(h, ED_LOG_ERROR, "import pack '%s': nothing copied", packDir);
+    }
+}
+
+// File ▸ Game project ▸ Import Pack… — pick any pack folder, import into game.
+static void a_import_pack(EdHost *h, void *u) {
+    (void)u;
+    char startDir[512];
+    if (!Eng_LocateRoot("packs", startDir, sizeof startDir))
+        EdProject_DefaultGamesDir(startDir, sizeof startDir);
+    char chosen[512];
+    if (!EdFileDialog_SelectFolder(chosen, sizeof chosen,
+                                   "Import Pack — select a pack folder", startDir)) return;
+    ImportPackInto(h, chosen);
+}
+
+// onClick for a quick-import entry: user = (void*)(intptr_t)index into g_installedPacks.
+static void a_import_installed_pack(EdHost *h, void *u) {
+    int idx = (int)(intptr_t)u;
+    if (idx < 0 || idx >= g_installedPackCount) return;
+    ImportPackInto(h, g_installedPacks[idx].dir);
+}
+
+// File ▸ Game project ▸ Install Pack… — copy a pack source into packs/ so it is
+// importable for every project. (Quick-import list refreshes on next launch.)
+static void a_install_pack(EdHost *h, void *u) {
+    (void)u;
+    char startDir[512]; EdProject_DefaultGamesDir(startDir, sizeof startDir);
+    char chosen[512];
+    if (!EdFileDialog_SelectFolder(chosen, sizeof chosen,
+                                   "Install Pack — select a pack folder to install", startDir)) return;
+    char packsRoot[512];
+    if (!Eng_LocateRoot("packs", packsRoot, sizeof packsRoot)) {
+        EdHost_Log(h, ED_LOG_ERROR, "install pack: packs/ tier not found next to the editor");
+        return;
+    }
+    const char *name = GetFileName(chosen);
+    if (!name || !name[0]) { EdHost_Log(h, ED_LOG_ERROR, "install pack: bad folder"); return; }
+    char dst[768]; snprintf(dst, sizeof dst, "%s/%s", packsRoot, name);
+    EdProject_CopyTree(chosen, dst);
+    EdHost_Log(h, ED_LOG_INFO, "installed pack '%s' into %s (restart to quick-import)", name, dst);
+}
+
 // ---- non-File actions -------------------------------------------------------
 
 static void a_undo(EdHost *h, void *u)  { (void)u; EdScene_Undo(EdHost_Scene(h)); }
@@ -782,6 +852,20 @@ static void RegisterMenus(EdHost *h) {
     // document-level New/Open above (audit P1-E).
     EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="File", .submenu="Game project", .label="New Game...",  .onClick=a_new_game });
     EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="File", .submenu="Game project", .label="Open Game...", .onClick=a_open_game });
+    // Content packs (docs/content-packs.md §4): import a pack into the current
+    // game (copy-on-import), or install a pack source into packs/ for reuse.
+    EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="File", .submenu="Game project", .label="Import Pack...",  .onClick=a_import_pack });
+    EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="File", .submenu="Game project", .label="Install Pack...", .onClick=a_install_pack });
+    // Quick-import entries for the packs present at launch (the first-party
+    // zombies pack ships under packs/). Discovered via Eng_PackList (Phase 2).
+    g_installedPackCount = Eng_PackList(g_installedPacks, ED_PACK_MAX);
+    for (int i = 0; i < g_installedPackCount; i++) {
+        snprintf(g_packLabels[i], sizeof g_packLabels[i], "Import: %s",
+                 g_installedPacks[i].name);
+        EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="File", .submenu="Game project",
+            .label=g_packLabels[i], .onClick=a_import_installed_pack,
+            .user=(void*)(intptr_t)i });
+    }
     EdHost_AddMenuSeparator(h, "File");
     // (recent games appear here via the second dynamic hook — registered below)
     EdHost_AddMenuSeparator(h, "File");

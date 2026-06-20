@@ -1,21 +1,30 @@
 # Content Packs — stdlib + importable packs, copied into a game
 
-> **Status: Phase 1 (migration) SHIPPED; phases 2–4 (scan + import + editor UX) not yet
-> built.** Captures the content-packs model worked out 2026-06-20. It extends the
-> games-as-projects overlay ([game-projects.md](game-projects.md)) with a *pack* — a
-> distributable bundle of placeables — and a copy-on-import flow at whole-pack or per-item
-> granularity.
+> **Status: Phases 1–4 SHIPPED; phase 5 (provenance sidecars) deferred.** Captures the
+> content-packs model worked out 2026-06-20. It extends the games-as-projects overlay
+> ([game-projects.md](game-projects.md)) with a *pack* — a distributable bundle of placeables —
+> and a copy-on-import flow at whole-pack or per-item granularity.
 >
-> **Done (§7/§8 phase 1):** the content tree is reorganized — `library/ → stdlib/` (commit
+> **Done (phase 1):** the content tree is reorganized — `library/ → stdlib/` (commit
 > 29a2747), and the themed content extracted into `packs/zombies/` and imported (copied) into
 > `games/shooter/` (commit 1aef637). Runtime resolves **game → stdlib** unchanged; packs are
-> import sources, not runtime-loaded. Verified: all maps `--sim-tick`, `--screenshot-zombies`
-> load log (zombie content from `games/shooter/`, base from `stdlib/`), editor catalog + `--check`.
+> import sources, not runtime-loaded.
 >
-> **Not yet built:** §8 phases 2 (pack-source scan + `pack.manifest` read), 3 (copy-on-import
-> core), 4 (editor browse-by-pack + Install/Import UI), 5 (provenance sidecars). The
-> resolved-design decisions (§9) are settled: tier name `packs/`; stdlib = fallback +
-> import-to-edit; "add to editor overall" = install the source into `packs/`.
+> **Done (phases 2–4):** the engine reads/enumerates packs (`src/engine/pack.{c,h}`:
+> `Eng_PackReadManifest`, `Eng_PackList`, `Eng_PackDirs`), a reusable copy-on-import core copies
+> a def + its referenced model/`.mtl`/textures into a game (`src/editor/edimport.{c,h}`:
+> `EdImport_Item`, `EdImport_Pack`), and the editor exposes **File ▸ Game project ▸ Import Pack… /
+> Install Pack…** plus one-click **Import: \<pack\>** entries for the packs found at launch
+> (`edmenus.c`). `EdProject_CopyTree` was made public to back Install Pack. The importer mirrors
+> the source layout: weapon models copy beside their def, mob/perk/prop models copy into the
+> shared `models/` tier — matching how the game resolves each.
+> Verified: clean `-Wall -Wextra` build; a link-test imports the zombies pack (21 files,
+> incl. the raygun viewmodel) into a fresh game folder; editor `--check` still parses maps.
+>
+> **Not yet built:** §8 phase 5 (provenance `.import` sidecars + "update from pack"), and the
+> richer per-tile pack **badges / browse-by-pack** inside the content-browser palette (§6) — the
+> menu-driven import is the shipped surface; the palette half is a follow-up. The resolved-design
+> decisions (§9) are settled.
 
 ---
 
@@ -209,17 +218,23 @@ This is a no-backwards-compat move (per the project rule) — one clean cut, not
    `stdlib/` + `packs/zombies/`, moved files, imported the pack into `games/shooter/`, repointed
    roots (`Eng_LocateRoot("stdlib")`) + CMake staging (`stdlib/ packs/ games/`). Verified maps +
    render + editor catalog. *No new runtime code beyond root-name wiring.*
-2. **Pack scan + manifest read** — engine/editor read `pack.manifest` and enumerate `packs/`
-   (+ stdlib) as **import sources**, distinct from the runtime overlay. A `Eng_PackDirs()` /
-   pack-list helper alongside `Eng_ContentDirs`.
-3. **Copy-on-import core** — a reusable import routine: given a source item (or whole pack)
-   and a target game, copy def + referenced unique assets, de-duping. (Shared by file-picker
-   import and permanent install.)
-4. **Editor UX** — pack badges + browse-by-pack + Import/Install in the content browser and
-   menus (§6), on the file picker.
-5. **Provenance sidecars (optional)** — `.import` origin tracking + "update from pack".
+2. **Pack scan + manifest read — ✅ SHIPPED** (`src/engine/pack.{c,h}`): `Eng_PackReadManifest`
+   reads a `pack.manifest` (deffile), `Eng_PackList` enumerates `packs/` (located via
+   `Eng_LocateRoot`) as **import sources** distinct from the runtime overlay, and `Eng_PackDirs`
+   is the per-pack analogue of `Eng_ContentDirs`. Engine-clean (raylib + deffile + content.h).
+3. **Copy-on-import core — ✅ SHIPPED** (`src/editor/edimport.{c,h}`): `EdImport_Item` copies one
+   def + the unique model/`.mtl`/`map_Kd` textures it references; `EdImport_Pack` does a whole
+   pack. Binary-safe (LoadFileData/SaveFileData). Mirrors the source layout (weapon model beside
+   the def vs. mob/perk/prop model in shared `models/`) so the game resolves the copy unchanged.
+4. **Editor UX — ✅ SHIPPED (menus)** (`src/editor/edmenus.c`): **File ▸ Game project ▸
+   Import Pack…** (folder picker → import into the open game, then rescan the palette),
+   **Install Pack…** (folder picker → copy a source into `packs/`, reusing the now-public
+   `EdProject_CopyTree`), and dynamic **Import: \<pack\>** quick-entries from `Eng_PackList`.
+   The richer per-tile pack badges + browse-by-pack inside the content browser remain a follow-up.
+5. **Provenance sidecars (deferred)** — `.import` origin tracking + "update from pack".
 
-Phases 1–4 are the "format + scan + editor" scope agreed; 5 is later polish.
+Phases 1–4 (format + scan + editor menus) are shipped; the palette badges (part of 4) and
+phase 5 are later polish.
 
 ---
 

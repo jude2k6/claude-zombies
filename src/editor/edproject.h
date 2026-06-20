@@ -45,6 +45,12 @@ bool EdProject_Write(const char *gameDir, const EdProject *p);
 // folder is missing or the manifest cannot be parsed.
 bool EdProject_Open(const char *gameDir);
 
+// Recursively copy the directory tree `src` into `dst` (binary-safe — uses
+// LoadFileData/SaveFileData so .glb/.png survive; creates `dst` and any subdirs
+// as needed). Used by New Game (template copy) and Install Pack (copy a pack
+// source folder into packs/).
+void EdProject_CopyTree(const char *src, const char *dst);
+
 // Scaffold a new game folder at `gameDir`:
 //   • creates <gameDir>/maps/
 //   • copies library/templates/<templateName>/ into <gameDir>/ (if present)

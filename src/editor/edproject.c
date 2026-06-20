@@ -159,7 +159,9 @@ bool EdProject_Open(const char *gameDir) {
 
 // Copy a directory tree recursively into dst (one level deep, then recurse).
 // We walk with LoadDirectoryFiles; if an entry is a directory we mkdir+recurse.
-static void CopyDirTree(const char *src, const char *dst) {
+// Public (declared in edproject.h) so Install Pack can reuse it.
+void EdProject_CopyTree(const char *src, const char *dst) {
+    MkDir(dst);   // create the destination root if absent (no-op if it exists)
     FilePathList entries = LoadDirectoryFiles(src);
     for (unsigned int i = 0; i < entries.count; i++) {
         const char *srcPath = entries.paths[i];
@@ -170,7 +172,7 @@ static void CopyDirTree(const char *src, const char *dst) {
             char dstSub[768];
             snprintf(dstSub, sizeof dstSub, "%s/%s", dst, name);
             MkDir(dstSub);  // ignore error if already exists
-            CopyDirTree(srcPath, dstSub);
+            EdProject_CopyTree(srcPath, dstSub);
         } else {
             // Regular file: copy verbatim. Use a *binary* load/save — text-mode
             // copy (LoadFileText + fputs) truncates at the first NUL byte, which
@@ -231,7 +233,7 @@ bool EdProject_New(const char *gameDir, const char *templateName,
         char tmplDir[768];
         snprintf(tmplDir, sizeof tmplDir, "%s/templates/%s", libRoot, templateName);
         if (DirectoryExists(tmplDir)) {
-            CopyDirTree(tmplDir, gameDir);
+            EdProject_CopyTree(tmplDir, gameDir);
             templateCopied = true;
         }
     }

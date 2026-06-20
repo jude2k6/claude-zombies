@@ -45,9 +45,21 @@
 > disk while the doc is clean), the **plugin seams** **6.1 `EdHost_ForEachMenuItem`** /
 > **6.2 `EdHost_AddCommitHook`** (host-routed commits) / **6.5 `EdHost_AddPlaceTool`**
 > (ABI bumped 1→2), the **§4.x P2-D restart-required banner** in Settings, and a
-> **live validation badge** (`[2E 1W]`) in the status bar. *(Still open: rotate/scale on a
-> multi-selection acts on the primary; bookmarks 1–3 also nudge gizmo mode; plugin
-> place-tools aren't rendered in the PALETTE yet; commit hooks skip scene-direct commits.)*
+> **live validation badge** (`[2E 1W]`) in the status bar.
+>
+> **Caveat cleanup (follow-up):** the four caveats from that wave are resolved.
+> *Rotate/scale on a multi-selection* already applied to every selected prop (the
+> caveat was stale — `UpdateGizmo`'s ROTATE/SCALE branches iterate `selIds`).
+> *Bookmark vs gizmo-digit conflict* fixed: `Ctrl+1..9` only saves, a set bookmark
+> recalls, and `1/2/3` fall through to gizmo mode **only when that slot is
+> unbookmarked** (so a saved bookmark shadows the mode key — the one residual).
+> *Plugin place-tools* now render under a **Plugins** category in the PALETTE
+> (hidden until a plugin registers one; clicking a tile invokes its `onPlace`;
+> the example plugin ships a demo "Marker" tool). *Commit hooks* now fire for
+> **all discrete commits** via an `EdScene_SetCommitCallback` the host wires to its
+> hook list — covering scene-direct `EdScene_Commit*`, not just the host wrappers
+> (continuous gizmo-drag commits still don't notify, by design — they'd fire per
+> frame).
 
 ---
 

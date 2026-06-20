@@ -30,9 +30,18 @@ static void status_selection(EdHost *h, char *out, int cap, void *user) {
     else         snprintf(out, cap, "plugin: idle");
 }
 
+// Demo place-tool: shows up under the PALETTE's "Plugins" category; clicking the
+// tile invokes this (the seam for plugin-contributed placement, EdHost_AddPlaceTool).
+static void place_marker(EdHost *h, void *user) {
+    (void)user;
+    EdHost_Log(h, ED_LOG_INFO, "example_plugin: 'Marker' place-tool clicked (demo)");
+}
+
 static void Register(EdHost *h) {
     EdHost_AddMenuItem(h, &(EdMenuItem){ .menu = "Plugins", .label = "Say hello", .onClick = say_hello });
     EdHost_AddStatusItem(h, status_selection, NULL);
+    EdHost_AddPlaceTool(h, &(EdHostPlaceTool){ .label = "Marker",
+        .tint = (Color){ 120, 200, 255, 255 }, .onPlace = place_marker });
 }
 
 const EdPluginDesc *ed_plugin_main(void) {

@@ -91,6 +91,15 @@ typedef struct {
     Color         col;
 } EdProxy;
 
+// One saved camera bookmark (Ctrl+1..9). `set` is false until first written.
+typedef struct {
+    float      x, y, z;         // focus position
+    float      yaw, pitch;
+    EdViewMode view;
+    float      orthoH;
+    bool       set;
+} EdBookmark;
+
 // One clipboard slot: an entity's kind plus a full copy of its struct. The
 // union holds whichever MapDoc payload matches `kind`; paste re-adds an entity
 // of that kind and copies the payload back (minus the id, which is re-minted).
@@ -124,6 +133,13 @@ typedef struct EdScene {
     MapDoc        doc;
     EngMapHistory hist;
 
+    // Fired after every discrete commit (EdScene_Commit / EdScene_CommitTagged)
+    // so a host can react — e.g. run plugin commit hooks. Set via
+    // EdScene_SetCommitCallback. Continuous gizmo-drag commits that write
+    // EngMapHistory directly do NOT call this (they'd fire every frame).
+    void        (*commitCb)(void *user);
+    void         *commitCbUser;
+
     // ---- camera / view -----------------------------------------------------
     Camera3D      cam;
     EdViewMode    view;
@@ -136,13 +152,7 @@ typedef struct EdScene {
     // ---- camera bookmarks (Ctrl+1..9 saves, bare 1..9 recalls) ---------------
     // Each slot captures the full camera state; `set` is false until written.
     // Persisted in editor.cfg as bookmark.<n>.{x,y,z,yaw,pitch,view,orthoH,set}.
-    struct {
-        float      x, y, z;         // focus position
-        float      yaw, pitch;
-        EdViewMode view;
-        float      orthoH;
-        bool       set;
-    } bookmarks[9];
+    EdBookmark bookmarks[9];
 
     // ---- selection / tools -------------------------------------------------
     // selectedId is the PRIMARY (active) selection: gizmo pivot, inspector
@@ -345,6 +355,8 @@ void EdScene_Commit(EdScene *s);             // push one undo step + mark dirty
 // never-zero tags shared across all continuous edits (gizmo + inspector sliders).
 void     EdScene_CommitTagged(EdScene *s, uint32_t tag);
 uint32_t EdScene_NextTag(EdScene *s);
+// Register a callback fired after every discrete commit (NULL clears it).
+void     EdScene_SetCommitCallback(EdScene *s, void (*cb)(void *user), void *user);
 void EdScene_Undo(EdScene *s);
 void EdScene_Redo(EdScene *s);
 void EdScene_DeleteSelected(EdScene *s);     // delete the whole selection set

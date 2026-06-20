@@ -473,6 +473,11 @@ void EdScene_Commit(EdScene *s) { EdScene_CommitTagged(s, 0); }
 void EdScene_CommitTagged(EdScene *s, uint32_t tag) {
     EngMapHistory_Commit(&s->hist, &s->doc, tag);
     s->dirty = true;
+    if (s->commitCb) s->commitCb(s->commitCbUser);
+}
+
+void EdScene_SetCommitCallback(EdScene *s, void (*cb)(void *user), void *user) {
+    s->commitCb = cb; s->commitCbUser = user;
 }
 
 // Hand out a fresh, never-zero coalesce token. Shared by every continuous edit
@@ -1363,41 +1368,34 @@ void EdScene_UpdateViewport(EdScene *s, Rectangle vp, bool inputAllowed) {
         if (IsKeyPressed(KEY_F4)) EdScene_SwitchView(s, ED_VIEW_FRONT);
         if (IsKeyPressed(KEY_F5)) EdScene_SwitchView(s, ED_VIEW_SIDE);
 
-        // Camera bookmarks: Ctrl+1..9 saves, bare 1..9 recalls (only when no
-        // placement tool is armed, so digit keys stay available as tool hotkeys).
+        // Digit keys, disambiguated so each press does exactly one thing:
+        //   Ctrl+1..9        → save a camera bookmark into that slot
+        //   bare 1..9, slot set, select mode → recall that bookmark
+        //   bare 1/2/3, slot UNset → gizmo mode (translate/rotate/scale)
+        // So 1/2/3 keep their gizmo-mode role until you actually bookmark them;
+        // Ctrl never touches the gizmo mode, and a set bookmark shadows the mode key.
         {
             bool ctrl = IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL);
-            // KEY_ONE..KEY_NINE are consecutive in raylib (48+1 = KEY_ONE for '1' = 49).
+            // KEY_ONE..KEY_NINE are consecutive in raylib (KEY_ONE='1'=49).
             for (int i = 0; i < 9; i++) {
-                int kc = KEY_ONE + i;   // KEY_ONE=49 .. KEY_NINE=57
-                if (!IsKeyPressed(kc)) continue;
+                if (!IsKeyPressed(KEY_ONE + i)) continue;
                 if (ctrl) {
-                    // Save current camera state into slot i.
-                    s->bookmarks[i].x      = s->focus.x;
-                    s->bookmarks[i].y      = s->focus.y;
-                    s->bookmarks[i].z      = s->focus.z;
-                    s->bookmarks[i].yaw    = s->yaw;
-                    s->bookmarks[i].pitch  = s->pitch;
-                    s->bookmarks[i].view   = s->view;
-                    s->bookmarks[i].orthoH = s->orthoH;
-                    s->bookmarks[i].set    = true;
+                    s->bookmarks[i] = (EdBookmark){ .x = s->focus.x, .y = s->focus.y,
+                        .z = s->focus.z, .yaw = s->yaw, .pitch = s->pitch,
+                        .view = s->view, .orthoH = s->orthoH, .set = true };
                     TraceLog(LOG_INFO, "editor: bookmark %d saved", i + 1);
                 } else if (s->placeTool == ED_PLACE_NONE && s->bookmarks[i].set) {
-                    // Recall: restore camera state.
                     EdScene_SwitchView(s, s->bookmarks[i].view);
-                    s->focus  = (Vector3){ s->bookmarks[i].x, s->bookmarks[i].y,
-                                           s->bookmarks[i].z };
+                    s->focus  = (Vector3){ s->bookmarks[i].x, s->bookmarks[i].y, s->bookmarks[i].z };
                     s->yaw    = s->bookmarks[i].yaw;
                     s->pitch  = s->bookmarks[i].pitch;
                     s->orthoH = s->bookmarks[i].orthoH;
                     TraceLog(LOG_INFO, "editor: bookmark %d recalled", i + 1);
-                }
+                } else if (i == 0) s->mode = ENG_GIZMO_TRANSLATE;
+                else if (i == 1) s->mode = ENG_GIZMO_ROTATE;
+                else if (i == 2) s->mode = ENG_GIZMO_SCALE;
             }
         }
-
-        if (IsKeyPressed(KEY_ONE))   s->mode = ENG_GIZMO_TRANSLATE;
-        if (IsKeyPressed(KEY_TWO))   s->mode = ENG_GIZMO_ROTATE;
-        if (IsKeyPressed(KEY_THREE)) s->mode = ENG_GIZMO_SCALE;
 
         if (IsKeyPressed(KEY_M)) s->materialMode = !s->materialMode;
         if (IsKeyPressed(KEY_G)) s->gridVisible = !s->gridVisible;

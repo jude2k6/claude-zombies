@@ -47,8 +47,8 @@ static bool ContainsCI(const char *hay, const char *needle);
 //  (EndScissorMode → render → restore), exactly as PanelAssets used to.
 // ============================================================================
 
-typedef enum { PAL_GEOMETRY = 0, PAL_SPAWNS, PAL_PROPS, PAL_WALLBUYS, PAL_PERKS, PAL_CATCOUNT } PalCat;
-static const char *kPalCatNames[PAL_CATCOUNT] = { "Geometry", "Spawns", "Props", "Wallbuys", "Perks" };
+typedef enum { PAL_GEOMETRY = 0, PAL_SPAWNS, PAL_PROPS, PAL_WALLBUYS, PAL_PERKS, PAL_PLUGINS, PAL_CATCOUNT } PalCat;
+static const char *kPalCatNames[PAL_CATCOUNT] = { "Geometry", "Spawns", "Props", "Wallbuys", "Perks", "Plugins" };
 
 // One resolved tile to draw. `geom` 1..4 = a primitive gesture glyph (no model);
 // 0 = an asset/spawn tile (thumbnail `model` if non-empty, else `swatch`).
@@ -60,6 +60,8 @@ typedef struct {
     EdPlaceTool tool;
     char        id[ED_PROPID_LEN]; // mob/prop/perk/weapon id ("" = n/a)
     bool        active;
+    EdActionFn  onPlace;        // plugin place-tool: invoked on click (else NULL → arm `tool`)
+    void       *onUser;
 } PalTile;
 
 static int  g_palCat = PAL_GEOMETRY;
@@ -77,12 +79,14 @@ static int PalEmit(PalTile *out, int n, int max, const char *label,
     snprintf(t->label, sizeof t->label, "%s", label);
     t->model = model; t->swatch = sw; t->geom = geom;
     t->tool  = tool;  t->active = active;
+    t->onPlace = NULL; t->onUser = NULL;   // built-in tile (not a plugin tool)
     snprintf(t->id, sizeof t->id, "%s", id);
     return n + 1;
 }
 
 // Build the tile list for the active category, applying the search filter.
-static int PaletteBuildTiles(EdScene *s, PalTile out[], int max) {
+static int PaletteBuildTiles(EdHost *h, PalTile out[], int max) {
+    EdScene *s = EdHost_Scene(h);
     int n = 0;
     switch (g_palCat) {
     case PAL_GEOMETRY:
@@ -118,6 +122,20 @@ static int PaletteBuildTiles(EdScene *s, PalTile out[], int max) {
             const EdPropDef *kd = &s->perkDefs[i];
             n = PalEmit(out, n, max, kd->name, kd->model, (Color){90,170,120,255}, 0, ED_PLACE_PERK, kd->id,
                         s->placeTool==ED_PLACE_PERK && strcmp(s->placePerkId, kd->id)==0);
+        }
+        break;
+    case PAL_PLUGINS:
+        // Place-tools contributed by plugins (EdHost_AddPlaceTool). These carry an
+        // onPlace callback instead of a built-in placeTool, invoked on click below.
+        for (int i = 0; i < EdHost_PlaceToolCount(h) && n < max; i++) {
+            const EdHostPlaceTool *pt = EdHost_PlaceToolAt(h, i);
+            if (!ContainsCI(pt->label, g_palFilter)) continue;
+            PalTile *t = &out[n++];
+            memset(t, 0, sizeof *t);
+            snprintf(t->label, sizeof t->label, "%s", pt->label);
+            t->swatch  = pt->tint.a ? pt->tint : (Color){130,130,160,255};
+            t->onPlace = pt->onPlace;
+            t->onUser  = pt->user;
         }
         break;
     default: break;
@@ -178,8 +196,13 @@ static void PanelPalette(EdHost *h, Rectangle c, void *u) {
                         rightR.width, rightR.height - searchH - 4 * sc };
 
     // ---- build the active category's tiles ---------------------------------
-    PalTile tiles[ED_MAX_PROPDEFS + ED_MAX_MOBDEFS + 8];
-    int nTiles = PaletteBuildTiles(s, tiles, (int)(sizeof tiles / sizeof tiles[0]));
+    // The Plugins category is hidden until a plugin registers a place-tool; if
+    // we're parked on it and it just emptied, fall back to Geometry.
+    bool hasPlugins = EdHost_PlaceToolCount(h) > 0;
+    if (g_palCat == PAL_PLUGINS && !hasPlugins) g_palCat = PAL_GEOMETRY;
+
+    PalTile tiles[ED_MAX_PROPDEFS + ED_MAX_MOBDEFS + ED_MAX_PLACE_TOOLS + 8];
+    int nTiles = PaletteBuildTiles(h, tiles, (int)(sizeof tiles / sizeof tiles[0]));
 
     // ---- tile grid metrics -------------------------------------------------
     float cellW = 64 * sc, cellH = 78 * sc, pad = 6 * sc;
@@ -196,19 +219,20 @@ static void PanelPalette(EdHost *h, Rectangle c, void *u) {
     BeginScissorMode((int)c.x, (int)c.y, (int)c.width, (int)c.height);
 
     // ---- category column ---------------------------------------------------
-    // 7 rows total: "Select" + PAL_CATCOUNT (5) categories + 1 gap row between
-    // Select and the categories. Divide the available height so all rows fit
-    // without clipping (T3-1). Gap between Select and categories = 1 row-pitch.
-    // Minimum button height: 16 scaled px so text stays legible at any panel size.
-    const int kCatRows = 1 + PAL_CATCOUNT;  // Select row + category rows
-    const int kGapRows = 1;                  // extra pitch gap after Select
-    float bh = fmaxf(16.0f * sc,
-                     colR.height / (float)(kCatRows + kGapRows));
+    // Rows = "Select" + the visible categories (Plugins is hidden until a plugin
+    // registers a place-tool). Size the button pitch from the ACTUAL row count so
+    // every row fits the short bottom panel without clipping (T3-1), with a small
+    // visual gap after Select folded in rather than a whole wasted row.
+    int nCats = hasPlugins ? PAL_CATCOUNT : PAL_CATCOUNT - 1;
+    int nRowsCol = 1 + nCats;                 // Select + categories
+    float gap = 4 * sc;
+    float bh = fmaxf(14.0f * sc, (colR.height - gap) / (float)nRowsCol);
     float by = colR.y;
     if (Eng_UiToolButton((Rectangle){ colR.x, by, colR.width, bh }, "Select", s->placeTool == ED_PLACE_NONE))
         s->placeTool = ED_PLACE_NONE;
-    by += bh * (1 + kGapRows);   // one button height + one gap pitch
+    by += bh + gap;   // one button height + a small visual gap
     for (int ci = 0; ci < PAL_CATCOUNT; ci++) {
+        if (ci == PAL_PLUGINS && !hasPlugins) continue;   // hide the empty Plugins tab
         if (Eng_UiToolButton((Rectangle){ colR.x, by, colR.width, bh }, kPalCatNames[ci], g_palCat == ci))
             g_palCat = ci;
         by += bh;
@@ -259,8 +283,10 @@ static void PanelPalette(EdHost *h, Rectangle c, void *u) {
         Eng_UiText(lbl, cell.x + (cell.width - fw) * 0.5f, q.y + q.height + 2 * sc, 10,
                    tiles[i].active ? ENG_UI_GOLD : ENG_UI_TEXT);
 
-        if (interactive && hot && IsMouseButtonPressed(MOUSE_BUTTON_LEFT))
-            PaletteArm(s, &tiles[i]);
+        if (interactive && hot && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+            if (tiles[i].onPlace) tiles[i].onPlace(h, tiles[i].onUser);  // plugin tool
+            else PaletteArm(s, &tiles[i]);
+        }
     }
     EndScissorMode();
 

@@ -174,6 +174,15 @@ void EdHost_AddCommitHook(EdHost *h, void (*fn)(EdHost *h, void *user), void *us
     h->commitHookCount++;
 }
 
+// Fired by EdScene after every discrete commit (registered in EdHost_Create), so
+// hooks run for BOTH host-routed and scene-direct commits — not only the
+// EdHost_CommitEdit* wrappers. `user` is the EdHost.
+static void HostFireCommitHooks(void *user) {
+    EdHost *h = user;
+    for (int i = 0; i < h->commitHookCount; i++)
+        h->commitHooks[i].fn(h, h->commitHooks[i].user);
+}
+
 // ---- 6.5: plugin place-tools -----------------------------------------------
 
 void EdHost_AddPlaceTool(EdHost *h, const EdHostPlaceTool *tool) {
@@ -215,16 +224,11 @@ const char *EdHost_LogLine(EdHost *h, int i, EdLogLevel *outLvl) {
 MapDoc  *EdHost_Doc(EdHost *h)        { return &h->scene->doc; }
 int      EdHost_SelectedId(EdHost *h) { return h->scene->selectedId; }
 void     EdHost_Select(EdHost *h, int id) { EdScene_SelectClick(h->scene, id, false); }
-void EdHost_CommitEdit(EdHost *h) {
-    EdScene_Commit(h->scene);
-    for (int i = 0; i < h->commitHookCount; i++)
-        h->commitHooks[i].fn(h, h->commitHooks[i].user);
-}
-void EdHost_CommitEditTagged(EdHost *h, uint32_t tag) {
-    EdScene_CommitTagged(h->scene, tag);
-    for (int i = 0; i < h->commitHookCount; i++)
-        h->commitHooks[i].fn(h, h->commitHooks[i].user);
-}
+// Commit hooks fire via the EdScene commit callback (HostFireCommitHooks),
+// which covers these wrappers AND any scene-direct EdScene_Commit* — so we do
+// NOT loop the hooks here (that would double-fire for host-routed commits).
+void EdHost_CommitEdit(EdHost *h)                 { EdScene_Commit(h->scene); }
+void EdHost_CommitEditTagged(EdHost *h, uint32_t tag) { EdScene_CommitTagged(h->scene, tag); }
 uint32_t EdHost_NewEditTag(EdHost *h) { return EdScene_NextTag(h->scene); }
 EdScene *EdHost_Scene(EdHost *h)      { return h->scene; }
 float    EdHost_UiScale(EdHost *h)    { return h->scene->uiScale; }
@@ -237,6 +241,7 @@ bool     EdHost_PanelsInteractive(EdHost *h) {
 EdHost *EdHost_Create(EdScene *scene) {
     EdHost *h = calloc(1, sizeof *h);
     h->scene    = scene;
+    EdScene_SetCommitCallback(scene, HostFireCommitHooks, h);  // 6.2: notify on every commit
     h->openMenu = -1;
     h->openSubmenu = -1;
     h->leftW    = 160;

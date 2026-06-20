@@ -402,8 +402,13 @@ static void EdUpdateCamera(EdScene *s, float dt, Rectangle vp, bool allowInput) 
 
 // ---- pick selection --------------------------------------------------------
 
-static void PickSelection(EdScene *s, bool additive) {
-    Ray ray = Eng_PickRayFromScreen(s->cam, s->vpMouse, s->vpW, s->vpH);
+// Minimum cursor travel (viewport px) before a left-drag counts as a marquee
+// rather than a click — keeps a slightly-shaky click from sweeping a rectangle.
+#define ED_MARQUEE_MIN_PX 4.0f
+
+// Nearest proxy under the cursor, or -1 if the ray hits empty space.
+static int PickProxyAt(EdScene *s, Vector2 vpMouse) {
+    Ray ray = Eng_PickRayFromScreen(s->cam, vpMouse, s->vpW, s->vpH);
     int   best = -1;
     float bestT = 1e30f;
     for (int i = 0; i < s->proxyCount; i++) {
@@ -412,10 +417,28 @@ static void PickSelection(EdScene *s, bool additive) {
             bestT = t; best = s->proxies[i].id;
         }
     }
-    // Shift-click into empty space is a no-op (keeps the current set); a plain
-    // click into empty space clears. Hits toggle (additive) or replace.
-    if (additive && best < 0) return;
-    EdScene_SelectClick(s, best, additive);
+    return best;
+}
+
+// Resolve a finished marquee: select every proxy whose box centre projects into
+// the swept rectangle. Non-additive replaces the set; additive (shift) adds to
+// it. Proxies behind the camera are skipped (GetWorldToScreenEx would otherwise
+// project them to a bogus on-screen point).
+static void MarqueeSelect(EdScene *s) {
+    float minX = fminf(s->marqueeStart.x, s->marqueeCur.x);
+    float maxX = fmaxf(s->marqueeStart.x, s->marqueeCur.x);
+    float minY = fminf(s->marqueeStart.y, s->marqueeCur.y);
+    float maxY = fmaxf(s->marqueeStart.y, s->marqueeCur.y);
+    if (!s->marqueeAdditive) EdScene_ClearSelection(s);
+
+    Vector3 fwd = Vector3Normalize(Vector3Subtract(s->cam.target, s->cam.position));
+    for (int i = 0; i < s->proxyCount; i++) {
+        Vector3 c = Vector3Scale(Vector3Add(s->proxies[i].box.min, s->proxies[i].box.max), 0.5f);
+        if (Vector3DotProduct(Vector3Subtract(c, s->cam.position), fwd) <= 0.0f) continue;
+        Vector2 sp = GetWorldToScreenEx(c, s->cam, s->vpW, s->vpH);
+        if (sp.x >= minX && sp.x <= maxX && sp.y >= minY && sp.y <= maxY)
+            SelAdd(s, s->proxies[i].id);   // no-op if already in the set
+    }
 }
 
 // ---- commit + sector query (placement itself lives in edplace.c) -----------
@@ -1293,7 +1316,18 @@ void EdScene_UpdateViewport(EdScene *s, Rectangle vp, bool inputAllowed) {
                 if (hot == ENG_GIZMO_AXIS_NONE && !BeginSectorResize(s) &&
                     !BeginSectorHeight(s) && !BeginWallEdit(s)) {
                     bool additive = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
-                    PickSelection(s, additive);
+                    int hitId = PickProxyAt(s, s->vpMouse);
+                    if (hitId >= 0) {
+                        // Hit a proxy: click-select it immediately (toggle if shift).
+                        EdScene_SelectClick(s, hitId, additive);
+                    } else {
+                        // Empty space: arm a rubber-band marquee, resolved on release.
+                        s->marqueeActive   = true;
+                        s->marqueeMoved    = false;
+                        s->marqueeAdditive = additive;
+                        s->marqueeStart    = s->vpMouse;
+                        s->marqueeCur      = s->vpMouse;
+                    }
                 }
             }
         }
@@ -1312,6 +1346,24 @@ void EdScene_UpdateViewport(EdScene *s, Rectangle vp, bool inputAllowed) {
         else                          s->heightEditing = false;
     } else {
         UpdateGizmo(s, inputAllowed && !camBusy && s->placeTool == ED_PLACE_NONE);
+    }
+
+    // Rubber-band marquee: track the drag and resolve the selection on release.
+    // Begun in the press handler above when a click lands in empty space.
+    if (s->marqueeActive) {
+        if (!inputAllowed || camBusy || s->placeTool != ED_PLACE_NONE) {
+            s->marqueeActive = false;   // focus / camera / tool took over → cancel
+        } else if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+            s->marqueeCur = s->vpMouse;
+            if (Vector2Length(Vector2Subtract(s->marqueeCur, s->marqueeStart)) > ED_MARQUEE_MIN_PX)
+                s->marqueeMoved = true;
+        } else {
+            // Released: a real drag selects the swept region; a non-drag is just
+            // an empty click (clears the set, unless shift was held).
+            if (s->marqueeMoved) MarqueeSelect(s);
+            else                 EdScene_SelectClick(s, -1, s->marqueeAdditive);
+            s->marqueeActive = false;
+        }
     }
 }
 
@@ -1425,4 +1477,17 @@ void EdScene_DrawViewport(EdScene *s, Rectangle vp) {
     DrawTextureRec(s->vpTex.texture,
                    (Rectangle){ 0, 0, (float)s->vpW, -(float)s->vpH },
                    (Vector2){ vp.x, vp.y }, WHITE);
+
+    // Rubber-band marquee overlay: a 2D rectangle in window space (the marquee
+    // coords are viewport-relative, so offset by the viewport origin).
+    if (s->marqueeActive && s->marqueeMoved) {
+        Rectangle m = {
+            vp.x + fminf(s->marqueeStart.x, s->marqueeCur.x),
+            vp.y + fminf(s->marqueeStart.y, s->marqueeCur.y),
+            fabsf(s->marqueeCur.x - s->marqueeStart.x),
+            fabsf(s->marqueeCur.y - s->marqueeStart.y),
+        };
+        DrawRectangleRec(m, (Color){ 120, 200, 255, 40 });
+        DrawRectangleLinesEx(m, 1.0f, (Color){ 120, 200, 255, 220 });
+    }
 }

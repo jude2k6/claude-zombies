@@ -167,6 +167,16 @@ typedef struct EdScene {
     EngGizmoDrag  heightDrag;
     float         heightStartLow, heightStartHigh;  // sector heights at grab
 
+    // Rubber-band marquee multi-select: a left-drag that begins in empty space
+    // (no proxy/gizmo/handle under the cursor) sweeps out a screen rectangle;
+    // release selects every entity whose proxy centre projects inside it. A drag
+    // shorter than ED_MARQUEE_MIN_PX is treated as a plain empty click instead.
+    bool          marqueeActive;    // a marquee drag is in progress
+    bool          marqueeMoved;     // moved past the start threshold (click vs drag)
+    bool          marqueeAdditive;  // shift at press → add to the set, else replace
+    Vector2       marqueeStart;     // viewport-relative press position
+    Vector2       marqueeCur;       // viewport-relative current position
+
     // Ramp link-pick mode: 0 = off, 1 = picking link A, 2 = picking link B. Armed
     // from the Inspector; the next viewport click on a sector sets that link on
     // the selected ramp. The Inspector reads/sets this directly on EdScene.

@@ -114,8 +114,13 @@ height handle owns vertical editing.
 
 ### Tier 3 — tail (smaller)
 
-- No marquee/rubber-band multi-select (`PickSelection` in edscene.c is click +
-  shift-click only).
+- Marquee/rubber-band multi-select — **DONE**. A left-drag beginning in empty
+  space (`PickProxyAt` returns -1) sweeps a screen rectangle; release selects
+  every proxy whose box centre projects inside it (`MarqueeSelect`, edscene.c),
+  shift = additive. Below `ED_MARQUEE_MIN_PX` travel it falls back to a plain
+  empty-click clear, so click-select is unchanged. Overlay drawn in window space
+  after the viewport blit (`EdScene_DrawViewport`). Drag paths aren't
+  screenshot-testable; verified by build + static render.
 - Hierarchy is a flat `#id kind` list — double-click-to-frame DONE (a row
   double-click calls `EdScene_FrameSelected`); grouping + inline rename still open
   (`PanelHierarchy` in edpanels.c). Also: `F` now frames AND zooms the selection
@@ -137,7 +142,8 @@ height handle owns vertical editing.
 
 ## Recommended order for a fresh session
 Items **1**–**8** are done (8's vertical handle; its "multi-sector" half remains).
-What's left: the Tier 3 tail (below) — all small and independent — plus the one
-larger deferred refactor, the `edgizmo.c` extraction (see item 3). Good next picks
-from the tail: Play-Test binary name (game-agnostic goal) and the misleading
-undo-depth label are quick; marquee select is the most-wanted bigger one.
+What's left: the remaining Tier 3 tail (below) — all small and independent — plus
+the one larger deferred refactor, the `edgizmo.c` extraction (see item 3). The
+most-wanted tail item (marquee multi-select) is now done; the open tail is
+hierarchy grouping/inline-rename, placement-time out-of-bounds toast, and the
+SECTOR copy/paste duplicate-name check.

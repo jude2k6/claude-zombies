@@ -704,6 +704,7 @@ static void SettingsModal(EdHost *h, Rectangle area, void *u) {
     cy += 18 * sc; // DISPLAY header
     cy += 24 * sc; // vsync checkbox
     cy += 24 * sc; // fps slider
+    cy += 20 * sc; // "Requires restart" banner header
     float contentH = cy;
 
     // Clamp scroll to [0, max scrollable].
@@ -746,10 +747,15 @@ static void SettingsModal(EdHost *h, Rectangle area, void *u) {
     float depth = (float)s->undoDepth;
     OvSlider(X, W, &y, sc, "Undo depth (next open)", &depth, 16, 256, "%.0f"); s->undoDepth = (int)depth;
 
-    OvSection(X, W, &y, sc, "DISPLAY   (* applies on restart)");
-    OvCheck(X, &y, sc, " VSync*", &s->vsync);
+    OvSection(X, W, &y, sc, "DISPLAY");
+    // "Requires restart" banner — groups VSync and FPS cap (window settings that
+    // only take effect when the editor is restarted).
+    Eng_UiText("\xe2\x80\x94 Requires restart \xe2\x80\x94", X, y + 2 * sc, 11,
+               (Color){ 180, 160, 70, 220 });
+    y += 20 * sc;
+    OvCheck(X, &y, sc, " VSync", &s->vsync);
     float fps = (float)s->fpsCap;
-    OvSlider(X, W, &y, sc, "FPS cap*", &fps, 0, 240, "%.0f"); s->fpsCap = (int)fps;
+    OvSlider(X, W, &y, sc, "FPS cap", &fps, 0, 240, "%.0f"); s->fpsCap = (int)fps;
 
     EndScissorMode();
 }

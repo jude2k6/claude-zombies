@@ -36,7 +36,12 @@ typedef struct EdScene EdScene;   // concrete type in edscene.h
 // ---- plugin ABI ------------------------------------------------------------
 // Bump ED_PLUGIN_ABI on any breaking change to the EdHost_* surface; dynamic
 // plugins whose abiVersion doesn't match are refused at load.
-#define ED_PLUGIN_ABI   1
+//
+// History:
+//   1 — initial surface
+//   2 — added EdHost_ForEachMenuItem, EdHost_AddCommitHook,
+//       EdHost_AddPlaceTool / EdHost_PlaceToolCount / EdHost_PlaceToolAt
+#define ED_PLUGIN_ABI   2
 #define ED_PLUGIN_ENTRY "ed_plugin_main"   // symbol a .so must export
 
 typedef void (*EdRegisterFn)(EdHost *host);
@@ -148,6 +153,50 @@ float    EdHost_UiScale(EdHost *h);
 // raygui widgets are already locked in those states; use this to gate manual
 // CheckCollisionPointRec/IsMouseButtonPressed handling (e.g. a list row click).
 bool     EdHost_PanelsInteractive(EdHost *h);
+
+// ---- 6.1: menu-item iterator (command-palette prerequisite) ----------------
+// Calls `fn` once per registered static menu item, in registration order
+// (menu by menu, items within each menu in order). Separator items are
+// included (label == NULL). Dynamic-item providers registered via
+// EdHost_SetMenuDynamic are NOT enumerated here — they are per-frame, not
+// static descriptors. Read-only; `fn` must not call EdHost_AddMenuItem.
+void EdHost_ForEachMenuItem(EdHost *h,
+    void (*fn)(const char *menu, const char *label, const char *shortcut,
+               const EdMenuItem *item, void *user),
+    void *user);
+
+// ---- 6.2: commit hooks (post-edit notification) ----------------------------
+// Register a hook called after every host-routed commit (EdHost_CommitEdit /
+// EdHost_CommitEditTagged). Hooks fire in registration order, after the
+// underlying EdScene_Commit* call completes.
+//
+// NOTE: commits made by calling EdScene_Commit* DIRECTLY (e.g. inside
+// edscene.c) do NOT fire these hooks — they bypass EdHost entirely. Wiring
+// scene-direct commits is a follow-up task.
+#define ED_MAX_COMMIT_HOOKS 8
+void EdHost_AddCommitHook(EdHost *h, void (*fn)(EdHost *h, void *user), void *user);
+
+// ---- 6.5: plugin-contributed place-palette entries -------------------------
+// A plugin may register custom place-tool entries. Each entry has a label,
+// an optional RGBA tint (use (Color){0,0,0,0} for "no tint"), and a callback
+// fired when the tool is activated (mirroring how built-in palette entries arm
+// h->scene->placeTool). Storage is a fixed array capped at ED_MAX_PLACE_TOOLS.
+//
+// NOTE: the built-in PALETTE panel (edpanels.c) does not yet render plugin
+// place-tools — rendering is a follow-up. This seam provides the storage,
+// registration, and read accessors so the feature can land incrementally.
+#define ED_MAX_PLACE_TOOLS 16
+
+typedef struct {
+    const char  *label;            // display name in the place palette
+    Color        tint;             // accent / icon tint; {0,0,0,0} = no tint
+    EdActionFn   onPlace;          // called when the tool is activated
+    void        *user;
+} EdHostPlaceTool;
+
+void             EdHost_AddPlaceTool(EdHost *h, const EdHostPlaceTool *tool);
+int              EdHost_PlaceToolCount(EdHost *h);
+const EdHostPlaceTool *EdHost_PlaceToolAt(EdHost *h, int i);
 
 // ============================================================================
 //  Shell lifecycle (used by editor_main.c, not by plugins)

@@ -29,8 +29,11 @@
                       MAPDOC_MAX_PERKS + MAPDOC_MAX_SECTORS + 4)
 
 // View modes. FLY is the free no-clip perspective camera; ORBIT and TOP are
-// orthographic editor views pivoting around a focus point.
-typedef enum { ED_VIEW_FLY = 0, ED_VIEW_ORBIT, ED_VIEW_TOP } EdViewMode;
+// orthographic editor views pivoting around a focus point. FRONT looks along
+// -Z (camera south of focus, level); SIDE looks along -X (camera west of
+// focus, level). Both are orthographic, pan/zoom like TOP, no free rotate.
+typedef enum { ED_VIEW_FLY = 0, ED_VIEW_ORBIT, ED_VIEW_TOP,
+               ED_VIEW_FRONT, ED_VIEW_SIDE } EdViewMode;
 
 // Placement tool: what a ground-click drops. NONE = click selects instead.
 // ED_PLACE_MOB drops a SPAWN whose mob tag is `placeMobId` — the data-driven
@@ -109,6 +112,15 @@ typedef struct EdScene {
     char          path[512];
     bool          dirty;            // unsaved edits since last save/open
     float         autosaveAccum;    // seconds of dirty time since last autosave
+    long          diskMtime;        // mtime stamp at last Open/Save (live-reload guard)
+
+    // ---- measure / distance tool (T key) -------------------------------------
+    // measureMode: T toggles; first LMB sets pointA, second sets pointB and draws
+    // the line+label. A third click resets to a new A. Esc exits measure mode.
+    bool          measureMode;
+    bool          measureHasA;      // point A is set (first click done)
+    bool          measureHasB;      // point B is set (second click done, draw seg)
+    Vector3       measureA, measureB;  // world positions (ground pick)
     MapDoc        doc;
     EngMapHistory hist;
 
@@ -120,6 +132,17 @@ typedef struct EdScene {
     Vector3       focus;            // orbit/top: point the view pivots around
     float         orthoH;           // orbit/top: orthographic view height (zoom)
     bool          materialMode;     // M key toggle: draw textured geometry instead of proxy boxes
+
+    // ---- camera bookmarks (Ctrl+1..9 saves, bare 1..9 recalls) ---------------
+    // Each slot captures the full camera state; `set` is false until written.
+    // Persisted in editor.cfg as bookmark.<n>.{x,y,z,yaw,pitch,view,orthoH,set}.
+    struct {
+        float      x, y, z;         // focus position
+        float      yaw, pitch;
+        EdViewMode view;
+        float      orthoH;
+        bool       set;
+    } bookmarks[9];
 
     // ---- selection / tools -------------------------------------------------
     // selectedId is the PRIMARY (active) selection: gizmo pivot, inspector

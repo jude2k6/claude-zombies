@@ -28,13 +28,26 @@
 > see [scene-builder.md](scene-builder.md) §5.7. Also shipped:
 > **5.3 Asset Browser Panel** (the ASSETS panel — maps/models/textures from the content
 > overlay, model thumbnails, click-a-map-to-open; `edassets.{c,h}` + `edthumb.{c,h}` —
-> models are browse-only, props place from the Props palette). A later wave shipped
+> models are browse-only, props place from the Props palette; subsequently **relocated
+> to a bottom-dock tab** beside PALETTE/CONSOLE so INSPECTOR owns the full right zone). A later wave shipped
 > **1.3 Multi-Select** (Shift-click; box-select still open), **1.4 Copy / Paste / Duplicate**
 > (Ctrl+C/X/V/D + Ctrl+A select-all), **inspector per-surface texture override** (the `tex`
 > field on walls/obstacles, §2.4-adjacent), and **autosave + crash recovery** (§4.7). Then
 > **5.1 Play-Test Launch** (`Ctrl+R` — save + spawn the game on the current map) closed out
 > the Top 5. (Beyond the editor backlog, the games-as-projects **New/Open Game** UI also
 > shipped — see [game-projects.md](game-projects.md) §8 / §10.)
+>
+> **SHIPPED 2026-06-20 (parallel wave):** **1.3 box-select** (marquee/rubber-band, the
+> open half of multi-select), **2.2 Ortho front/side views** (F4/F5; tool-strip view-cycle
+> now fly→iso→top→front→side), **2.3 Camera bookmarks** (Ctrl+1–9 save / 1–9 recall,
+> persisted in `editor.cfg`), **1.6 Measure tool** (`T` toggles; two clicks → distance
+> label via debugdraw), **5.2 Live reload** (auto-reopens the `.map` when it changes on
+> disk while the doc is clean), the **plugin seams** **6.1 `EdHost_ForEachMenuItem`** /
+> **6.2 `EdHost_AddCommitHook`** (host-routed commits) / **6.5 `EdHost_AddPlaceTool`**
+> (ABI bumped 1→2), the **§4.x P2-D restart-required banner** in Settings, and a
+> **live validation badge** (`[2E 1W]`) in the status bar. *(Still open: rotate/scale on a
+> multi-selection acts on the primary; bookmarks 1–3 also nudge gizmo mode; plugin
+> place-tools aren't rendered in the PALETTE yet; commit hooks skip scene-direct commits.)*
 
 ---
 
@@ -540,11 +553,13 @@ reshuffle + submenus, status-bar/window-title cleanup, Console clear/filter, the
 launcher); these **P2 polish** items and a couple of deferred ideas remain — folded
 here so the audit file could be retired (full audit + resolution log is in git):
 
-- **Place-tool feedback in the viewport** — armed tool shows no cursor change / ghost
-  preview; only the highlighted palette button. Add a viewport overlay ("PLACING: …")
-  or a ghost entity. *(P2-A)*
-- **Hierarchy rows** — show `KIND (descriptor)` (e.g. `SPAWN (ZOMBIE)`) not just
-  `#id KIND`; optional drag-to-reorder. *(P2-B)*
+- **Place-tool feedback in the viewport** — ✅ SHIPPED: the `ToolStrip` overlay
+  (registered via `EdHost_AddViewportOverlay` in `edpanels.c`) shows a right-aligned
+  `PLACING: <tool>` cue when a placement tool is armed; `EdScene_DrawViewport`
+  (`edscene.c`) draws a snapped ground ghost (sphere + box) for point/line tools. *(P2-A)*
+- **Hierarchy rows — descriptor** — ✅ SHIPPED: `PanelHierarchy` (`edpanels.c`) now
+  shows descriptors alongside `#id KIND` (e.g. `obstacle 4×4`, `wall [door]`, `PLAYER`).
+  **Still open:** drag-to-reorder rows and inline rename. *(P2-B)*
 - **Settings dialog** — separate restart-required settings (VSync/FPS/window) into a
   banner-marked section instead of a `*` in the label. *(P2-D)*
 - **Wall 2-click state** — surface "click 2 of 2" in the viewport, not only the palette
@@ -601,13 +616,18 @@ separate feature in `src/game/`.
 ---
 
 ### 5.3 Asset Browser Panel — ✅ SHIPPED
-A right-zone panel listing the available assets: maps, models (GLB), textures — scanned
+A panel listing the available assets: maps, models (GLB), textures — scanned
 from the **content overlay** (`Eng_ContentDirs`, game-over-library), not a hardcoded
 `data/` path. Implemented as `edassets.{c,h}` (the de-duped index, held on `EdScene`) +
 the `PanelAssets` built-in + `edthumb.{c,h}` (off-screen GLB thumbnail cache). Click a map
 to open it (through the unsaved-changes guard); models/textures are browse-only previews
 (props place from the catalog-backed Props palette), with per-model thumbnails rendered
 off-screen and cached.
+
+**Location update:** ASSETS was subsequently **moved from the right zone to a bottom-dock
+tab** (registered as `ED_DOCK_BOTTOM` in `RegisterPanels`, `edpanels.c`), so INSPECTOR
+now owns the full right zone. ASSETS sits as a tab beside PALETTE and CONSOLE in the
+bottom dock.
 
 > **Implementation note worth keeping:** the host wraps every panel `draw` in a
 > `BeginScissorMode` (edhost.c). `BeginTextureMode` honours the active GL scissor, so an
@@ -680,11 +700,16 @@ a live validation overlay, a dependent panel that auto-refreshes).
 
 ---
 
-### 6.3 `EdHost_AddViewportOverlay` — custom 2D overlay per frame
+### 6.3 `EdHost_AddViewportOverlay` — custom 2D overlay per frame — ✅ SHIPPED
 A registration API that lets a plugin draw directly into the viewport after the 3D scene
 and gizmo layers. Returns a `Rectangle` of the viewport in screen coords; the plugin
 calls raygui or raylib 2D draw commands. Required for a "tape measure" or "snap preview"
 overlay that a third-party plugin would naturally implement.
+
+**As built:** `EdHost_AddViewportOverlay` (declared in `edhost.h`, implemented in
+`edhost.c`) backs the `ToolStrip` viewport overlay registered in `edpanels.c`; the host
+reserves a band atop the viewport and calls all registered overlay functions each frame
+after the scene blit.
 
 **Effort:** S — a callback list in `EdHost` called during viewport draw, after the scene
 blit.

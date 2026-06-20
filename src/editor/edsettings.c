@@ -40,8 +40,26 @@ void EdScene_LoadSettings(EdScene *s, EngCfg *cfg) {
     s->vsync              = EngCfg_Bool (cfg, "win.vsync",      true);
     s->fpsCap             = EngCfg_Int  (cfg, "win.fpsCap",     60);
 
-    if (s->viewDefault < ED_VIEW_FLY || s->viewDefault > ED_VIEW_TOP) s->viewDefault = ED_VIEW_ORBIT;
+    if (s->viewDefault < ED_VIEW_FLY || s->viewDefault > ED_VIEW_SIDE) s->viewDefault = ED_VIEW_ORBIT;
     if (s->undoDepth < 1) s->undoDepth = ENGMAPHISTORY_DEFAULT_DEPTH;
+
+    // Camera bookmarks (9 slots).
+    for (int i = 0; i < 9; i++) {
+        char k[48];
+        snprintf(k, sizeof k, "bookmark.%d.set", i + 1);
+        s->bookmarks[i].set = EngCfg_Bool(cfg, k, false);
+        if (!s->bookmarks[i].set) continue;
+        snprintf(k, sizeof k, "bookmark.%d.x",      i + 1); s->bookmarks[i].x      = EngCfg_Float(cfg, k, 0.0f);
+        snprintf(k, sizeof k, "bookmark.%d.y",      i + 1); s->bookmarks[i].y      = EngCfg_Float(cfg, k, 0.0f);
+        snprintf(k, sizeof k, "bookmark.%d.z",      i + 1); s->bookmarks[i].z      = EngCfg_Float(cfg, k, 0.0f);
+        snprintf(k, sizeof k, "bookmark.%d.yaw",    i + 1); s->bookmarks[i].yaw    = EngCfg_Float(cfg, k, 0.0f);
+        snprintf(k, sizeof k, "bookmark.%d.pitch",  i + 1); s->bookmarks[i].pitch  = EngCfg_Float(cfg, k, -0.6f);
+        snprintf(k, sizeof k, "bookmark.%d.view",   i + 1); s->bookmarks[i].view   = (EdViewMode)EngCfg_Int(cfg, k, (int)ED_VIEW_ORBIT);
+        snprintf(k, sizeof k, "bookmark.%d.orthoH", i + 1); s->bookmarks[i].orthoH = EngCfg_Float(cfg, k, 40.0f);
+        // Clamp view to valid range.
+        if (s->bookmarks[i].view < ED_VIEW_FLY || s->bookmarks[i].view > ED_VIEW_SIDE)
+            s->bookmarks[i].view = ED_VIEW_ORBIT;
+    }
 }
 
 // Emit every SCENE-OWNED setting key (cam/view/grid/edit/ui/win) into an open
@@ -71,6 +89,21 @@ void EdScene_PutSettingKeys(const EdScene *s, FILE *f) {
     EngCfg_PutInt  (f, "win.height",    s->winH);
     EngCfg_PutBool (f, "win.vsync",     s->vsync);
     EngCfg_PutInt  (f, "win.fpsCap",    s->fpsCap);
+
+    // Camera bookmarks.
+    for (int i = 0; i < 9; i++) {
+        char k[48];
+        snprintf(k, sizeof k, "bookmark.%d.set", i + 1);
+        EngCfg_PutBool(f, k, s->bookmarks[i].set);
+        if (!s->bookmarks[i].set) continue;
+        snprintf(k, sizeof k, "bookmark.%d.x",      i + 1); EngCfg_PutFloat(f, k, s->bookmarks[i].x);
+        snprintf(k, sizeof k, "bookmark.%d.y",      i + 1); EngCfg_PutFloat(f, k, s->bookmarks[i].y);
+        snprintf(k, sizeof k, "bookmark.%d.z",      i + 1); EngCfg_PutFloat(f, k, s->bookmarks[i].z);
+        snprintf(k, sizeof k, "bookmark.%d.yaw",    i + 1); EngCfg_PutFloat(f, k, s->bookmarks[i].yaw);
+        snprintf(k, sizeof k, "bookmark.%d.pitch",  i + 1); EngCfg_PutFloat(f, k, s->bookmarks[i].pitch);
+        snprintf(k, sizeof k, "bookmark.%d.view",   i + 1); EngCfg_PutInt  (f, k, (int)s->bookmarks[i].view);
+        snprintf(k, sizeof k, "bookmark.%d.orthoH", i + 1); EngCfg_PutFloat(f, k, s->bookmarks[i].orthoH);
+    }
 }
 
 void EdScene_SaveSettings(EdScene *s, EngCfg *cfg) {

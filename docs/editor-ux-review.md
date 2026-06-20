@@ -4,7 +4,7 @@
 > (`src/editor/`) and a proposed redesign, captured from a 2026-06-20 review session. Both
 > implementation waves are done and on `main`: §7 #1–#5 + #8 (wave 1), then #6 + its model-path
 > prereq + #7 (wave 2). What's left is future polish (tabbed docking, browser recents,
-> drag-to-place, relocating the ASSETS maps-browser). See
+> drag-to-place; ASSETS maps-browser relocated to bottom-dock tab — done). See
 > [§9 Implementation status](#9-implementation-status). This is the *target*; the canonical
 > "how it works today" reference stays [scene-builder.md](scene-builder.md), and the broader
 > backlog is [editor-feature-ideas.md](editor-feature-ideas.md) (this doc supersedes its §4.x
@@ -391,5 +391,6 @@ content; Help: Controls as a modal).
 
 Remaining future polish (not blocking): recents/favourites in the browser; drag-from-tile-into-
 viewport placement; per-panel **drag-to-rearrange between zones + saved layouts** (collapse/tab
-state is runtime-only today); the ASSETS maps-browser still sits in the right zone (the §2
-"repurpose/relocate" wasn't part of these waves — it remains a File-menu/start-screen candidate).
+state is runtime-only today). **ASSETS relocated** (the §2 "repurpose/relocate" is now done):
+`PanelAssets` is registered as `ED_DOCK_BOTTOM` in `RegisterPanels` (`edpanels.c`) and appears
+as a tab beside PALETTE and CONSOLE — INSPECTOR now owns the full right zone.

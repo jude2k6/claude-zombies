@@ -124,8 +124,11 @@ static Vector3 ForwardFrom(float yaw, float pitch);   // defined with the camera
 // or pull-back distance (fly). Shared by frame-all (union box) and frame-selected
 // (one proxy box). Rotation-independent so it holds at any iso yaw.
 static void FrameBox(EdScene *s, BoundingBox b) {
-    Vector3 fwd = (s->view == ED_VIEW_TOP) ? (Vector3){ 0, -1, 0 }
-                                           : ForwardFrom(s->yaw, s->pitch);
+    Vector3 fwd;
+    if      (s->view == ED_VIEW_TOP)   fwd = (Vector3){ 0, -1, 0 };
+    else if (s->view == ED_VIEW_FRONT) fwd = (Vector3){ 0, 0, -1 };
+    else if (s->view == ED_VIEW_SIDE)  fwd = (Vector3){ -1, 0, 0 };
+    else                               fwd = ForwardFrom(s->yaw, s->pitch);
     Vector3 c = { (b.min.x + b.max.x) * 0.5f, (b.min.y + b.max.y) * 0.5f,
                   (b.min.z + b.max.z) * 0.5f };
     s->focus = c;
@@ -151,8 +154,11 @@ static void FrameBox(EdScene *s, BoundingBox b) {
 void EdScene_FrameAll(EdScene *s) {
     s->framePending = false;
     if (s->proxyCount == 0) {        // empty map → recenter on the origin
-        Vector3 fwd = (s->view == ED_VIEW_TOP) ? (Vector3){ 0, -1, 0 }
-                                               : ForwardFrom(s->yaw, s->pitch);
+        Vector3 fwd;
+        if      (s->view == ED_VIEW_TOP)   fwd = (Vector3){ 0, -1, 0 };
+        else if (s->view == ED_VIEW_FRONT) fwd = (Vector3){ 0, 0, -1 };
+        else if (s->view == ED_VIEW_SIDE)  fwd = (Vector3){ -1, 0, 0 };
+        else                               fwd = ForwardFrom(s->yaw, s->pitch);
         s->focus = (Vector3){ 0, 0, 0 };
         s->orthoH = s->viewOrthoH;
         s->cam.position = Vector3Subtract(s->focus, Vector3Scale(fwd, ED_ORBIT_DIST));
@@ -283,8 +289,13 @@ static void DeriveCamera(EdScene *s) {
         s->cam.projection = CAMERA_PERSPECTIVE;
         s->focus = Vector3Add(s->cam.position, Vector3Scale(fwd, 20.0f));
     } else {
-        Vector3 fwd = (s->view == ED_VIEW_TOP) ? (Vector3){ 0, -1, 0 }
-                                               : ForwardFrom(s->yaw, s->pitch);
+        // Fixed direction for FRONT (-Z → camera sits north of focus looking south)
+        // and SIDE (-X → camera sits east of focus looking west).
+        Vector3 fwd;
+        if      (s->view == ED_VIEW_TOP)   fwd = (Vector3){ 0, -1, 0 };
+        else if (s->view == ED_VIEW_FRONT) fwd = (Vector3){ 0, 0, -1 };
+        else if (s->view == ED_VIEW_SIDE)  fwd = (Vector3){ -1, 0, 0 };
+        else                               fwd = ForwardFrom(s->yaw, s->pitch);
         Vector3 right, up;
         ViewBasis(fwd, &right, &up);
         s->cam.position   = Vector3Subtract(s->focus, Vector3Scale(fwd, ED_ORBIT_DIST));
@@ -304,9 +315,12 @@ void EdScene_SwitchView(EdScene *s, EdViewMode m) {
         if (s->looking) { s->looking = false; ShowCursor(); }
     } else if (m == ED_VIEW_TOP) {
         s->pitch = -PI * 0.5f;
-    } else if (m == ED_VIEW_ORBIT && s->view == ED_VIEW_TOP) {
+    } else if (m == ED_VIEW_ORBIT && (s->view == ED_VIEW_TOP ||
+               s->view == ED_VIEW_FRONT || s->view == ED_VIEW_SIDE)) {
         s->pitch = -0.9f;
     }
+    // FRONT and SIDE have no free-rotate yaw/pitch — DeriveCamera uses fixed fwd.
+    // No extra state to adjust; just assign the mode.
     s->view = m;
 }
 
@@ -363,8 +377,11 @@ static void UpdateCamOrtho(EdScene *s, bool allowRotate) {
         if (s->pitch >  1.55f) s->pitch =  1.55f;
     }
 
-    Vector3 fwd = (s->view == ED_VIEW_TOP) ? (Vector3){ 0, -1, 0 }
-                                           : ForwardFrom(s->yaw, s->pitch);
+    Vector3 fwd;
+    if      (s->view == ED_VIEW_TOP)   fwd = (Vector3){ 0, -1, 0 };
+    else if (s->view == ED_VIEW_FRONT) fwd = (Vector3){ 0, 0, -1 };
+    else if (s->view == ED_VIEW_SIDE)  fwd = (Vector3){ -1, 0, 0 };
+    else                               fwd = ForwardFrom(s->yaw, s->pitch);
     Vector3 right, up;
     ViewBasis(fwd, &right, &up);
 
@@ -391,6 +408,8 @@ static void EdUpdateCamera(EdScene *s, float dt, Rectangle vp, bool allowInput) 
             case ED_VIEW_FLY:   UpdateCamFly(s, dt, vp);  break;
             case ED_VIEW_ORBIT: UpdateCamOrtho(s, true);  break;
             case ED_VIEW_TOP:   UpdateCamOrtho(s, false); break;
+            case ED_VIEW_FRONT: UpdateCamOrtho(s, false); break;
+            case ED_VIEW_SIDE:  UpdateCamOrtho(s, false); break;
         }
     } else {
         // Mouse isn't driving the camera this frame, but still re-derive it from
@@ -1116,6 +1135,7 @@ void EdScene_Init(EdScene *s) {
     EdScene_ScanWeapons(s);
     EdAssets_Scan(&s->assets);
     s->dirty = false;
+    s->diskMtime = FileExists(s->path) ? GetFileModTime(s->path) : 0L;
 }
 
 void EdScene_Shutdown(EdScene *s) {
@@ -1130,6 +1150,9 @@ bool EdScene_Save(EdScene *s) {
         s->dirty = false;
         s->autosaveAccum = 0.0f;
         EdScene_DiscardRecovery(s);   // the on-disk map is now authoritative
+        // Stamp our own save time so the live-reload check doesn't trigger on a
+        // file we just wrote (give 1 second of slack for filesystem granularity).
+        s->diskMtime = (long)GetFileModTime(s->path);
     }
     return rc == 0;
 }
@@ -1199,6 +1222,8 @@ bool EdScene_Open(EdScene *s, const char *path) {
     s->dragging = false;
     s->dirty = false;
     s->framePending = true;   // fit the camera to the new map (deferred: needs vpW/vpH)
+    // Stamp the mtime we loaded so live-reload doesn't immediately re-trigger.
+    s->diskMtime = FileExists(path) ? (long)GetFileModTime(path) : 0L;
     return true;
 }
 
@@ -1310,6 +1335,19 @@ void EdScene_UpdateViewport(EdScene *s, Rectangle vp, bool inputAllowed) {
 
     EdScene_RebuildProxies(s);
 
+    // Live reload: if the .map on disk changed (newer mtime) AND the document
+    // is clean (no unsaved edits), silently reload it. Skipped for the scratch
+    // "untitled.map" (EdHasRealPath). Our own Open/Save stamps diskMtime so we
+    // never reload a file we just wrote.
+    if (EdHasRealPath(s) && !s->dirty && FileExists(s->path)) {
+        long curMtime = (long)GetFileModTime(s->path);
+        if (curMtime > s->diskMtime) {
+            TraceLog(LOG_INFO, "editor: live reload '%s' (disk changed)", s->path);
+            EdScene_Open(s, s->path);
+            // EdScene_Open stamps diskMtime, resets dirty, sets framePending.
+        }
+    }
+
     // Deferred "frame all" from Open/New: now that proxies are current and the
     // viewport is sized (vpW/vpH above), fit the camera to the map.
     if (s->framePending) EdScene_FrameAll(s);
@@ -1322,6 +1360,40 @@ void EdScene_UpdateViewport(EdScene *s, Rectangle vp, bool inputAllowed) {
         if (IsKeyPressed(KEY_F1)) EdScene_SwitchView(s, ED_VIEW_FLY);
         if (IsKeyPressed(KEY_F2)) EdScene_SwitchView(s, ED_VIEW_ORBIT);
         if (IsKeyPressed(KEY_F3)) EdScene_SwitchView(s, ED_VIEW_TOP);
+        if (IsKeyPressed(KEY_F4)) EdScene_SwitchView(s, ED_VIEW_FRONT);
+        if (IsKeyPressed(KEY_F5)) EdScene_SwitchView(s, ED_VIEW_SIDE);
+
+        // Camera bookmarks: Ctrl+1..9 saves, bare 1..9 recalls (only when no
+        // placement tool is armed, so digit keys stay available as tool hotkeys).
+        {
+            bool ctrl = IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL);
+            // KEY_ONE..KEY_NINE are consecutive in raylib (48+1 = KEY_ONE for '1' = 49).
+            for (int i = 0; i < 9; i++) {
+                int kc = KEY_ONE + i;   // KEY_ONE=49 .. KEY_NINE=57
+                if (!IsKeyPressed(kc)) continue;
+                if (ctrl) {
+                    // Save current camera state into slot i.
+                    s->bookmarks[i].x      = s->focus.x;
+                    s->bookmarks[i].y      = s->focus.y;
+                    s->bookmarks[i].z      = s->focus.z;
+                    s->bookmarks[i].yaw    = s->yaw;
+                    s->bookmarks[i].pitch  = s->pitch;
+                    s->bookmarks[i].view   = s->view;
+                    s->bookmarks[i].orthoH = s->orthoH;
+                    s->bookmarks[i].set    = true;
+                    TraceLog(LOG_INFO, "editor: bookmark %d saved", i + 1);
+                } else if (s->placeTool == ED_PLACE_NONE && s->bookmarks[i].set) {
+                    // Recall: restore camera state.
+                    EdScene_SwitchView(s, s->bookmarks[i].view);
+                    s->focus  = (Vector3){ s->bookmarks[i].x, s->bookmarks[i].y,
+                                           s->bookmarks[i].z };
+                    s->yaw    = s->bookmarks[i].yaw;
+                    s->pitch  = s->bookmarks[i].pitch;
+                    s->orthoH = s->bookmarks[i].orthoH;
+                    TraceLog(LOG_INFO, "editor: bookmark %d recalled", i + 1);
+                }
+            }
+        }
 
         if (IsKeyPressed(KEY_ONE))   s->mode = ENG_GIZMO_TRANSLATE;
         if (IsKeyPressed(KEY_TWO))   s->mode = ENG_GIZMO_ROTATE;
@@ -1329,6 +1401,17 @@ void EdScene_UpdateViewport(EdScene *s, Rectangle vp, bool inputAllowed) {
 
         if (IsKeyPressed(KEY_M)) s->materialMode = !s->materialMode;
         if (IsKeyPressed(KEY_G)) s->gridVisible = !s->gridVisible;
+        // T: toggle measure / distance tool.
+        if (IsKeyPressed(KEY_T)) {
+            s->measureMode = !s->measureMode;
+            s->measureHasA = false;   // reset state on every toggle
+            s->measureHasB = false;
+        }
+        if (s->measureMode && IsKeyPressed(KEY_ESCAPE)) {
+            s->measureMode = false;
+            s->measureHasA = false;
+            s->measureHasB = false;
+        }
         if (IsKeyPressed(KEY_P)) {
             // Cancel any pending two-click wall when cycling away from WALL.
             s->wallPending = false;
@@ -1362,7 +1445,38 @@ void EdScene_UpdateViewport(EdScene *s, Rectangle vp, bool inputAllowed) {
                    IsMouseButtonDown(MOUSE_BUTTON_MIDDLE);
 
     bool canInteract = inputAllowed && !camBusy && !s->dragging;
-    bool picking = UpdateLinkPick(s, canInteract);   // ramp link-pick consumes the frame
+
+    // Measure mode: T toggles; first LMB sets A, second sets B (draws line +
+    // label); third LMB resets to a new A. Esc exits. Consumes LMB so clicks
+    // don't fall through to selection/placement.
+    if (s->measureMode) {
+        if (canInteract && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+            Vector3 g;
+            Ray ray = Eng_PickRayFromScreen(s->cam, s->vpMouse, s->vpW, s->vpH);
+            if (Eng_PickRayGroundY(ray, 0.0f, &g)) {
+                if (!s->measureHasA) {
+                    // First click: set A, clear B.
+                    s->measureA    = g;
+                    s->measureHasA = true;
+                    s->measureHasB = false;
+                } else if (!s->measureHasB) {
+                    // Second click: set B, log distance.
+                    s->measureB    = g;
+                    s->measureHasB = true;
+                    float dist = Vector3Distance(s->measureA, s->measureB);
+                    TraceLog(LOG_INFO, "editor: measure distance = %.2f units", dist);
+                } else {
+                    // Third click: reset to a new A.
+                    s->measureA    = g;
+                    s->measureHasA = true;
+                    s->measureHasB = false;
+                }
+            }
+        }
+    }
+
+    bool picking = s->measureMode ||   // measure mode consumes LMB; skip selection/placement
+                  UpdateLinkPick(s, canInteract && !s->measureMode);   // ramp link-pick consumes the frame
     if (picking) {
         s->sectorDragging = false;
     } else if (canInteract && s->placeTool == ED_PLACE_SECTOR) {
@@ -1538,6 +1652,26 @@ void EdScene_DrawViewport(EdScene *s, Rectangle vp) {
 
     // Ramp slope wireframe + uphill arrow for every RAMP sector.
     DrawRampOverlay(s);
+
+    // Measure tool: draw line A→B + midpoint distance label (both modes).
+    if (s->measureMode) {
+        Color mcol = { 255, 220, 60, 255 };
+        if (s->measureHasA && !s->measureHasB) {
+            // Point A placed, waiting for B: draw a marker at A.
+            Eng_DebugSphere(s->measureA, ED_MARKER * 0.7f, mcol);
+        }
+        if (s->measureHasB) {
+            // Both points set: draw the segment and the midpoint label.
+            Eng_DebugLine(s->measureA, s->measureB, mcol);
+            Eng_DebugSphere(s->measureA, ED_MARKER * 0.5f, mcol);
+            Eng_DebugSphere(s->measureB, ED_MARKER * 0.5f, mcol);
+            float dist = Vector3Distance(s->measureA, s->measureB);
+            Vector3 mid = Vector3Scale(Vector3Add(s->measureA, s->measureB), 0.5f);
+            mid.y += ED_MARKER;   // float the label above the line
+            char label[48]; snprintf(label, sizeof label, "%.2f u", dist);
+            Eng_DebugText3D(mid, label, mcol);
+        }
+    }
 
     Eng_DebugDraw3D(s->cam);
     Eng_GfxEndMode3D();

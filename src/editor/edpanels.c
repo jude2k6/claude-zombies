@@ -793,11 +793,16 @@ static void ToolStrip(EdHost *h, Rectangle strip, void *u) {
     if (StripBtn(&x, by, bh, "Select", s->placeTool == ED_PLACE_NONE, it, sc))
         s->placeTool = ED_PLACE_NONE;
 
-    const char *vn = s->view == ED_VIEW_FLY ? "view: fly"
-                   : s->view == ED_VIEW_ORBIT ? "view: iso" : "view: top";
+    const char *vn = s->view == ED_VIEW_FLY   ? "view: fly"
+                   : s->view == ED_VIEW_ORBIT ? "view: iso"
+                   : s->view == ED_VIEW_TOP   ? "view: top"
+                   : s->view == ED_VIEW_FRONT ? "view: front" : "view: side";
     if (StripBtn(&x, by, bh, vn, false, it, sc)) {
-        EdViewMode nv = s->view == ED_VIEW_ORBIT ? ED_VIEW_TOP
-                      : s->view == ED_VIEW_TOP   ? ED_VIEW_FLY : ED_VIEW_ORBIT;
+        // Cycle fly → iso → top → front → side → fly (F1–F5 jump directly).
+        EdViewMode nv = s->view == ED_VIEW_FLY   ? ED_VIEW_ORBIT
+                      : s->view == ED_VIEW_ORBIT ? ED_VIEW_TOP
+                      : s->view == ED_VIEW_TOP   ? ED_VIEW_FRONT
+                      : s->view == ED_VIEW_FRONT ? ED_VIEW_SIDE : ED_VIEW_FLY;
         EdScene_SwitchView(s, nv);
     }
 
@@ -840,10 +845,36 @@ static void st_sel(EdHost *h, char *out, int cap, void *u) {
     else       snprintf(out, cap, "sel #%d %s", s->selectedId, EdScene_KindName(k));
 }
 
+// Validation badge: runs MapDoc_Validate once per status-bar draw and emits a
+// compact badge — [2E 1W], [3E], [2W], or nothing when clean.
+// Note: EdHost_AddStatusItem has no per-segment colour API (the host always
+// draws with ENG_UI_TEXT).  A follow-up host API addition (colour-per-item
+// callback) can wire in red/gold colouring without touching this file.
+static void st_validate(EdHost *h, char *out, int cap, void *u) {
+    (void)u; EdScene *s = EdHost_Scene(h);
+    MapDocIssue issues[64];
+    int n = MapDoc_Validate(&s->doc, issues, 64);
+    if (n == 0) { out[0] = '\0'; return; }   // clean map → hide segment
+    int errs = 0, warns = 0;
+    for (int i = 0; i < n && i < 64; i++) {
+        if (issues[i].severity == MAPDOC_ERROR) errs++;
+        else                                     warns++;
+    }
+    // Suffix "+" if MapDoc_Validate found more issues than the buffer holds.
+    const char *ov = (n > 64) ? "+" : "";
+    if (errs > 0 && warns > 0)
+        snprintf(out, cap, "[%d%sE %d%sW]", errs, ov, warns, ov);
+    else if (errs > 0)
+        snprintf(out, cap, "[%d%sE]",  errs,  ov);
+    else
+        snprintf(out, cap, "[%d%sW]",  warns, ov);
+}
+
 static void RegisterStatusBar(EdHost *h) {
-    EdHost_AddStatusItem(h, st_map,   NULL);
-    EdHost_AddStatusItem(h, st_count, NULL);
-    EdHost_AddStatusItem(h, st_sel,   NULL);
+    EdHost_AddStatusItem(h, st_map,      NULL);
+    EdHost_AddStatusItem(h, st_count,    NULL);
+    EdHost_AddStatusItem(h, st_validate, NULL);
+    EdHost_AddStatusItem(h, st_sel,      NULL);
     // view/gizmo/snap/grid moved to the viewport tool-strip (editor-ux-review §5).
     EdHost_AddViewportOverlay(h, ToolStrip, NULL);
 }

@@ -82,6 +82,14 @@ struct EdHost {
     EdLogLevel logLvl[ED_LOG_LINES];
     int        logHead, logCount;
 
+    // commit hooks (6.2): fired after every host-routed EdScene_Commit* call
+    struct { void (*fn)(EdHost *h, void *user); void *user; } commitHooks[ED_MAX_COMMIT_HOOKS];
+    int      commitHookCount;
+
+    // plugin place-tools (6.5): contributed entries for the place palette
+    EdHostPlaceTool placeTools[ED_MAX_PLACE_TOOLS];
+    int         placeToolCount;
+
     // dynamic plugin handles (for dlclose at teardown)
     void    *dl[ED_MAX_PLUGINS];
     int      dlCount;
@@ -141,6 +149,45 @@ void EdHost_SetModal(EdHost *h, EdModalFn fn, void *user) {
 }
 bool EdHost_HasModal(EdHost *h) { return h->modalFn != NULL; }
 
+// ---- 6.1: menu-item iterator -----------------------------------------------
+
+void EdHost_ForEachMenuItem(EdHost *h,
+    void (*fn)(const char *menu, const char *label, const char *shortcut,
+               const EdMenuItem *item, void *user),
+    void *user) {
+    if (!fn) return;
+    for (int m = 0; m < h->menuCount; m++) {
+        EdMenu *mn = &h->menus[m];
+        for (int i = 0; i < mn->itemCount; i++) {
+            const EdMenuItem *it = &mn->items[i];
+            fn(mn->label, it->label, it->shortcut, it, user);
+        }
+    }
+}
+
+// ---- 6.2: commit hooks -----------------------------------------------------
+
+void EdHost_AddCommitHook(EdHost *h, void (*fn)(EdHost *h, void *user), void *user) {
+    if (!fn || h->commitHookCount >= ED_MAX_COMMIT_HOOKS) return;
+    h->commitHooks[h->commitHookCount].fn   = fn;
+    h->commitHooks[h->commitHookCount].user = user;
+    h->commitHookCount++;
+}
+
+// ---- 6.5: plugin place-tools -----------------------------------------------
+
+void EdHost_AddPlaceTool(EdHost *h, const EdHostPlaceTool *tool) {
+    if (!tool || h->placeToolCount >= ED_MAX_PLACE_TOOLS) return;
+    h->placeTools[h->placeToolCount++] = *tool;
+}
+
+int EdHost_PlaceToolCount(EdHost *h) { return h->placeToolCount; }
+
+const EdHostPlaceTool *EdHost_PlaceToolAt(EdHost *h, int i) {
+    if (i < 0 || i >= h->placeToolCount) return NULL;
+    return &h->placeTools[i];
+}
+
 // ---- console / log ---------------------------------------------------------
 
 void EdHost_Log(EdHost *h, EdLogLevel lvl, const char *fmt, ...) {
@@ -168,8 +215,16 @@ const char *EdHost_LogLine(EdHost *h, int i, EdLogLevel *outLvl) {
 MapDoc  *EdHost_Doc(EdHost *h)        { return &h->scene->doc; }
 int      EdHost_SelectedId(EdHost *h) { return h->scene->selectedId; }
 void     EdHost_Select(EdHost *h, int id) { EdScene_SelectClick(h->scene, id, false); }
-void     EdHost_CommitEdit(EdHost *h) { EdScene_Commit(h->scene); }
-void     EdHost_CommitEditTagged(EdHost *h, uint32_t tag) { EdScene_CommitTagged(h->scene, tag); }
+void EdHost_CommitEdit(EdHost *h) {
+    EdScene_Commit(h->scene);
+    for (int i = 0; i < h->commitHookCount; i++)
+        h->commitHooks[i].fn(h, h->commitHooks[i].user);
+}
+void EdHost_CommitEditTagged(EdHost *h, uint32_t tag) {
+    EdScene_CommitTagged(h->scene, tag);
+    for (int i = 0; i < h->commitHookCount; i++)
+        h->commitHooks[i].fn(h, h->commitHooks[i].user);
+}
 uint32_t EdHost_NewEditTag(EdHost *h) { return EdScene_NextTag(h->scene); }
 EdScene *EdHost_Scene(EdHost *h)      { return h->scene; }
 float    EdHost_UiScale(EdHost *h)    { return h->scene->uiScale; }

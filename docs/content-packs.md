@@ -1,11 +1,21 @@
 # Content Packs — stdlib + importable packs, copied into a game
 
-> **Status: DESIGN — for review before any files move.** Captures the content-packs
-> model worked out 2026-06-20. It extends the games-as-projects overlay
-> ([game-projects.md](game-projects.md)) with a *pack* — a distributable bundle of
-> placeables — and a copy-on-import flow at whole-pack or per-item granularity. Nothing
-> below is built yet; the migration in §7 is load-bearing (the game currently *runs* off
-> `library/`) so it must be done as one careful step.
+> **Status: Phase 1 (migration) SHIPPED; phases 2–4 (scan + import + editor UX) not yet
+> built.** Captures the content-packs model worked out 2026-06-20. It extends the
+> games-as-projects overlay ([game-projects.md](game-projects.md)) with a *pack* — a
+> distributable bundle of placeables — and a copy-on-import flow at whole-pack or per-item
+> granularity.
+>
+> **Done (§7/§8 phase 1):** the content tree is reorganized — `library/ → stdlib/` (commit
+> 29a2747), and the themed content extracted into `packs/zombies/` and imported (copied) into
+> `games/shooter/` (commit 1aef637). Runtime resolves **game → stdlib** unchanged; packs are
+> import sources, not runtime-loaded. Verified: all maps `--sim-tick`, `--screenshot-zombies`
+> load log (zombie content from `games/shooter/`, base from `stdlib/`), editor catalog + `--check`.
+>
+> **Not yet built:** §8 phases 2 (pack-source scan + `pack.manifest` read), 3 (copy-on-import
+> core), 4 (editor browse-by-pack + Install/Import UI), 5 (provenance sidecars). The
+> resolved-design decisions (§9) are settled: tier name `packs/`; stdlib = fallback +
+> import-to-edit; "add to editor overall" = install the source into `packs/`.
 
 ---
 
@@ -195,9 +205,10 @@ This is a no-backwards-compat move (per the project rule) — one clean cut, not
 
 ## 8. Implementation phases
 
-1. **Layout + manifest + migration (§7)** — create `stdlib/` + `packs/zombies/`, move files,
-   copy the pack into `games/shooter/`, repoint roots, keep CI green. *No new code yet beyond
-   root-name wiring.*
+1. **Layout + manifest + migration (§7) — ✅ SHIPPED** (commits 29a2747 + 1aef637): created
+   `stdlib/` + `packs/zombies/`, moved files, imported the pack into `games/shooter/`, repointed
+   roots (`Eng_LocateRoot("stdlib")`) + CMake staging (`stdlib/ packs/ games/`). Verified maps +
+   render + editor catalog. *No new runtime code beyond root-name wiring.*
 2. **Pack scan + manifest read** — engine/editor read `pack.manifest` and enumerate `packs/`
    (+ stdlib) as **import sources**, distinct from the runtime overlay. A `Eng_PackDirs()` /
    pack-list helper alongside `Eng_ContentDirs`.
@@ -212,9 +223,9 @@ Phases 1–4 are the "format + scan + editor" scope agreed; 5 is later polish.
 
 ---
 
-## 9. Open decisions (defaults in **bold**)
+## 9. Decisions (all RESOLVED 2026-06-20 — chosen value in **bold**)
 
-1. **Source-tier name:** **`packs/`** *(recommended — first-party packs live there too)* vs.
+1. **Source-tier name:** **`packs/`** *(chosen — first-party packs live there too)* vs.
    `3rdparty/` (only fits externally-installed ones).
 2. **stdlib copy policy:** **fallback + import-to-edit** *(recommended — matches the existing
    game-projects overlay; games stay lean)* vs. always-copy stdlib into every game (fully

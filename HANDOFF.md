@@ -14,7 +14,7 @@ Repo: `git@github.com:jude2k6/claude-zombies.git` · branch: `main`.
 
 ## Current state
 
-- **Engine/game split complete (§15).** Source tree is `src/engine/` (→ `libengine.a`, zero game knowledge) + `src/game/`. `src/game/main.c` is ~10 lines: `Eng_Run(&cfg, Game_Module())`. Headless sim: `./build/shooter --sim-tick <map>`. CI runs seam-check + build + `--validate` + `--sim-tick` on every map.
+- **Engine/game split complete (§15).** Source tree is `src/engine/` (→ `libengine.a`, zero game knowledge) + the game logic in `games/shooter/src/` (relocated from `src/game/` so each game folder owns its own code). `games/shooter/src/main.c` is ~10 lines: `Eng_Run(&cfg, Game_Module())`. Headless sim: `./build/shooter --sim-tick <map>`. CI runs seam-check + build + `--validate` + `--sim-tick` on every map.
 - **MP5 is the only gun with a combined viewmodel rig** (`data/weapons/smg/smg_vm.glb` — arms + gun + mechanism in one skinned glTF). Pistol/shotgun/rifle/raygun fall back to the shared `arms_vm.glb` + gun bolted to `hand.R` (`vm_grip_*` seating). **Next: author combined rigs for those 4 guns** using the MP5 recipe in the `blender-game-asset` skill, then retire the bolt-on path.
 - **`NET_PROTO_VERSION` is 11** (`src/engine/net.h`). `SerPlayer` carries `fireHeld` (uint8_t) and `reviverIdx` (int8_t).
 - **Zombie + player third-person rigs** (`zombie.glb`, `player.glb`) are wired and animating. Death/attack clips are sim-driven via `dyingTimer`/`simAttackTimer`. Region-BFS zombie nav over the sector graph is live (`CrossFloorGoalFull` in `entities.c`, driven by `RAMP … LINK` edges).
@@ -54,11 +54,13 @@ from the build dir). On first run with no file, defaults are written.
 ## Architecture
 
 The tree is split into a reusable **`src/engine/`** (→ `libengine.a`) and the
-game in **`src/game/`** (which links it). `src/game/main.c` holds `main()` + the
-per-frame gameplay body; `src/engine/app.c` owns the window / frame-loop / time
-and hosts the `GameModule` vtable. Engine modules (zero game knowledge):
+game, whose logic lives **inside its project folder at `games/shooter/src/`**
+(which links the engine) — a self-contained games-as-projects layout, not code in
+the engine tree. `games/shooter/src/main.c` holds `main()` + the per-frame
+gameplay body; `src/engine/app.c` owns the window / frame-loop / time and hosts
+the `GameModule` vtable. Engine modules (zero game knowledge):
 `app gfx anim audio decals fx mapdoc net pad particles`. Game TUs share
-`src/game/types.h` and are one translation unit per responsibility:
+`games/shooter/src/types.h` and are one translation unit per responsibility:
 
 | File              | Owns                                                   |
 |-------------------|--------------------------------------------------------|

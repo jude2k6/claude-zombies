@@ -2,7 +2,7 @@
 
 The in-engine **scene builder** — the tool that authors `.map` files visually. It is a
 **sibling application to the game**, not a feature inside it: its own `GameModule`
-hosted by `Eng_Run`, linking `libengine.a` and **nothing** from `src/game/`. This is
+hosted by `Eng_Run`, linking `libengine.a` and **nothing** from `games/shooter/src/`. This is
 what makes the project *an engine with a toolkit* rather than *a game with a built-in
 editor* — see [engine-layers.md](engine-layers.md) for the layering rationale, and
 [engine-usage.md](engine-usage.md) §4 ("Building a second module") for the host pattern.
@@ -59,7 +59,7 @@ loaded `.so` files in `./plugins`) extend it through the identical surface. See 
 - **It edits a `MapDoc`** — the engine-neutral document (`mapdoc.h`), the same one the
   game instantiates at load. The editor never touches game rules; it knows only that a
   map has sectors and entities with stable ids, positions, sizes, and types.
-- **Zero game knowledge.** No `src/game/` header, no zombie/perk/weapon concept. A
+- **Zero game knowledge.** No `games/shooter/src/` header, no zombie/perk/weapon concept. A
   custom inspector that understands game-specific entity flavours would come *later*
   via a registration hook (the content-registry pattern), never a direct dependency.
 - **One document at a time.** The editor is a single-document tool: one `MapDoc`, one
@@ -451,7 +451,7 @@ Small, independently shippable steps; none blocks the game.
    `GetApplicationDirectory`, so any game project launches its own exe (not a hardcoded
    `shooter`). `EdScene_PlayTest` is the one entry point (menu + hotkey both call it);
    untitled scratch maps are refused. The seam holds: the editor hands the game a **path
-   string**, never a header. Game side (`src/game/`): `main.c` treats a positional `.map`
+   string**, never a header. Game side (`games/shooter/src/`): `main.c` treats a positional `.map`
    arg as a boot map and `GameMod_Init` calls the new `Menu_StartSoloOnMap`, dropping
    straight into solo play on it instead of the menu.
 8. **Docking polish** — *partly done.* Zones now **collapse** to a rail (click a splitter)
@@ -464,7 +464,7 @@ Small, independently shippable steps; none blocks the game.
 
 ## 6. Rules this tool must keep
 
-- **No `src/game/` include, ever** (the whole point — the build links engine only).
+- **No `games/shooter/src/` include, ever** (the whole point — the build links engine only).
 - **Edit through `mapedit.h` by stable id**, not by array index — indices shift on
   add/delete; ids don't.
 - **Every committed edit is one `EngMapHistory_Commit`**; continuous drags coalesce

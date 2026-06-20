@@ -346,7 +346,7 @@ the most valuable and the heaviest. **5, 8** ride along.
 
 - **Through the plugin API, not the frame.** Every panel/strip/overlay is registered via
   `EdHost_Add*`; the one new seam is a viewport-overlay hook (§5). No engine change, no game header.
-- **No `src/game/` include.** Thumbnails resolve a model *path* the editor reads itself
+- **No `games/shooter/src/` include.** Thumbnails resolve a model *path* the editor reads itself
   (`Eng_LoadModel` / `edthumb`); the def's `behaviour`/stats stay game-only, uninspected.
 - **The seam stays where it is.** The content browser drives the *same* `placeTool` state the old
   palette did; it's a front-end swap, not a new editing path.

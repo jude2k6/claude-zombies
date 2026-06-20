@@ -76,32 +76,36 @@ target_include_directories(engine PUBLIC
 )
 target_link_libraries(engine PUBLIC raylib enet)
 
-# ---- game executable (src/game/ — rules + content, links the engine) -------
+# ---- game executable (games/shooter/src/ — rules + content, links the engine) --
+# The reference game's logic lives INSIDE its project folder (games/shooter/src/),
+# alongside its data (maps/ mobs/ perks/ ...), so the game is a self-contained
+# games-as-projects folder rather than code in the engine tree. src/ at the repo
+# root is now engine + editor only. See docs/game-projects.md.
 add_executable(shooter
-    src/game/main.c
-    src/game/world.c
-    src/game/level.c
-    src/game/player.c
-    src/game/weapons.c
-    src/game/mobs.c
-    src/game/mob_ai.c
-    src/game/perks.c
-    src/game/entities.c
-    src/game/interact.c
-    src/game/game.c
-    src/game/protocol.c
-    src/game/render.c
-    src/game/viewmodel.c
-    src/game/devtools.c
-    src/game/hud.c
-    src/game/menu.c
-    src/game/audio_director.c
-    src/game/settings.c
-    src/game/assets.c
-    src/game/props.c
+    games/shooter/src/main.c
+    games/shooter/src/world.c
+    games/shooter/src/level.c
+    games/shooter/src/player.c
+    games/shooter/src/weapons.c
+    games/shooter/src/mobs.c
+    games/shooter/src/mob_ai.c
+    games/shooter/src/perks.c
+    games/shooter/src/entities.c
+    games/shooter/src/interact.c
+    games/shooter/src/game.c
+    games/shooter/src/protocol.c
+    games/shooter/src/render.c
+    games/shooter/src/viewmodel.c
+    games/shooter/src/devtools.c
+    games/shooter/src/hud.c
+    games/shooter/src/menu.c
+    games/shooter/src/audio_director.c
+    games/shooter/src/settings.c
+    games/shooter/src/assets.c
+    games/shooter/src/props.c
 )
 target_include_directories(shooter PRIVATE
-    ${CMAKE_SOURCE_DIR}/src/game
+    ${CMAKE_SOURCE_DIR}/games/shooter/src
 )
 target_link_libraries(shooter PRIVATE engine ${CMAKE_DL_LIBS})
 # -rdynamic so Tier-2 .so mob behaviours (dlopen'd from ./behaviours) resolve
@@ -111,7 +115,7 @@ set_target_properties(shooter PROPERTIES ENABLE_EXPORTS ON)
 
 # ---- editor executable (src/editor/ — the scene/map builder) ----------------
 # A SIBLING application to the game: its own GameModule on the engine, linking
-# libengine.a and NOTHING from src/game/. The map editor is an IDE-style shell
+# libengine.a and NOTHING from the game (games/shooter/src/). The map editor is an IDE-style shell
 # (edhost) hosting a scene/viewport (edscene) filled by first-party plugins
 # (builtins). See docs/scene-builder.md.
 #

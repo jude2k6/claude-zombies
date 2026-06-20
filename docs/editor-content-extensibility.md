@@ -202,7 +202,7 @@ provider tiers:
                   │ lookup by name
                   ▼
         name → archetype registry
-         ├─ Tier 1: compiled-in C   (src/game/ai/, Game_RegisterBehaviour("chaser",...);
+         ├─ Tier 1: compiled-in C   (games/shooter/src/ai/, Game_RegisterBehaviour("chaser",...);
          │                            needs a game rebuild)
          └─ Tier 2: dynamic .so     (same dlopen-by-name pattern as the editor plugin
                                       loader — drop a .so, NO engine/game rebuild)
@@ -242,7 +242,7 @@ The loader scans **both** `behaviours/` and every mob folder; `behaviour <name>`
 the same regardless of where the provider was found. So a mob folder *can* contain its
 behaviour — and does, precisely when that behaviour is the mob's own.
 
-> Note: a Tier-1 compiled-in archetype is C in `src/game/` and can't sit in the data tree;
+> Note: a Tier-1 compiled-in archetype is C in `games/shooter/src/` and can't sit in the data tree;
 > anything you want physically next to a mob takes the Tier-2 `.so` route.
 
 ### Authoring behaviours from the editor (open in external editor)
@@ -314,9 +314,9 @@ copy-on-import of stock library assets into the game folder.
    editor reuses it. `.weapon` and `.mob` both parse through it.
 2. ~~**Zombie refactor**~~ **Done** — `data/mobs/zombie/zombie.mob` carries the (formerly
    hardcoded) zombie numbers; the game scales the round curve by the mob's round-1
-   baselines so the zombie is byte-identical (`src/game/mobs.{c,h}`, `Mob_Validate`,
+   baselines so the zombie is byte-identical (`games/shooter/src/mobs.{c,h}`, `Mob_Validate`,
    headless `--list-mobs`).
-3. ~~**Behaviour registry**~~ **Done** — `src/game/mob_ai.{c,h}`:
+3. ~~**Behaviour registry**~~ **Done** — `games/shooter/src/mob_ai.{c,h}`:
    `Game_RegisterBehaviour` + a `./behaviours/` and per-mob-folder `.so` scan
    (`Game_LoadBehaviourPlugins`, dlopen, ABI-checked, `shooter` is `-rdynamic`). The
    zombie loop is registered as the Tier-1 `chaser` archetype and dispatched via
@@ -344,7 +344,7 @@ copy-on-import of stock library assets into the game folder.
    are the shared catalog for placeable props, replacing the hardcoded `barrel` placeholder
    and the game's static `PROP_DEFS[]`. The editor reads id/name (`EdScene_ScanProps` → the
    PLACE palette's data-driven **Props** section); the game reads model + collision
-   (`src/game/props.{c,h}`, loaded in `Assets_Load`, resolved by `Level_InstantiateDoc` via
+   (`games/shooter/src/props.{c,h}`, loaded in `Assets_Load`, resolved by `Level_InstantiateDoc` via
    `Props_IndexByName`, rendered from the catalog model). A new `.prop` + model is placeable
    AND renderable with no recompile — the first end-to-end proof of the §2 registry beyond
    mobs. `PROP_SANDBAG_STACK`/`PROP_OBSTACLE_BARREL` were pruned from the `PropId`
@@ -368,7 +368,7 @@ copy-on-import of stock library assets into the game folder.
   (the archetype iterates `g_world.enemies` and filters to its own), not a per-enemy
   param-bag call. The registry/lookup is real; the per-enemy param-bag refactor of the
   300-line chaser loop is deferred (the loop still keys on `ZombieType` internally).
-- **Behaviour code lives flat in `src/game/`** (`mob_ai.c`), not `src/game/ai/`, matching
+- **Behaviour code lives flat in `games/shooter/src/`** (`mob_ai.c`), not `games/shooter/src/ai/`, matching
   the existing flat game layout.
 - **Render uses one model for all live mobs** (the zombie `.glb`, with model + clip *names*
   read from the zombie `MobDef`). Per-mob distinct models need the enemy's `mobIdx` on the

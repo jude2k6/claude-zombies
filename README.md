@@ -158,14 +158,16 @@ src/engine/           reusable, game-clean runtime → static libengine.a
   ui cfg              house UI (theme/text over raygui) + key=value config
   pick gizmo mapedit debugdraw   editor toolkit: ray/handle math, id-edits+undo, overlay
 src/editor/           the map editor — a second GameModule on the engine (no game deps)
-src/game/             rules + content; links libengine.a
-  main.c              ~10 lines: Eng_Run(Game_Module())
-  world.{c,h}         the World struct (all game state, g_world)
-  types.h             shared game structs / enums / constants
-  level player weapons perks entities interact game   simulation
-  render viewmodel hud menu assets audio_director      presentation
-  protocol            snapshot (de)serialization (the wire schema)
-  settings devtools   bindings persistence + dev/debug CLI modes
+games/shooter/        the reference game — a self-contained games-as-projects folder
+  src/                rules + content LOGIC; links libengine.a (was src/game/)
+    main.c            ~10 lines: Eng_Run(Game_Module())
+    world.{c,h}       the World struct (all game state, g_world)
+    types.h           shared game structs / enums / constants
+    level player weapons perks entities interact game   simulation
+    render viewmodel hud menu assets audio_director      presentation
+    protocol          snapshot (de)serialization (the wire schema)
+    settings devtools bindings persistence + dev/debug CLI modes
+  maps/ mobs/ perks/ weapons/ models/   the game's DATA (overlays stdlib/)
 library/              read-only stock content the engine ships with (overlay base)
   models/             props + rigged glTF models (+ ASSETS.md spec)
   textures/  shaders/ surfaces + world (lit+fog) / world_skinned / sky / postfx

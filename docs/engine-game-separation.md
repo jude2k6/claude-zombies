@@ -2,7 +2,7 @@
 
 > ## ▶ DONE — §15 definition of done is met (commit `6ae27ce`)
 > The engine/game split is complete. The tree is `src/engine/` (a reusable
-> static `libengine.a`) + `src/game/` (rules + content linking it). Build runs
+> static `libengine.a`) + `games/shooter/src/` (rules + content linking it). Build runs
 > `seam-check`, a pre-commit hook enforces the §2 rule
 > (`git config core.hooksPath scripts/hooks` if cloning fresh), and CI
 > (`.github/workflows/ci.yml`) runs the seam check + build + `--validate` +
@@ -16,7 +16,7 @@
 >    executable links it.
 > 3. ✅ A `World` is instantiated from a `MapDoc` and `Game_Tick`'d with **no
 >    window** — `./build/shooter --sim-tick <map> [frames]` (devtools.c).
-> 4. ✅ `main()` is 10 lines and lives in `src/game/main.c`.
+> 4. ✅ `main()` is 10 lines and lives in `games/shooter/src/main.c`.
 > 5. ✅ No file outside `src/engine/` includes `rlgl.h`; no engine file includes
 >    a game header.
 >

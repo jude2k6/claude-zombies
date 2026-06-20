@@ -2,7 +2,7 @@
 
 How to build a game — or a second one (the map editor) — on top of this
 project's engine. The engine is the reusable runtime in **`src/engine/`**,
-compiled into a static **`libengine.a`**; the game in `src/game/` is just one
+compiled into a static **`libengine.a`**; the game in `games/shooter/src/` is just one
 *module* that links it. This guide is the contract for writing another.
 
 For *why* the split exists and how it was reached, see
@@ -231,7 +231,7 @@ float   wz = Eng_InputMouseWheel();                   // scroll this frame (edit
 `look.x`/`look.y` to your camera yaw/pitch. It already unifies mouse + right-stick
 and applies the sensitivities set above. **Cursor capture is game-side** — the
 engine doesn't grab the mouse for you; toggle raylib's `DisableCursor()` (locked
-mouselook) / `EnableCursor()` (menus) yourself (see `src/game/main.c`).
+mouselook) / `EnableCursor()` (menus) yourself (see `games/shooter/src/main.c`).
 
 `Eng_InputMousePos`/`MouseDelta`/`MouseWheel` route raw cursor state through the
 same facade for an unlocked-cursor tool UI (the editor). Note `MouseDelta` is *raw

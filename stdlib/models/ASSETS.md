@@ -73,7 +73,7 @@ Hard-won gotchas — re-hitting these wastes hours:
 
 ## Prop registry
 
-Every prop is a `PropId` in `src/game/assets.h`; the loader walks `PROP_FILES[]`,
+Every prop is a `PropId` in `games/shooter/src/assets.h`; the loader walks `PROP_FILES[]`,
 probes the prefixes, sets `propModelLoaded[id]`. Render sites use the model if
 loaded, else a fallback cube draw — so a missing OBJ never breaks the build.
 

@@ -12,7 +12,7 @@
 > TOOLS palette, a sector-tree Hierarchy, MAP PROPERTIES → a modal).
 >
 > **Seam rule reminder:** The editor links `libengine.a` only — it must never `#include` a
-> `src/game/` header. Features that need game-specific knowledge go through a
+> `games/shooter/src/` header. Features that need game-specific knowledge go through a
 > content-registry hook (a registration function the game calls into the editor, never the
 > other way around). This is called out where relevant.
 >
@@ -607,7 +607,7 @@ shortcut both call it) saves, resolves the game binary next to the editor binary
 `GetApplicationDirectory()`, and `posix_spawn`s it with the map path as argv. `SIGCHLD` is
 set to `SIG_IGN` so finished play-tests are auto-reaped (no zombies) and the spawn never
 blocks the frame loop. Untitled scratch maps are refused (no on-disk file to hand the game).
-Game side: `src/game/main.c` treats a positional `.map` arg as a **boot map**, and
+Game side: `games/shooter/src/main.c` treats a positional `.map` arg as a **boot map**, and
 `GameMod_Init` calls the new `Menu_StartSoloOnMap`, dropping straight into solo play on it
 instead of the menu. (POSIX-only for now; a Windows `CreateProcess` branch is the port.)
 
@@ -633,7 +633,7 @@ the game side, auto-reload after an external tool modifies the file is useful.
 **Effort:** S — `stat()`-based file watch in `edscene.c`, triggered in the update loop.
 
 **Seam:** No constraint for the editor-side reload. The game-side hot-reload is a
-separate feature in `src/game/`.
+separate feature in `games/shooter/src/`.
 
 ---
 

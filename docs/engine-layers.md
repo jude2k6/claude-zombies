@@ -100,7 +100,7 @@ UI is not one thing. Split it three ways and it stops being confusing:
   `Gui*` directly. **The missing piece is the facade** so applications call `Eng_Ui*`
   instead of raygui directly (same containment we did for 3D with `Eng_Gfx*`).
 
-- **The menus themselves → game (`src/game/ui/menu.c`, `hud.c`).** Which screens exist,
+- **The menus themselves → game (`games/shooter/src/ui/menu.c`, `hud.c`).** Which screens exist,
   the main→solo→loadout flow, what each button does, the round/score HUD — all game
   policy. Stays game-side, rebuilt on `Eng_Ui*`.
 
@@ -189,7 +189,7 @@ engine reusable as an SDK.
 3. Editor packaging: **standalone `editor` binary first**, in-game embed later — vs.
    embed-only from the start. Standalone first keeps the "engine as SDK" property honest
    and is easier to test headlessly.
-4. Editor tree location: **`src/editor/`** as a peer of `src/game/` — vs. `src/game/editor/`
+4. Editor tree location: **`src/editor/`** as a peer of `games/shooter/src/` — vs. `games/shooter/src/editor/`
    (rejected: that re-couples the tool to this game, the exact thing we're avoiding).
 5. **Do we need a menu *builder* tool?** (open — revisit later) Distinguish a tool to
    *draw* menus (= the `ui.h` facade, already step 1) from a tool to *build* menus (a

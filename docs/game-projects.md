@@ -196,7 +196,7 @@ int main(void) {
 ### How a game's code is built and run
 
 **A game is an executable that statically links the engine** — the standard,
-simplest model, and exactly what `src/game` is today. No plugin indirection, no
+simplest model, and exactly what `games/shooter/src` is today. No plugin indirection, no
 engine↔game ABI to freeze, normal build/debug/ship. We split only by *whether a
 game has custom code*:
 
@@ -355,7 +355,7 @@ filesystem reorg landed as a single coherent edit:
   binary (was `data/`); `.gitignore`'s `*.obj` keep-exception follows to
   `library/`/`games/`. `data/` no longer exists.
 
-**✅ Step 5 — Runtime root wiring** (this wave). Both `src/game/main.c` (before
+**✅ Step 5 — Runtime root wiring** (this wave). Both `games/shooter/src/main.c` (before
 `Devtools_HandleCLI`) and `src/editor/editor_main.c` (before the default-map
 resolve) call the new engine helper **`Eng_LocateRoot(relName, buf, n)`** — it
 probes `<exe-dir>/relName` (the install layout) then the CWD and its parent (dev

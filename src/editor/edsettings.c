@@ -51,6 +51,18 @@ void EdScene_LoadSettings(EdScene *s, EngCfg *cfg) {
     if (s->viewDefault < ED_VIEW_FLY || s->viewDefault > ED_VIEW_SIDE) s->viewDefault = ED_VIEW_ORBIT;
     if (s->undoDepth < 1) s->undoDepth = ENGMAPHISTORY_DEFAULT_DEPTH;
 
+    // Recently-used placeables (content browser "Recent" category).
+    s->recentCount = EngCfg_Int(cfg, "place.recentCount", 0);
+    if (s->recentCount < 0) s->recentCount = 0;
+    if (s->recentCount > ED_MAX_RECENTS) s->recentCount = ED_MAX_RECENTS;
+    for (int i = 0; i < s->recentCount; i++) {
+        char k[48];
+        snprintf(k, sizeof k, "place.recent.%d.tool", i);
+        s->recents[i].tool = EngCfg_Int(cfg, k, 0);
+        snprintf(k, sizeof k, "place.recent.%d.id", i);
+        snprintf(s->recents[i].id, sizeof s->recents[i].id, "%s", EngCfg_Str(cfg, k, ""));
+    }
+
     // Camera bookmarks (9 slots).
     for (int i = 0; i < 9; i++) {
         char k[48];
@@ -98,6 +110,14 @@ void EdScene_PutSettingKeys(const EdScene *s, FILE *f) {
     EngCfg_PutInt  (f, "win.height",    s->winH);
     EngCfg_PutBool (f, "win.vsync",     s->vsync);
     EngCfg_PutInt  (f, "win.fpsCap",    s->fpsCap);
+
+    // Recently-used placeables (content browser "Recent" category).
+    EngCfg_PutInt(f, "place.recentCount", s->recentCount);
+    for (int i = 0; i < s->recentCount; i++) {
+        char k[48];
+        snprintf(k, sizeof k, "place.recent.%d.tool", i); EngCfg_PutInt(f, k, s->recents[i].tool);
+        snprintf(k, sizeof k, "place.recent.%d.id", i);   EngCfg_PutStr(f, k, s->recents[i].id);
+    }
 
     // Camera bookmarks.
     for (int i = 0; i < 9; i++) {

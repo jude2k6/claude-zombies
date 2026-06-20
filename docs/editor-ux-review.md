@@ -1,6 +1,6 @@
 # Editor UI/UX Review + Redesign — 2026-06-20
 
-> **Status: DESIGN + waves 1–2 SHIPPED.** A critical UX teardown of the map editor
+> **Status: DESIGN + waves 1–4 SHIPPED.** A critical UX teardown of the map editor
 > (`src/editor/`) and a proposed redesign, captured from a 2026-06-20 review session. Both
 > implementation waves are done and on `main`: §7 #1–#5 + #8 (wave 1), then #6 + its model-path
 > prereq + #7 (wave 2). What's left is future polish (tabbed docking, browser recents,
@@ -389,8 +389,16 @@ the viewport can take the whole frame; the short bottom zone now shows PALETTE a
 also expanded the menus (View: Frame selection/all, Material mode; Tools: Map statistics, Rescan
 content; Help: Controls as a modal).
 
-Remaining future polish (not blocking): recents/favourites in the browser; drag-from-tile-into-
-viewport placement; per-panel **drag-to-rearrange between zones + saved layouts** (collapse/tab
-state is runtime-only today). **ASSETS relocated** (the §2 "repurpose/relocate" is now done):
+Wave-4 (later pass) — **content-browser Recents shipped.** A `Recent` category (first in the
+palette column, hidden until something is used) shows a small MRU ring of recently-armed
+placeables, one click away regardless of category. Backed by an `EdScene` ring
+(`recents[]`/`EdScene_PushRecent`, pushed from `PaletteArm`), resolved back to live catalog defs
+each frame (so thumbnails/active state stay correct, stale entries drop), and **persisted in
+editor.cfg** (`place.recent.*`, via the existing `EdScene_PutSettingKeys`/`LoadSettings` path).
+Verified by a ring-logic link-test (order/dedup/cap/geometry/none) + editor `--check`.
+
+Remaining future polish (not blocking): favourites/saved-searches beyond Recents;
+drag-from-tile-into-viewport placement; per-panel **drag-to-rearrange between zones + saved
+layouts** (collapse/tab state is runtime-only today). **ASSETS relocated** (the §2 "repurpose/relocate" is now done):
 `PanelAssets` is registered as `ED_DOCK_BOTTOM` in `RegisterPanels` (`edpanels.c`) and appears
 as a tab beside PALETTE and CONSOLE — INSPECTOR now owns the full right zone.

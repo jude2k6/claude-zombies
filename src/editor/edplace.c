@@ -18,6 +18,25 @@
 #include <string.h>
 #include <math.h>
 
+// ---- recents ring (content browser "Recent" category) ----------------------
+
+void EdScene_PushRecent(EdScene *s, int tool, const char *id) {
+    if (!s || tool == ED_PLACE_NONE) return;
+    if (!id) id = "";
+    // De-dup: drop any existing entry with the same (tool,id), then unshift.
+    int w = 0;
+    EdRecentPlace keep[ED_MAX_RECENTS];
+    for (int i = 0; i < s->recentCount && w < ED_MAX_RECENTS; i++) {
+        if (s->recents[i].tool == tool && strcmp(s->recents[i].id, id) == 0) continue;
+        keep[w++] = s->recents[i];
+    }
+    s->recents[0].tool = tool;
+    snprintf(s->recents[0].id, sizeof s->recents[0].id, "%s", id);
+    int n = 1;
+    for (int i = 0; i < w && n < ED_MAX_RECENTS; i++) s->recents[n++] = keep[i];
+    s->recentCount = n;
+}
+
 // ---- placement (mapedit add + retag) ---------------------------------------
 
 static const char *FacingToward(Vector3 p) {

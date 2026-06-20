@@ -95,6 +95,16 @@ typedef struct {
     char  srcRoot[ED_SRCPATH_LEN];  // pack root dir  (for import)
 } EdPropDef;
 
+// Recently-used placeable (content browser "Recent" category). A small MRU ring
+// of (tool + id) pairs pushed when a palette tile is armed, so the most-recent
+// placeables are one click away regardless of category. Persisted in editor.cfg.
+// See docs/editor-ux-review.md §4 (Recents = the cheap slice of Favorites).
+#define ED_MAX_RECENTS 10
+typedef struct {
+    int  tool;                 // EdPlaceTool
+    char id[ED_PROPID_LEN];    // mob/prop/perk/weapon id ("" for geometry/player)
+} EdRecentPlace;
+
 // A draw/pick proxy: one selectable box per MapDoc entity, tagged by stable id.
 typedef struct {
     int           id;
@@ -245,6 +255,10 @@ typedef struct EdScene {
     EdPropDef     weaponDefs[ED_MAX_BUYDEFS];  // scanned from weapons/*/*.weapon
     int           weaponDefCount;
 
+    // Recently-used placeables (content browser "Recent" category), MRU order.
+    EdRecentPlace recents[ED_MAX_RECENTS];
+    int           recentCount;
+
     EdAssetIndex  assets;           // maps/models/textures index (asset browser)
 
     bool          dragging;
@@ -346,6 +360,11 @@ void EdScene_ScanWeapons(EdScene *s);  // weapons/*.weapon → weaponDefs (wallb
 // game's catalogs — EdScene_Init scans once at startup, but switching games does
 // not re-init the scene.
 void EdScene_RescanContent(EdScene *s);
+
+// Push a placeable (tool + id) to the front of the recents ring, de-duping an
+// existing same entry. `id` may be NULL/"" for geometry/player tools. A no-op
+// for ED_PLACE_NONE. Called when a palette tile is armed (edpanels.c).
+void EdScene_PushRecent(EdScene *s, int tool, const char *id);
 
 // Rebuild the proxy list from the document (cheap; called each frame).
 void EdScene_RebuildProxies(EdScene *s);

@@ -49,8 +49,8 @@ static bool ContainsCI(const char *hay, const char *needle);
 //  (EndScissorMode → render → restore), exactly as PanelAssets used to.
 // ============================================================================
 
-typedef enum { PAL_GEOMETRY = 0, PAL_SPAWNS, PAL_PROPS, PAL_WALLBUYS, PAL_PERKS, PAL_PLUGINS, PAL_CATCOUNT } PalCat;
-static const char *kPalCatNames[PAL_CATCOUNT] = { "Geometry", "Spawns", "Props", "Wallbuys", "Perks", "Plugins" };
+typedef enum { PAL_RECENTS = 0, PAL_GEOMETRY, PAL_SPAWNS, PAL_PROPS, PAL_WALLBUYS, PAL_PERKS, PAL_PLUGINS, PAL_CATCOUNT } PalCat;
+static const char *kPalCatNames[PAL_CATCOUNT] = { "Recent", "Geometry", "Spawns", "Props", "Wallbuys", "Perks", "Plugins" };
 
 // One resolved tile to draw. `geom` 1..4 = a primitive gesture glyph (no model);
 // 0 = an asset/spawn tile (thumbnail `model` if non-empty, else `swatch`).
@@ -100,11 +100,57 @@ static int PalEmit(PalTile *out, int n, int max, const char *label,
     return n + 1;
 }
 
+// Emit one tile for a recents entry, resolving (tool,id) back to its catalog def
+// (so name/thumbnail/active state stay live). A no-op if the def no longer exists
+// (e.g. the game changed) — the stale recent just doesn't render.
+static int PalEmitRecent(EdScene *s, PalTile *out, int n, int max, int tool, const char *id) {
+    switch (tool) {
+    case ED_PLACE_WALL:      return PalEmit(out,n,max,"Wall",     "",(Color){150,150,160,255},1,ED_PLACE_WALL,     "",s->placeTool==ED_PLACE_WALL,     NULL,NULL,NULL);
+    case ED_PLACE_SECTOR:    return PalEmit(out,n,max,"Sector",   "",(Color){ 90,110,150,255},2,ED_PLACE_SECTOR,   "",s->placeTool==ED_PLACE_SECTOR,   NULL,NULL,NULL);
+    case ED_PLACE_OBSTACLE:  return PalEmit(out,n,max,"Obstacle", "",(Color){170,140, 90,255},3,ED_PLACE_OBSTACLE, "",s->placeTool==ED_PLACE_OBSTACLE, NULL,NULL,NULL);
+    case ED_PLACE_BARRICADE: return PalEmit(out,n,max,"Barricade","",(Color){200,170, 80,255},4,ED_PLACE_BARRICADE,"",s->placeTool==ED_PLACE_BARRICADE,NULL,NULL,NULL);
+    case ED_PLACE_PLAYER:    return PalEmit(out,n,max,"Player",   "",(Color){ 80,130,210,255},0,ED_PLACE_PLAYER,   "",s->placeTool==ED_PLACE_PLAYER,   NULL,NULL,NULL);
+    case ED_PLACE_MOB:
+        for (int i = 0; i < s->mobDefCount; i++) if (strcmp(s->mobDefs[i].id, id) == 0) {
+            const EdMobDef *m = &s->mobDefs[i];
+            return PalEmit(out,n,max,m->name,m->model,m->tint,0,ED_PLACE_MOB,m->id,
+                           s->placeTool==ED_PLACE_MOB && strcmp(s->placeMobId,m->id)==0, m->pack,m->srcDef,m->srcRoot);
+        }
+        return n;
+    case ED_PLACE_PROP:
+        for (int i = 0; i < s->propDefCount; i++) if (strcmp(s->propDefs[i].id, id) == 0) {
+            const EdPropDef *pd = &s->propDefs[i];
+            return PalEmit(out,n,max,pd->name,pd->model,(Color){130,130,140,255},0,ED_PLACE_PROP,pd->id,
+                           s->placeTool==ED_PLACE_PROP && strcmp(s->placePropId,pd->id)==0, pd->pack,pd->srcDef,pd->srcRoot);
+        }
+        return n;
+    case ED_PLACE_WALLBUY:
+        for (int i = 0; i < s->weaponDefCount; i++) if (strcmp(s->weaponDefs[i].id, id) == 0) {
+            const EdPropDef *wd = &s->weaponDefs[i];
+            return PalEmit(out,n,max,wd->name,wd->model,(Color){180,150,90,255},0,ED_PLACE_WALLBUY,wd->id,
+                           s->placeTool==ED_PLACE_WALLBUY && strcmp(s->placeWeaponId,wd->id)==0, wd->pack,wd->srcDef,wd->srcRoot);
+        }
+        return n;
+    case ED_PLACE_PERK:
+        for (int i = 0; i < s->perkDefCount; i++) if (strcmp(s->perkDefs[i].id, id) == 0) {
+            const EdPropDef *kd = &s->perkDefs[i];
+            return PalEmit(out,n,max,kd->name,kd->model,(Color){90,170,120,255},0,ED_PLACE_PERK,kd->id,
+                           s->placeTool==ED_PLACE_PERK && strcmp(s->placePerkId,kd->id)==0, kd->pack,kd->srcDef,kd->srcRoot);
+        }
+        return n;
+    default: return n;
+    }
+}
+
 // Build the tile list for the active category, applying the search filter.
 static int PaletteBuildTiles(EdHost *h, PalTile out[], int max) {
     EdScene *s = EdHost_Scene(h);
     int n = 0;
     switch (g_palCat) {
+    case PAL_RECENTS:
+        for (int i = 0; i < s->recentCount && n < max; i++)
+            n = PalEmitRecent(s, out, n, max, s->recents[i].tool, s->recents[i].id);
+        break;
     case PAL_GEOMETRY:
         n = PalEmit(out, n, max, "Wall",      "", (Color){150,150,160,255}, 1, ED_PLACE_WALL,      "", s->placeTool==ED_PLACE_WALL,      NULL, NULL, NULL);
         n = PalEmit(out, n, max, "Sector",    "", (Color){ 90,110,150,255}, 2, ED_PLACE_SECTOR,    "", s->placeTool==ED_PLACE_SECTOR,    NULL, NULL, NULL);
@@ -174,6 +220,8 @@ static void PaletteArm(EdScene *s, const PalTile *t) {
     case ED_PLACE_WALL:    s->wallPending = false; break;   // clear a stale first endpoint
     default: break;
     }
+    // Track it in the recents ring so it's one click away in the Recent category.
+    EdScene_PushRecent(s, (int)t->tool, t->id);
 }
 
 // A small procedural glyph for a GEOMETRY primitive (no model to thumbnail).
@@ -219,7 +267,9 @@ static void PanelPalette(EdHost *h, Rectangle c, void *u) {
     // The Plugins category is hidden until a plugin registers a place-tool; if
     // we're parked on it and it just emptied, fall back to Geometry.
     bool hasPlugins = EdHost_PlaceToolCount(h) > 0;
+    bool hasRecents = s->recentCount > 0;
     if (g_palCat == PAL_PLUGINS && !hasPlugins) g_palCat = PAL_GEOMETRY;
+    if (g_palCat == PAL_RECENTS && !hasRecents) g_palCat = PAL_GEOMETRY;
 
     PalTile tiles[ED_MAX_PROPDEFS + ED_MAX_MOBDEFS + ED_MAX_PLACE_TOOLS + 8];
     int nTiles = PaletteBuildTiles(h, tiles, (int)(sizeof tiles / sizeof tiles[0]));
@@ -243,7 +293,9 @@ static void PanelPalette(EdHost *h, Rectangle c, void *u) {
     // registers a place-tool). Size the button pitch from the ACTUAL row count so
     // every row fits the short bottom panel without clipping (T3-1), with a small
     // visual gap after Select folded in rather than a whole wasted row.
-    int nCats = hasPlugins ? PAL_CATCOUNT : PAL_CATCOUNT - 1;
+    int nCats = PAL_CATCOUNT;
+    if (!hasPlugins) nCats--;                  // hide the empty Plugins tab
+    if (!hasRecents) nCats--;                  // hide Recent until something is used
     int nRowsCol = 1 + nCats;                 // Select + categories
     float gap = 4 * sc;
     float bh = fmaxf(14.0f * sc, (colR.height - gap) / (float)nRowsCol);
@@ -253,6 +305,7 @@ static void PanelPalette(EdHost *h, Rectangle c, void *u) {
     by += bh + gap;   // one button height + a small visual gap
     for (int ci = 0; ci < PAL_CATCOUNT; ci++) {
         if (ci == PAL_PLUGINS && !hasPlugins) continue;   // hide the empty Plugins tab
+        if (ci == PAL_RECENTS && !hasRecents) continue;   // hide Recent until used
         if (Eng_UiToolButton((Rectangle){ colR.x, by, colR.width, bh }, kPalCatNames[ci], g_palCat == ci))
             g_palCat = ci;
         by += bh;

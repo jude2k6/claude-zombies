@@ -183,6 +183,7 @@ static bool q_grid    (EdHost *h, void *u) { (void)u; return EdHost_Scene(h)->gr
 static bool q_giz_move (EdHost *h, void *u) { (void)u; return EdHost_Scene(h)->mode == ENG_GIZMO_TRANSLATE; }
 static bool q_giz_rot  (EdHost *h, void *u) { (void)u; return EdHost_Scene(h)->mode == ENG_GIZMO_ROTATE; }
 static bool q_giz_scale(EdHost *h, void *u) { (void)u; return EdHost_Scene(h)->mode == ENG_GIZMO_SCALE; }
+static bool q_material (EdHost *h, void *u) { (void)u; return EdHost_Scene(h)->materialMode; }
 
 // ---- do_* helpers (real work, no dirty check) --------------------------------
 
@@ -497,19 +498,66 @@ static void a_view_iso(EdHost *h, void *u) { (void)u; EdScene_SwitchView(EdHost_
 static void a_view_top(EdHost *h, void *u) { (void)u; EdScene_SwitchView(EdHost_Scene(h), ED_VIEW_TOP); }
 static void a_snap(EdHost *h, void *u)     { (void)u; EdScene *s = EdHost_Scene(h); s->snapEnabled = !s->snapEnabled; }
 static void a_grid(EdHost *h, void *u)     { (void)u; EdScene *s = EdHost_Scene(h); s->gridVisible = !s->gridVisible; }
+static void a_material(EdHost *h, void *u) { (void)u; EdScene *s = EdHost_Scene(h); s->materialMode = !s->materialMode; }
+static void a_frame_sel(EdHost *h, void *u){ (void)u; EdScene_FrameSelected(EdHost_Scene(h)); }
+static void a_frame_all(EdHost *h, void *u){ (void)u; EdScene_FrameAll(EdHost_Scene(h)); }
 static void a_giz_move (EdHost *h, void *u) { (void)u; EdHost_Scene(h)->mode = ENG_GIZMO_TRANSLATE; }
 static void a_giz_rot  (EdHost *h, void *u) { (void)u; EdHost_Scene(h)->mode = ENG_GIZMO_ROTATE; }
 static void a_giz_scale(EdHost *h, void *u) { (void)u; EdHost_Scene(h)->mode = ENG_GIZMO_SCALE; }
 
-static void a_help_controls(EdHost *h, void *u) {
+// Controls reference — a modal (instead of a console dump that scrolls away).
+// Two columns: key chord (gold) + what it does. Grouped by activity.
+static void ControlsModal(EdHost *h, Rectangle area, void *u) {
     (void)u;
-    EdHost_Log(h, ED_LOG_INFO, "View: F1 fly / F2 iso / F3 top   Gizmo: 1 move 2 rot 3 scale   G show/hide grid");
-    EdHost_Log(h, ED_LOG_INFO, "Place: P cycle tool, click ground (Sector: drag a footprint)   R retag/rotate   X/Del delete");
-    EdHost_Log(h, ED_LOG_INFO, "Select: click   Shift+click add/remove   Ctrl+A all   move gizmo drags the set");
-    EdHost_Log(h, ED_LOG_INFO, "Fly: RMB+WASDQE (Shift fast)   Ortho: RMB orbit / MMB pan / wheel zoom");
-    EdHost_Log(h, ED_LOG_INFO, "Edit: Ctrl+Z undo / Ctrl+Y redo / Ctrl+S save   Ctrl+D dup / Ctrl+C copy / Ctrl+X cut / Ctrl+V paste");
-    EdHost_Log(h, ED_LOG_INFO, "File: Ctrl+O open / Ctrl+R play test (save + launch the game on this map)");
+    float sc = EdHost_UiScale(h);
+    Eng_UiSetScale(sc); Eng_UiApplyFont(13);
+    float pw = 540 * sc, ph = 470 * sc;
+    float px = (area.width  - pw) / 2.0f;
+    float py = (area.height - ph) / 2.0f; if (py < 6 * sc) py = 6 * sc;
+    Eng_UiPanelBg((Rectangle){ px - 2, py - 2, pw + 4, ph + 4 }, (Color){ 60, 66, 80, 255 });
+    Eng_UiPanelBg((Rectangle){ px, py, pw, ph },                 (Color){ 24, 27, 34, 255 });
+
+    float X = px + 18 * sc, kx = X, dx = X + 170 * sc, y = py + 14 * sc;
+    Eng_UiText("CONTROLS", X, y, 18, ENG_UI_GOLD); y += 30 * sc;
+
+    // {key, desc}; a NULL key with a desc is a section header, NULL/NULL a gap.
+    static const char *rows[][2] = {
+        { NULL, "VIEW" },
+        { "F1 / F2 / F3",   "Fly / Isometric / Top-down camera" },
+        { "F / Home",       "Frame selection / Frame all" },
+        { "G / M",          "Show grid / Material (textured) mode" },
+        { "Ctrl + = / -",   "Zoom the UI in / out" },
+        { NULL, NULL },
+        { NULL, "EDIT" },
+        { "1 / 2 / 3",      "Gizmo: Move / Rotate / Scale" },
+        { "P",              "Cycle place tool (click ground to drop)" },
+        { "R",              "Retag spawn / rotate barricade" },
+        { "X / Del",        "Delete selection" },
+        { "Click / Shift",  "Select / add to selection;  Ctrl+A all" },
+        { "Ctrl+C/X/V/D",   "Copy / Cut / Paste / Duplicate" },
+        { "Ctrl+Z / Ctrl+Y","Undo / Redo" },
+        { NULL, NULL },
+        { NULL, "FILE / NAVIGATION" },
+        { "Ctrl+S / Ctrl+O","Save / Open" },
+        { "Ctrl+R",         "Play test (save + launch the game)" },
+        { "RMB + WASDQE",   "Fly (Shift = fast)" },
+        { "RMB / MMB / Wheel","Orbit / Pan / Zoom (ortho views)" },
+    };
+    int n = (int)(sizeof rows / sizeof rows[0]);
+    for (int i = 0; i < n; i++) {
+        if (!rows[i][0] && !rows[i][1]) { y += 8 * sc; continue; }       // gap
+        if (!rows[i][0]) { Eng_UiText(rows[i][1], X, y, 13, ENG_UI_GOLD); y += 18 * sc; continue; } // header
+        Eng_UiText(rows[i][0], kx, y, 12, (Color){ 220, 200, 130, 255 });
+        Eng_UiText(rows[i][1], dx, y, 12, ENG_UI_TEXT);
+        y += 17 * sc;
+    }
+
+    float bw = 100 * sc, by = py + ph - 32 * sc;
+    if (GuiButton((Rectangle){ px + (pw - bw) / 2.0f, by, bw, 24 * sc }, "Close"))
+        EdHost_SetModal(h, NULL, NULL);
 }
+
+static void a_help_controls(EdHost *h, void *u) { (void)u; EdHost_SetModal(h, ControlsModal, NULL); }
 static void a_help_about(EdHost *h, void *u) {
     (void)u;
     EdHost_Log(h, ED_LOG_INFO, "Scene Builder — engine-native map editor (libengine.a, no game code).");
@@ -561,8 +609,12 @@ static void RegisterMenus(EdHost *h) {
     EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="View", .label="Isometric camera", .shortcut="F2", .onClick=a_view_iso, .checked=q_view_iso });
     EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="View", .label="Top-down camera",  .shortcut="F3", .onClick=a_view_top, .checked=q_view_top });
     EdHost_AddMenuSeparator(h, "View");
-    EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="View", .label="Show grid",    .shortcut="G", .onClick=a_grid, .checked=q_grid });
-    EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="View", .label="Snap to grid", .onClick=a_snap, .checked=q_snap });
+    EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="View", .label="Frame selection", .shortcut="F",    .onClick=a_frame_sel, .enabled=q_has_sel });
+    EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="View", .label="Frame all",       .shortcut="Home", .onClick=a_frame_all });
+    EdHost_AddMenuSeparator(h, "View");
+    EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="View", .label="Show grid",     .shortcut="G", .onClick=a_grid, .checked=q_grid });
+    EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="View", .label="Snap to grid",  .onClick=a_snap, .checked=q_snap });
+    EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="View", .label="Material mode", .shortcut="M", .onClick=a_material, .checked=q_material });
     // Gizmo mode (audit P1-B): menu-discoverable counterpart to keys 1/2/3, now
     // that the panel toggle is gone.
     EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="View", .submenu="Gizmo mode", .label="Move",   .shortcut="1", .onClick=a_giz_move,  .checked=q_giz_move });
@@ -673,6 +725,21 @@ static void MapSettingsModal(EdHost *h, Rectangle area, void *u) {
 
 static void a_map_settings(EdHost *h, void *u) { (void)u; EdHost_SetModal(h, MapSettingsModal, NULL); }
 
+static void a_rescan(EdHost *h, void *u) {
+    (void)u;
+    EdScene_RescanContent(EdHost_Scene(h));
+    EdHost_Log(h, ED_LOG_INFO, "content rescanned — palette + asset browser refreshed");
+}
+
+static void a_stats(EdHost *h, void *u) {
+    (void)u; MapDoc *d = &EdHost_Scene(h)->doc;
+    EdHost_Log(h, ED_LOG_INFO, "map '%s': sectors %d  walls %d  windows %d  obstacles %d",
+               d->name[0] ? d->name : "(unnamed)",
+               d->sectorCount, d->wallCount, d->windowCount, d->obstacleCount);
+    EdHost_Log(h, ED_LOG_INFO, "          props %d  wallbuys %d  perks %d  spawns %d",
+               d->propCount, d->wallbuyCount, d->perkCount, d->spawnCount);
+}
+
 static void a_validate(EdHost *h, void *u) {
     (void)u; EdScene *s = EdHost_Scene(h);
     MapDocIssue issues[64];
@@ -690,7 +757,10 @@ static void RegisterMapTools(EdHost *h) {
     // so the bar order is File / Edit / View / Tools / Help (Fix #8).
     EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="Tools", .label="Map Settings...", .onClick=a_map_settings });
     EdHost_AddMenuSeparator(h, "Tools");
-    EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="Tools", .label="Validate map", .onClick=a_validate });
+    EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="Tools", .label="Validate map",    .onClick=a_validate });
+    EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="Tools", .label="Map statistics",  .onClick=a_stats });
+    EdHost_AddMenuSeparator(h, "Tools");
+    EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="Tools", .label="Rescan content",  .onClick=a_rescan });
     EdHost_AddMenuSeparator(h, "Edit");
     EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="Edit", .label="Preferences...", .onClick=a_settings });
 

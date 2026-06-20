@@ -35,6 +35,8 @@
 #define ED_DROPDOWN_W  220
 #define ED_ITEM_H      22
 #define ED_STRIP_H     22   // viewport tool-strip band reserved at the top of the viewport
+#define ED_RAIL        16   // width/height a collapsed dock zone shrinks to (a re-open rail)
+#define ED_SPLIT_DRAG   4   // px the mouse must travel before a splitter press counts as a resize-drag
 
 typedef struct {
     char         label[24];
@@ -64,7 +66,12 @@ struct EdHost {
 
     // dock-zone sizes in UNSCALED px (multiplied by uiScale at layout time).
     float    leftW, rightW, bottomH;
+    bool     zoneCollapsed[ED_DOCK_COUNT];  // a collapsed zone shrinks to a thin rail
+    bool     zoneTabbed[ED_DOCK_COUNT];     // tabbed zone: one panel shown full-height, tab bar to switch
+    int      zoneActiveTab[ED_DOCK_COUNT];  // which panel index (within the zone) the tab bar shows
     int      splitterDrag;      // 0 none, 1 left, 2 right, 3 bottom
+    Vector2  splitDownPos;      // mouse pos when the splitter was pressed
+    bool     splitMoved;        // press has moved past the drag threshold (=> resize, not a click)
     bool     vpActive;          // a viewport drag is in progress (started in vp)
 
     EdModalFn modalFn;
@@ -180,6 +187,10 @@ EdHost *EdHost_Create(EdScene *scene) {
     h->leftW    = 160;
     h->rightW   = 180;
     h->bottomH  = 150;   // taller now the bottom hosts the PALETTE browser + CONSOLE
+    // The bottom zone is short, so its two panels (PALETTE + CONSOLE) would clip
+    // each other if stacked — show them as tabs (one full-height at a time). The
+    // tall side zones keep stacking so both their panels stay visible at once.
+    h->zoneTabbed[ED_DOCK_BOTTOM] = true;
     return h;
 }
 
@@ -256,6 +267,11 @@ static EdLayout ComputeLayout(EdHost *h, int W, int H) {
     if (bh < 70 * s)  bh = 70 * s;
     if (bh > maxB)    bh = maxB;
 
+    // A collapsed zone overrides the above and shrinks to a thin re-open rail.
+    if (h->zoneCollapsed[ED_DOCK_LEFT])   lw = ED_RAIL * s;
+    if (h->zoneCollapsed[ED_DOCK_RIGHT])  rw = ED_RAIL * s;
+    if (h->zoneCollapsed[ED_DOCK_BOTTOM]) bh = ED_RAIL * s;
+
     float midTop = mh, midBot = H - sh;
     L.menuBar   = (Rectangle){ 0, 0, (float)W, mh };
     L.statusBar = (Rectangle){ 0, (float)H - sh, (float)W, sh };
@@ -280,8 +296,17 @@ static void SplitterRects(const EdLayout *L, Rectangle *sl, Rectangle *sr, Recta
     *sb = (Rectangle){ L->bottom.x, L->bottom.y - w * 0.5f, L->bottom.width, w };
 }
 
+// A splitter is dual-purpose: a *click* (press + release without moving past
+// ED_SPLIT_DRAG) toggles its zone collapsed/expanded; a *drag* resizes the zone
+// (and un-collapses it if it was a rail). This makes the same handle the user
+// already grabs to resize also the way to fold the panel away.
 static void UpdateSplitters(EdHost *h, const EdLayout *L, int W, int H) {
     Rectangle sl, sr, sb; SplitterRects(L, &sl, &sr, &sb);
+    // A collapsed zone's whole rail is the toggle hit-area (the thin handle would
+    // be a tiny target); expanded zones keep the thin splitter handle.
+    if (h->zoneCollapsed[ED_DOCK_LEFT])   sl = L->left;
+    if (h->zoneCollapsed[ED_DOCK_RIGHT])  sr = L->right;
+    if (h->zoneCollapsed[ED_DOCK_BOTTOM]) sb = L->bottom;
     Vector2 m = GetMousePosition();
     float s = L->s;
 
@@ -289,12 +314,28 @@ static void UpdateSplitters(EdHost *h, const EdLayout *L, int W, int H) {
         if      (CheckCollisionPointRec(m, sl)) h->splitterDrag = 1;
         else if (CheckCollisionPointRec(m, sr)) h->splitterDrag = 2;
         else if (CheckCollisionPointRec(m, sb)) h->splitterDrag = 3;
+        if (h->splitterDrag) { h->splitDownPos = m; h->splitMoved = false; }
     }
-    if (h->splitterDrag && !IsMouseButtonDown(MOUSE_BUTTON_LEFT)) h->splitterDrag = 0;
 
-    if (h->splitterDrag == 1) h->leftW   = m.x / s;
-    if (h->splitterDrag == 2) h->rightW  = (W - m.x) / s;
-    if (h->splitterDrag == 3) h->bottomH = (H - (ED_STATUS_H * s) - m.y) / s;
+    if (h->splitterDrag) {
+        EdDockZone z = (EdDockZone)(h->splitterDrag - 1);  // 1/2/3 → LEFT/RIGHT/BOTTOM
+        float dx = m.x - h->splitDownPos.x, dy = m.y - h->splitDownPos.y;
+        float thr = ED_SPLIT_DRAG * s;
+        if (!h->splitMoved && dx * dx + dy * dy > thr * thr) h->splitMoved = true;
+
+        if (h->splitMoved) {
+            // Resize: a drag always implies an expanded zone.
+            h->zoneCollapsed[z] = false;
+            if (h->splitterDrag == 1) h->leftW   = m.x / s;
+            if (h->splitterDrag == 2) h->rightW  = (W - m.x) / s;
+            if (h->splitterDrag == 3) h->bottomH = (H - (ED_STATUS_H * s) - m.y) / s;
+        }
+
+        if (!IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+            if (!h->splitMoved) h->zoneCollapsed[z] = !h->zoneCollapsed[z];  // click = toggle
+            h->splitterDrag = 0;
+        }
+    }
 
     // Cursor hint: EW on vertical splitters (left/right), NS on the bottom one.
     // Checked against drag state first so the hint persists while dragging even
@@ -477,8 +518,32 @@ static bool DrawMenuBar(EdHost *h, const EdLayout *L) {
 
 // ---- panels ----------------------------------------------------------------
 
+// Small filled arrow centred at (cx,cy), half-size a. dir 0/1/2/3 = right/left/
+// up/down. Vertex order is wound so raylib's backface cull keeps it (matches the
+// Hierarchy sector triangles — the editor font has no arrow glyphs).
+static void DrawArrow(float cx, float cy, float a, int dir, Color c) {
+    Vector2 v[3];
+    switch (dir) {
+        case 0: v[0]=(Vector2){cx-a,cy-a}; v[1]=(Vector2){cx-a,cy+a}; v[2]=(Vector2){cx+a,cy}; break; // ▶
+        case 1: v[0]=(Vector2){cx+a,cy-a}; v[1]=(Vector2){cx-a,cy};   v[2]=(Vector2){cx+a,cy+a}; break; // ◀
+        case 2: v[0]=(Vector2){cx,cy-a};   v[1]=(Vector2){cx-a,cy+a}; v[2]=(Vector2){cx+a,cy+a}; break; // ▲
+        default:v[0]=(Vector2){cx-a,cy-a}; v[1]=(Vector2){cx,cy+a};   v[2]=(Vector2){cx+a,cy-a}; break; // ▼
+    }
+    DrawTriangle(v[0], v[1], v[2], c);
+}
+
 static void DrawZone(EdHost *h, EdDockZone zone, Rectangle area) {
     if (area.width < 2 || area.height < 2) return;
+
+    // Collapsed: draw a thin rail with an expand arrow instead of any panels.
+    if (h->zoneCollapsed[zone]) {
+        float s = h->scene->uiScale;
+        DrawRectangleRec(area, (Color){ 30, 34, 42, 255 });
+        int dir = (zone == ED_DOCK_LEFT) ? 0 : (zone == ED_DOCK_RIGHT) ? 1 : 2; // open ▶/◀/▲
+        DrawArrow(area.x + area.width * 0.5f, area.y + area.height * 0.5f, 5 * s, dir, ENG_UI_GOLD);
+        return;
+    }
+
     DrawRectangleRec(area, (Color){ 24, 27, 34, 255 });
 
     // count panels in this zone
@@ -489,6 +554,41 @@ static void DrawZone(EdHost *h, EdDockZone zone, Rectangle area) {
 
     float s = h->scene->uiScale;
     float hdr = ED_PANEL_HDR * s;
+
+    // Tabbed zone: a tab bar across the top, the active panel filling the rest
+    // (one at a time) — used where stacking would clip a short zone's panels.
+    if (h->zoneTabbed[zone] && n > 1) {
+        int *act = &h->zoneActiveTab[zone];
+        if (*act < 0 || *act >= n) *act = 0;
+        Vector2 mp = GetMousePosition();
+        bool tabClick = EdHost_PanelsInteractive(h) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
+        float tabW = area.width / n;
+        DrawRectangle((int)area.x, (int)area.y, (int)area.width, (int)hdr, (Color){ 28, 32, 40, 255 });
+        for (int k = 0; k < n; k++) {
+            EdPanel *p = &h->panels[idx[k]];
+            Rectangle tr = { area.x + k * tabW, area.y, tabW, hdr };
+            bool hot = CheckCollisionPointRec(mp, tr);
+            if (tabClick && hot) *act = k;
+            bool active = (k == *act);
+            if (active)   DrawRectangleRec(tr, (Color){ 24, 27, 34, 255 });
+            else if (hot) DrawRectangleRec(tr, (Color){ 34, 39, 49, 255 });
+            float tw = MeasureText(p->title, (int)(12 * s));
+            Eng_UiText(p->title, tr.x + (tabW - tw) / 2.0f, tr.y + (hdr - 12 * s) / 2.0f, 12,
+                       active ? ENG_UI_GOLD : ENG_UI_DIM);
+            if (active) DrawRectangle((int)tr.x, (int)tr.y, (int)tabW, (int)(2 * s), ENG_UI_GOLD);
+            if (k > 0)  DrawRectangle((int)tr.x, (int)tr.y, 1, (int)hdr, (Color){ 50, 56, 68, 255 });
+        }
+        DrawRectangle((int)area.x, (int)(area.y + hdr), (int)area.width, 1, (Color){ 50, 56, 68, 255 });
+        EdPanel *ap = &h->panels[idx[*act]];
+        Rectangle content = { area.x + 6 * s, area.y + hdr + 4 * s,
+                              area.width - 12 * s, area.height - hdr - 8 * s };
+        if (content.height > 4 && ap->draw) {
+            BeginScissorMode((int)content.x, (int)content.y, (int)content.width, (int)content.height);
+            ap->draw(h, content, ap->user);
+            EndScissorMode();
+        }
+        return;
+    }
 
     // Height allocation: fixed-height panels (prefH>0) keep prefH*scale+header;
     // the rest of the zone is split evenly among the flexible panels. If fixed
@@ -644,6 +744,15 @@ void EdHost_Frame(EdHost *h, int W, int H) {
     DrawRectangleRec(sl, h->splitterDrag == 1 ? ENG_UI_GOLD : spc);
     DrawRectangleRec(sr, h->splitterDrag == 2 ? ENG_UI_GOLD : spc);
     DrawRectangleRec(sb, h->splitterDrag == 3 ? ENG_UI_GOLD : spc);
+    // On an expanded zone, a faint chevron on the splitter hints "click to
+    // collapse" (points the way the zone folds away). Collapsed zones show their
+    // expand arrow on the rail instead (DrawZone).
+    if (!h->zoneCollapsed[ED_DOCK_LEFT])
+        DrawArrow(sl.x + sl.width * 0.5f, sl.y + sl.height * 0.5f, 2.5f * s, 1, ENG_UI_DIM); // ◀
+    if (!h->zoneCollapsed[ED_DOCK_RIGHT])
+        DrawArrow(sr.x + sr.width * 0.5f, sr.y + sr.height * 0.5f, 2.5f * s, 0, ENG_UI_DIM); // ▶
+    if (!h->zoneCollapsed[ED_DOCK_BOTTOM])
+        DrawArrow(sb.x + sb.width * 0.5f, sb.y + sb.height * 0.5f, 2.5f * s, 3, ENG_UI_DIM); // ▼
 
     DrawStatusBar(h, &L);
 

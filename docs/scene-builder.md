@@ -8,8 +8,10 @@ editor* — see [engine-layers.md](engine-layers.md) for the layering rationale,
 [engine-usage.md](engine-usage.md) §4 ("Building a second module") for the host pattern.
 
 The editor is a **Unity-style IDE shell**: a top **menu bar** (File / Edit / View /
-Tools / Help), resizable **dock zones** (Tools + Hierarchy on the left, Inspector + Assets
-on the right, Console on the bottom) around a central **3D viewport**, and a **status bar**.
+View / Tools / Help), resizable **dock zones** (Hierarchy on the left, Inspector + Assets
+on the right, a tabbed Palette / Console browser on the bottom) around a central **3D
+viewport**, and a **status bar**. Each dock zone **collapses** to a thin rail by clicking
+its splitter, handing the freed space to the viewport.
 Everything visible is contributed through a **plugin API** — the built-in tools are
 themselves first-party plugins, and third-party plugins (compiled-in *or* dynamically
 loaded `.so` files in `./plugins`) extend it through the identical surface. See §3.
@@ -29,9 +31,11 @@ loaded `.so` files in `./plugins`) extend it through the identical surface. See 
 > settings dialog (`editor.cfg`), and `MapDoc_Validate` map-checking — plus
 > `File ▸ Save` (`MapDoc_Save`), **New Game / Open Game** (game-folder scaffolding +
 > overlay), **data-driven place palettes for every entity kind** (Spawns/Props/
-> Wallbuys/Perks scanned from content catalogs) in an **always-visible TOOLS panel**
-> (left dock, above Hierarchy), submenu support, and a dynamic plugin loader, plus an
-> **ASSETS panel** (right dock) that browses the overlay's maps — click one to open it.
+> Wallbuys/Perks scanned from content catalogs) in a **bottom-dock PALETTE browser**
+> (category column + thumbnail grid, **tabbed with the Console**), submenu support, and a
+> dynamic plugin loader, plus an **ASSETS panel** (right dock) that browses the overlay's
+> maps — click one to open it. Every **dock zone collapses** to a rail (click its splitter)
+> to maximise the viewport.
 > Direct **geometry handles** in the viewport: sector edge-resize + a **vertical floor-
 > height handle**, and **wall endpoint handles** (drag either end). There's also a
 > **material mode** (`M`): textured floors/walls/obstacles/props instead of proxy boxes,
@@ -92,7 +96,7 @@ The editor is **three layers + plugins**, all in `src/editor/`:
 |---|---|
 | `edscene.{c,h}` | **The document + 3D view.** `EdScene` owns the open `MapDoc`, its `EngMapHistory`, the camera (fly/iso/top — always re-derived each frame via `DeriveCamera` so framing applies even off-viewport), selection, the gizmo + geometry-edit handles (sector resize, sector floor-height, wall endpoints), placement tools, framing (`EdScene_FrameAll`/`FrameSelected`), and the persisted settings. Split across `edsettings/edcatalog/edmat/edplace.c` (former statics in `edscene_internal.h`). Knows nothing about menus or panels. |
 | `edhost.{c,h}`  | **The shell** (the IDE frame). Owns layout (menu bar, dock zones, splitters, status bar), input routing, the **plugin registration API**, and the undo-commit helpers (incl. tagged/coalescing commits). Owns no editing logic — it hosts a viewport rect and calls into the scene. |
-| `edpanels.c` / `edmenus.c` / `panel_inspector.c` / `ed_recents.c` | **First-party plugins** (split from the former `builtins.c`; entry points in `builtins.h`, cross-file calls via `builtins_internal.h`). The default IDE: the **Tools** (placement palette, left dock) / **Hierarchy** / **Inspector** / **Assets** / **Console** panels + status segments (`edpanels.c`), the menu bar + Settings/Validate modals (`edmenus.c`), the per-entity Inspector (`panel_inspector.c`), and recents (`ed_recents.c`) — each against the same `EdHost_*` API a third-party plugin uses. |
+| `edpanels.c` / `edmenus.c` / `panel_inspector.c` / `ed_recents.c` | **First-party plugins** (split from the former `builtins.c`; entry points in `builtins.h`, cross-file calls via `builtins_internal.h`). The default IDE: the **Palette** (placement browser, bottom dock, tabbed with Console) / **Hierarchy** / **Inspector** / **Assets** / **Console** panels + status segments (`edpanels.c`), the menu bar + Settings/Validate modals (`edmenus.c`), the per-entity Inspector (`panel_inspector.c`), and recents (`ed_recents.c`) — each against the same `EdHost_*` API a third-party plugin uses. |
 | `editor_main.c` | **Wiring.** `main()` loads settings, opens the window, builds the host, registers the built-ins, loads dynamic plugins, runs `Eng_Run`. Also hosts the headless `--check` and the `--shot`/`--view`/`--select` capture hooks for CI. |
 | `edassets.{c,h}` | **Asset index.** Scans the content overlay (`Eng_ContentDirs`) for maps/models/textures into a de-duped `EdAssetIndex` (held on `EdScene`). The Assets panel now lists **maps** only (click to open); the models/textures lists were trimmed (browse-only dead weight). Pure file listing — no parse, no load. |
 | `edthumb.{c,h}` | **Model thumbnails** (lazy off-screen `.glb` render to a cached `RenderTexture`). **Currently dormant** — its only call site went away with the Assets-panel trim; kept for the planned asset-import browser. Still freed at shutdown. |
@@ -246,9 +250,10 @@ The shell wraps the viewport in a Unity-style frame, all built by the `menus` / 
   maps, **Play Test** `Ctrl+R`, a **Game project ▸** flyout with New/Open Game, Reload,
   Exit — see below), **Edit**
   (Undo/Redo/Delete, enabled-state aware, **Preferences…**), **View** (Fly/Iso/Top with a
-  check on the active one, Show grid (`G`), Snap to grid, a **Gizmo mode ▸** flyout:
-  Move/Rotate/Scale),
-  **Tools** (Validate map), **Help** (Controls, About — they print to the Console). Click
+  check on the active one, **Frame selection** (`F`) / **Frame all** (`Home`), Show grid
+  (`G`), Snap to grid, **Material mode** (`M`), a **Gizmo mode ▸** flyout: Move/Rotate/Scale),
+  **Tools** (Map Settings…, Validate map, **Map statistics**, **Rescan content**), **Help**
+  (**Controls** — a modal key reference — and About). Click
   a title to open; hover-switches between open menus; hovering a **`▸` item** opens its
   flyout submenu; click an item or click away to close. While a menu is open the viewport
   ignores clicks. (Submenus are an `EdMenuItem.submenu` group — see `edhost.h`.)
@@ -270,17 +275,10 @@ through a small **dynamic-menu** hook the shell grew for exactly this — a menu
 an `EdMenuDynFn` provider (`EdHost_SetMenuDynamic`) that emits items each frame the menu is
 open, drawn after the static items with an automatic separator. (Static menu items are
 registered once; recents change at runtime, hence the hook.)
-- **Left zone**: two stacked panels.
-  - **TOOLS** (`DrawPlaceTools`, `edpanels.c`) — an **always-visible** placement palette:
-    Select / move, then the data-driven **Spawns / Geometry / Props / Wallbuys / Perks**
-    sections (one button per tool, scanned from the content catalogs `mobs/*.mob`,
-    `props/*.prop`, `weapons/*.weapon`, `perks/*.perk` — a new file is a new button, no
-    rebuild; see [editor-content-extensibility.md](editor-content-extensibility.md)). *(Transient
-    state — UI scale, view camera, gizmo mode, barricade auto-spawn — lives in keyboard
-    shortcuts, the View/Edit menus, and the Settings dialog, never here.)*
-  - **HIERARCHY** — a scrollable list of every entity by `#id kind`, with a **search box**
-    that filters rows by id/kind/mob substring; click a row to select (mirrors the viewport),
-    **double-click to frame** that entity.
+- **Left zone**: **HIERARCHY** — a scrollable list of every entity by `#id kind`, with a
+  **search box** that filters rows by id/kind/mob substring; click a row to select (mirrors
+  the viewport), **double-click to frame** that entity. (The placement palette used to share
+  this zone; it now lives in the bottom dock — see below.)
 - **Right zone**: two stacked panels.
   - **INSPECTOR** — **editable** fields for the selection: position (all kinds), spawn mob,
     window facing, prop yaw/scale, obstacle size, sector size/heights, **wall endpoints
@@ -294,20 +292,35 @@ registered once; recents change at runtime, hence the hook.)
     `EdScene.assets` by `edassets.{c,h}`, de-duped game-over-library), narrowed by a filter
     box — **click a map to open it** (through the same unsaved-changes guard as `File ▸ Open`).
     > **Maps-only by design.** The old models/textures browse lists were click-to-log dead
-    > weight and were trimmed; props place from the **Props** palette (TOOLS), which resolves
-    > against the `.prop` catalog (`Props_IndexByName`) so they're guaranteed to render in-game
-    > (a raw model stem would stamp a `prop.name` with no `.prop`, which `level.c` silently
-    > skips at load). Thumbnails + an import browser return with the asset-import work.
-- **Bottom zone**: **CONSOLE** — log output (plugin loads, save/validate results, Help),
-  with a **Clear** button and a severity filter (all / warnings+ / errors).
-- **Status bar** (bottom): map name + dirty flag, entity count, view mode + gizmo mode +
-  snap, and the selection (empty when nothing is selected) — each a registered status
-  segment. The open map + dirty marker is also the OS window title.
+    > weight and were trimmed; props place from the **Props** section of the PALETTE, which
+    > resolves against the `.prop` catalog (`Props_IndexByName`) so they're guaranteed to
+    > render in-game (a raw model stem would stamp a `prop.name` with no `.prop`, which
+    > `level.c` silently skips at load). Thumbnails + an import browser return with the
+    > asset-import work.
+- **Bottom zone**: **PALETTE** and **CONSOLE**, shown as **tabs** (one fills the zone
+  full-height; click the other tab to switch — the zone is short, so stacking the two clipped
+  the palette).
+  - **PALETTE** (`PanelPalette`, `edpanels.c`) — the placement browser: a **category column**
+    (Select / Geometry / Spawns / Props / Wallbuys / Perks) and a **wrapping tile grid** with
+    a search box. Asset kinds show real GLB thumbnails; Geometry shows procedural gesture
+    glyphs. Tools are scanned from the content catalogs `mobs/*.mob`, `props/*.prop`,
+    `weapons/*.weapon`, `perks/*.perk` — a new file is a new tile, no rebuild (see
+    [editor-content-extensibility.md](editor-content-extensibility.md)). Clicking a tile arms
+    the same `placeTool` state. *(Transient state — UI scale, view camera, gizmo mode,
+    barricade auto-spawn — lives in keyboard shortcuts and the View/Edit menus, never here.)*
+  - **CONSOLE** — log output (plugin loads, save/validate results, Help), with a **Clear**
+    button and a severity filter (all / warnings+ / errors).
+- **Status bar** (bottom): map name + dirty flag, entity count, and the selection (empty when
+  nothing is selected) — each a registered status segment; the view / gizmo / snap / grid
+  badges live on the **viewport tool-strip** at the top of the viewport, not here. The open
+  map + dirty marker is also the OS window title.
 
-Zones resize by dragging the **splitters** between them and the viewport. Panels stack
-within a zone; a panel may request a fixed height (`prefH`) and otherwise flexes to share
-the leftover space (INSPECTOR/ASSETS split the right zone; HIERARCHY/CONSOLE fill theirs).
-Every menu/panel action has a hotkey equivalent and vice-versa.
+Zones resize by dragging the **splitters** between them and the viewport; **clicking** a
+splitter instead **collapses** that zone to a thin rail (with an expand arrow — click the
+rail, or drag it back out, to restore). In a *stacked* zone (the right one) a panel may
+request a fixed height (`prefH`) and otherwise flexes to share the leftover space
+(INSPECTOR/ASSETS); the *tabbed* bottom zone shows one panel full-height at a time. Every
+menu/panel action has a hotkey equivalent and vice-versa.
 
 **UI scale.** The whole frame's font and layout scale together by one factor, seeded from
 the display: ~1.0 at 720p, ~1.5 at 1080p, up to 3.0 on a 4K monitor. Adjust it live with
@@ -426,8 +439,8 @@ Small, independently shippable steps; none blocks the game.
    (`edassets.{c,h}` index) lists the overlay's **maps** with a filter and opens one on
    click (via the unsaved-changes guard). The earlier models/textures browse lists (and
    their `edthumb.{c,h}` off-screen thumbnails) were **removed** as click-to-log dead
-   weight; props place from the catalog-backed Props palette (TOOLS), not by arming a raw
-   model stem. Still future (returns with the asset-import browser): model/texture
+   weight; props place from the catalog-backed Props section of the PALETTE (bottom dock), not
+   by arming a raw model stem. Still future (returns with the asset-import browser): model/texture
    browsing + thumbnails, drag-to-place props, texture-slot assignment, and copy-on-import
    of stock assets into the game folder ([game-projects.md](game-projects.md)).
 7c. ~~**Play Test launch**~~ **Done (game-agnostic)** — `File ▸ Play Test` / **`Ctrl+R`**
@@ -441,8 +454,10 @@ Small, independently shippable steps; none blocks the game.
    string**, never a header. Game side (`src/game/`): `main.c` treats a positional `.map`
    arg as a boot map and `GameMod_Init` calls the new `Menu_StartSoloOnMap`, dropping
    straight into solo play on it instead of the menu.
-8. **Docking polish** — tabbed panels + drag-to-rearrange + saved layouts (today's zones
-   are fixed-position, splitter-resizable).
+8. **Docking polish** — *partly done.* Zones now **collapse** to a rail (click a splitter)
+   and the short bottom zone shows **PALETTE / CONSOLE as tabs** (`zoneCollapsed` /
+   `zoneTabbed` in `edhost.c`). Still open: drag-to-rearrange panels between zones and
+   **saved layouts** (collapse/tab state is runtime-only today).
 9. **Packaging** — keep the standalone `editor` binary; later, optionally embed the same
    `GameModule` as an in-game "edit this map" screen (Krunker-style). The code is identical
    either way because it depends on the toolkit, not the game.

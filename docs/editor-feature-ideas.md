@@ -442,10 +442,16 @@ string and a `strstr` check per row is a small change to `builtins.c`.
 
 ---
 
-### 4.3 Dockable / Tabbed Panels + Layout Persistence
+### 4.3 Dockable / Tabbed Panels + Layout Persistence — ◑ PARTLY SHIPPED
 Allow panels within a dock zone to be reordered by drag, stacked as tabs (click the
 title to bring to front), and have their preferred heights saved to `editor.cfg` on
 shutdown. The current fixed-stack layout is functional but inflexible.
+
+**Shipped so far:** **zone collapse** (click a splitter → the zone folds to a thin rail with
+an expand arrow; drag the rail back out to restore) and **tabbed zones** (`zoneTabbed` in
+`edhost.c`, currently on for the short bottom zone so PALETTE/CONSOLE are tabs instead of a
+clipped stack). **Still open:** dragging panels *between* zones / reordering them, and
+**persisting** the collapse + tab + size state to `editor.cfg` (runtime-only today).
 
 **Why it matters:** Different workflows need different panel layouts — a texture author
 needs a big Inspector; a flow-layout author needs a big Hierarchy. Saved layouts let each
@@ -543,8 +549,8 @@ here so the audit file could be retired (full audit + resolution log is in git):
   banner-marked section instead of a `*` in the label. *(P2-D)*
 - **Wall 2-click state** — surface "click 2 of 2" in the viewport, not only the palette
   button label. *(P2-E)*
-- **Help ▸ Controls** — a modal/overlay instead of dumping to the Console (scrolls away).
-  *(P2-F)*
+- **Help ▸ Controls** — ✅ SHIPPED: now opens a **CONTROLS modal** (key chord + description,
+  grouped View / Edit / File) instead of dumping to the Console where it scrolled away. *(P2-F)*
 - **Viewport top-bar** (recommended-layout idea) — a thin strip over the viewport showing
   active view / gizmo / place-tool badges; would also host the place-tool feedback above.
 - **Validation error badge** — a `[3E 1W]` count in the status bar (red/gold) when

@@ -381,7 +381,15 @@ Wave-2 (2026-06-20) — **#6 (+ prereq) and #7 shipped**, done in the main sessi
 parallelized — they're entangled across `edpanels.c`/`edscene.c`/`edhost.c` and #6 needs the model
 -path prereq first), built + screenshot-verified incrementally.
 
-Remaining future polish (not blocking): true tabbed docking (PALETTE/CONSOLE as tabs rather than a
-short stack); recents/favourites in the browser; drag-from-tile-into-viewport placement; the
-ASSETS maps-browser still sits in the right zone (the §2 "repurpose/relocate" wasn't part of waves
-1–2 — it remains a File-menu/start-screen candidate).
+Wave-3 (later pass) — **dock-zone collapse + PALETTE/CONSOLE tabs shipped.** Clicking a zone's
+splitter collapses it to a thin rail (with an expand arrow; drag the rail back out to restore), so
+the viewport can take the whole frame; the short bottom zone now shows PALETTE and CONSOLE as
+**tabs** (one full-height at a time) instead of the clipped stack. Both are in `edhost.c`
+(`zoneCollapsed` / `zoneTabbed`, opt-in per zone so the tall side zones still stack). The same pass
+also expanded the menus (View: Frame selection/all, Material mode; Tools: Map statistics, Rescan
+content; Help: Controls as a modal).
+
+Remaining future polish (not blocking): recents/favourites in the browser; drag-from-tile-into-
+viewport placement; per-panel **drag-to-rearrange between zones + saved layouts** (collapse/tab
+state is runtime-only today); the ASSETS maps-browser still sits in the right zone (the §2
+"repurpose/relocate" wasn't part of these waves — it remains a File-menu/start-screen candidate).

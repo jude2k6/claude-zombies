@@ -8,8 +8,8 @@ editor* — see [engine-layers.md](engine-layers.md) for the layering rationale,
 [engine-usage.md](engine-usage.md) §4 ("Building a second module") for the host pattern.
 
 The editor is a **Unity-style IDE shell**: a top **menu bar** (File / Edit / View /
-Tools / Help), resizable **dock zones** (Tools + Hierarchy on the left, Inspector on the
-right, Console on the bottom) around a central **3D viewport**, and a **status bar**.
+Tools / Help), resizable **dock zones** (Tools + Hierarchy on the left, Inspector + Assets
+on the right, Console on the bottom) around a central **3D viewport**, and a **status bar**.
 Everything visible is contributed through a **plugin API** — the built-in tools are
 themselves first-party plugins, and third-party plugins (compiled-in *or* dynamically
 loaded `.so` files in `./plugins`) extend it through the identical surface. See §3.
@@ -17,22 +17,29 @@ loaded `.so` files in `./plugins`) extend it through the identical surface. See 
 > **Status: working IDE shell.** Builds the `editor` binary: a **start screen**
 > (recent games + New/Open Game/Map), then the menu/dock/status frame, fly/iso/top
 > cameras in a confined viewport, place / select / move entities (translate **+
-> rotate/scale** gizmo), undo/redo, grid snapping, a Hierarchy list with a search
-> filter, an **editable Inspector** (map-properties view when nothing is selected),
-> live **inline validation** (red outlines on bad entities), **focus-on-selection**
-> (`F`), an **unsaved-changes guard**, a Console (with clear + severity filter), a
-> persisted settings dialog (`editor.cfg`), and `MapDoc_Validate` map-checking — plus
+> rotate/scale** gizmo — rotate/scale show `(n/a)` in the status bar for kinds that
+> can't use them, instead of silently no-opping), undo/redo (continuous slider/picker
+> edits **coalesce into one step**), grid snapping, a Hierarchy list with a search
+> filter (**double-click a row to frame that entity**), an **editable Inspector**
+> (map-properties view when nothing is selected; **non-numeric field input is rejected,
+> not zeroed**, and the selected entity's validation issues are echoed inline), live
+> **inline validation** (red outlines on bad entities), **frame controls** (`F` frames
+> + zooms the selection, `Home` frames the whole map, auto-fit on open), an
+> **unsaved-changes guard**, a Console (with clear + severity filter), a persisted
+> settings dialog (`editor.cfg`), and `MapDoc_Validate` map-checking — plus
 > `File ▸ Save` (`MapDoc_Save`), **New Game / Open Game** (game-folder scaffolding +
 > overlay), **data-driven place palettes for every entity kind** (Spawns/Props/
-> Wallbuys/Perks scanned from content catalogs), submenu support, and a dynamic plugin
-> loader, plus an **ASSETS panel** that hosts both those placement tools and an asset
-> browser (maps/models/textures scanned from the content overlay, with model thumbnails —
-> click a map to open it; models/textures are browse-only, props place from the Props
-> palette); the left column is now just
-> the HIERARCHY. There's also a **material mode** (`M`): textured floors/walls/obstacles/
-> props instead of proxy boxes, now lit by a default editor lighting state (§5.7). A
-> **Play Test** action (`Ctrl+R`) saves and launches the game on the current map. Not yet:
-> copy-on-import of stock library assets into the game folder. See §5.
+> Wallbuys/Perks scanned from content catalogs) in an **always-visible TOOLS panel**
+> (left dock, above Hierarchy), submenu support, and a dynamic plugin loader, plus an
+> **ASSETS panel** (right dock) that browses the overlay's maps — click one to open it.
+> Direct **geometry handles** in the viewport: sector edge-resize + a **vertical floor-
+> height handle**, and **wall endpoint handles** (drag either end). There's also a
+> **material mode** (`M`): textured floors/walls/obstacles/props instead of proxy boxes,
+> now lit by a default editor lighting state (§5.7). A **Play Test** action (`Ctrl+R`)
+> saves and launches the game on the current map — the binary is resolved from the open
+> game's manifest (`binary` → `id` → legacy `shooter`), so it's game-agnostic. Not yet:
+> copy-on-import of stock library assets into the game folder; models/textures asset
+> browsing (trimmed out — props place from the Props palette). See §5.
 
 > **Related docs.** This is the canonical reference for how the editor works today.
 > For *where it's going*: [editor-content-extensibility.md](editor-content-extensibility.md)
@@ -81,12 +88,12 @@ The editor is **three layers + plugins**, all in `src/editor/`:
 
 | File | Role |
 |---|---|
-| `edscene.{c,h}` | **The document + 3D view.** `EdScene` owns the open `MapDoc`, its `EngMapHistory`, the camera (fly/iso/top), selection, the gizmo drag, placement tools, and the persisted settings. Knows nothing about menus or panels. |
-| `edhost.{c,h}`  | **The shell** (the IDE frame). Owns layout (menu bar, dock zones, splitters, status bar), input routing, and the **plugin registration API**. Owns no editing logic — it hosts a viewport rect and calls into the scene. |
-| `builtins.c`    | **First-party plugins** — the default IDE (menus, the Hierarchy/Inspector/Assets/Console panels, the Settings dialog + Validate, the status segments), each written against the same `EdHost_*` API a third-party plugin uses. The ASSETS panel hosts the placement tools (`DrawPlaceTools`) + asset browser (`edassets`/`edthumb`). |
-| `editor_main.c` | **Wiring.** `main()` loads settings, opens the window, builds the host, registers the built-ins, loads dynamic plugins, runs `Eng_Run`. |
-| `edassets.{c,h}` | **Asset index.** Scans the content overlay (`Eng_ContentDirs`) for maps/models/textures into a de-duped `EdAssetIndex` (held on `EdScene`) for the ASSETS panel. Pure file listing — no parse, no load. |
-| `edthumb.{c,h}` | **Model thumbnails.** Lazily renders a `.glb` to a cached off-screen `RenderTexture`, framed by its bounds; the ASSETS panel shows it per model row. Engine-clean (raylib + `content.h` loaders). |
+| `edscene.{c,h}` | **The document + 3D view.** `EdScene` owns the open `MapDoc`, its `EngMapHistory`, the camera (fly/iso/top — always re-derived each frame via `DeriveCamera` so framing applies even off-viewport), selection, the gizmo + geometry-edit handles (sector resize, sector floor-height, wall endpoints), placement tools, framing (`EdScene_FrameAll`/`FrameSelected`), and the persisted settings. Split across `edsettings/edcatalog/edmat/edplace.c` (former statics in `edscene_internal.h`). Knows nothing about menus or panels. |
+| `edhost.{c,h}`  | **The shell** (the IDE frame). Owns layout (menu bar, dock zones, splitters, status bar), input routing, the **plugin registration API**, and the undo-commit helpers (incl. tagged/coalescing commits). Owns no editing logic — it hosts a viewport rect and calls into the scene. |
+| `edpanels.c` / `edmenus.c` / `panel_inspector.c` / `ed_recents.c` | **First-party plugins** (split from the former `builtins.c`; entry points in `builtins.h`, cross-file calls via `builtins_internal.h`). The default IDE: the **Tools** (placement palette, left dock) / **Hierarchy** / **Inspector** / **Assets** / **Console** panels + status segments (`edpanels.c`), the menu bar + Settings/Validate modals (`edmenus.c`), the per-entity Inspector (`panel_inspector.c`), and recents (`ed_recents.c`) — each against the same `EdHost_*` API a third-party plugin uses. |
+| `editor_main.c` | **Wiring.** `main()` loads settings, opens the window, builds the host, registers the built-ins, loads dynamic plugins, runs `Eng_Run`. Also hosts the headless `--check` and the `--shot`/`--view`/`--select` capture hooks for CI. |
+| `edassets.{c,h}` | **Asset index.** Scans the content overlay (`Eng_ContentDirs`) for maps/models/textures into a de-duped `EdAssetIndex` (held on `EdScene`). The Assets panel now lists **maps** only (click to open); the models/textures lists were trimmed (browse-only dead weight). Pure file listing — no parse, no load. |
+| `edthumb.{c,h}` | **Model thumbnails** (lazy off-screen `.glb` render to a cached `RenderTexture`). **Currently dormant** — its only call site went away with the Assets-panel trim; kept for the planned asset-import browser. Still freed at shutdown. |
 | `edfiledialog.{c,h}` + `vendor/tinyfiledialogs.{c,h}` | **Native file picker** (Open/Save dialogs), editor-local — vendored, compiled into the `editor` target only, never the engine. |
 
 - **Proxies** — `EdScene_RebuildProxies()` walks the `MapDoc` each frame and emits one
@@ -261,37 +268,34 @@ through a small **dynamic-menu** hook the shell grew for exactly this — a menu
 an `EdMenuDynFn` provider (`EdHost_SetMenuDynamic`) that emits items each frame the menu is
 open, drawn after the static items with an automatic separator. (Static menu items are
 registered once; recents change at runtime, hence the hook.)
-- **Left zone**: **HIERARCHY** — a scrollable list of every entity by `#id kind`, with a
-  **search box** that filters rows by id/kind/mob substring; click a row to select — it
-  mirrors the viewport. (This is the whole left column now; placement moved to the ASSETS
-  panel — see below.)
-- **Right zone**: **INSPECTOR** — **editable** fields for the selection: position (all
-  kinds), spawn mob, window facing, prop yaw/scale, obstacle size, sector size/heights —
-  each wired through `mapedit.h` and pushing one undo step per change. When **nothing** is
-  selected it shows a **MAP PROPERTIES** view instead (map name + atmosphere fog/sky via
-  text fields and colour pickers, writing straight into the `MapDoc`); a *Map properties…*
-  button in the entity view deselects to reach it. Below it, the **ASSETS** panel is the
-  editor's single content surface — placement tools on top, the asset browser below:
-  - **Placement tools** (`DrawPlaceTools`): Select / move, then the data-driven **Spawns /
-    Geometry / Props / Wallbuys / Perks** sections (one button per tool, scanned from the
-    content catalogs `mobs/*.mob`, `props/*.prop`, `weapons/*.weapon`, `perks/*.perk` — a
-    new file is a new button, no rebuild; see
-    [editor-content-extensibility.md](editor-content-extensibility.md)). *(Transient state —
-    UI scale, view camera, gizmo mode, barricade auto-spawn — lives in keyboard shortcuts,
-    the View/Edit menus, and the Settings dialog, never here.)*
-  - **Asset browser**: the content overlay's maps / models / textures (scanned at load into
-    `EdScene.assets` by `edassets.{c,h}`, de-duped game-over-library) — **click a map to open
-    it** (through the same unsaved-changes guard as `File ▸ Open`); **models and textures are
-    browse-only previews**, each with a thumbnail per model rendered off-screen by
-    `edthumb.{c,h}`.
-    > **Why models don't place:** props are placed only from the catalog-backed **Props**
-    > palette section, which always resolves against the `.prop` catalog (`Props_IndexByName`)
-    > and is therefore guaranteed to render in-game. Arming a *raw* model stem here would stamp
-    > a `prop.name` with no matching `.prop`, which `level.c` **silently skips at game load**
-    > ("unknown prop — skipping") — so clicking a Models row only logs a hint pointing you at
-    > the Props palette. Texture-slot assignment from a texture click is still future.
-  - The **filter box** at the top is a global asset search: while it has text the placement
-    tools are hidden and the maps/models/textures lists narrow to matches.
+- **Left zone**: two stacked panels.
+  - **TOOLS** (`DrawPlaceTools`, `edpanels.c`) — an **always-visible** placement palette:
+    Select / move, then the data-driven **Spawns / Geometry / Props / Wallbuys / Perks**
+    sections (one button per tool, scanned from the content catalogs `mobs/*.mob`,
+    `props/*.prop`, `weapons/*.weapon`, `perks/*.perk` — a new file is a new button, no
+    rebuild; see [editor-content-extensibility.md](editor-content-extensibility.md)). *(Transient
+    state — UI scale, view camera, gizmo mode, barricade auto-spawn — lives in keyboard
+    shortcuts, the View/Edit menus, and the Settings dialog, never here.)*
+  - **HIERARCHY** — a scrollable list of every entity by `#id kind`, with a **search box**
+    that filters rows by id/kind/mob substring; click a row to select (mirrors the viewport),
+    **double-click to frame** that entity.
+- **Right zone**: two stacked panels.
+  - **INSPECTOR** — **editable** fields for the selection: position (all kinds), spawn mob,
+    window facing, prop yaw/scale, obstacle size, sector size/heights, **wall endpoints
+    (`x1/z1/x2/z2`)** — each wired through `mapedit.h` and pushing one undo step per change.
+    Numeric boxes **reject non-numeric input** (no silent zeroing), and the selection's
+    `MapDoc_Validate` issues are echoed **inline** under an *ISSUES* header. When **nothing**
+    is selected it shows a **MAP PROPERTIES** view instead (map name + atmosphere fog/sky via
+    text fields and colour pickers, writing straight into the `MapDoc`); a *Map properties…*
+    button in the entity view deselects to reach it.
+  - **ASSETS** — a **maps** browser: the content overlay's maps (scanned at load into
+    `EdScene.assets` by `edassets.{c,h}`, de-duped game-over-library), narrowed by a filter
+    box — **click a map to open it** (through the same unsaved-changes guard as `File ▸ Open`).
+    > **Maps-only by design.** The old models/textures browse lists were click-to-log dead
+    > weight and were trimmed; props place from the **Props** palette (TOOLS), which resolves
+    > against the `.prop` catalog (`Props_IndexByName`) so they're guaranteed to render in-game
+    > (a raw model stem would stamp a `prop.name` with no `.prop`, which `level.c` silently
+    > skips at load). Thumbnails + an import browser return with the asset-import work.
 - **Bottom zone**: **CONSOLE** — log output (plugin loads, save/validate results, Help),
   with a **Clear** button and a severity filter (all / warnings+ / errors).
 - **Status bar** (bottom): map name + dirty flag, entity count, view mode + gizmo mode +
@@ -381,10 +385,20 @@ Small, independently shippable steps; none blocks the game.
    spawn mob, window facing, prop yaw/scale, obstacle size, sector size/heights through
    `mapedit.h` (one undo step per change); a **map-metadata** view (name + atmosphere)
    shows when nothing is selected. (Also shipped alongside: a Hierarchy search filter,
-   inline validation outlines, `F` focus-on-selection, and an unsaved-changes guard.)
+   inline validation outlines **+ an *ISSUES* list on the selection**, **numeric-input
+   rejection** instead of `atof` zeroing, `F`/`Home`/Hierarchy-double-click **framing**,
+   **coalesced** slider/picker undo, and an unsaved-changes guard.)
 6. ~~**Rotate / scale** drag~~ **Done** — gizmo modes 2/3 drag PROPs via
    `Eng_SetYaw` / `Eng_SetScale` (using the gizmo's `rotateRadians` / per-axis `scale`),
-   coalesced under a drag tag like translate.
+   coalesced under a drag tag like translate. Kinds that can't rotate/scale (everything
+   but PROP) **suppress the gizmo** and show `(n/a)` in the status bar (`EdScene_GizmoModeApplies`)
+   rather than silently rejecting the drag.
+6b. ~~**Geometry handles + framing**~~ **Done** — direct viewport handles for the
+   selected geometry: sector **edge resize** (X/Z), a sector **vertical floor-height**
+   handle (reuses the gizmo Y-axis constraint), and **wall endpoint** handles (drag either
+   end). Framing: `EdScene_FrameAll` (fit-all, auto on open + `Home`) and
+   `EdScene_FrameSelected` (`F` / Hierarchy double-click). The camera is **re-derived every
+   frame** (`DeriveCamera`) so framing applies even when the mouse isn't over the viewport.
 7. ~~**Real scene rendering**~~ **Done (lit)** — an additive **`M` "material mode"**
    (`s->materialMode`, runtime-only, default OFF, proxy path unchanged) draws actual
    textured geometry in `EdScene_DrawViewport`: sector floors via `Eng_DrawTexturedFloorV`,
@@ -406,18 +420,21 @@ Small, independently shippable steps; none blocks the game.
    per-material shader, not the batch shader) so they're lit too. A later
    `libgame_edbridge.so` plugin could register game-specific draws (perk machines, wallbuys)
    for full parity without touching the editor binary.
-7b. ~~**Asset browser**~~ **Done** — the **ASSETS** panel (`edassets.{c,h}` index +
-   `edthumb.{c,h}` thumbnails) lists the overlay's maps/models/textures with a filter and
-   opens a map on click (via the unsaved-changes guard); models/textures are browse-only
-   previews (props place from the catalog-backed Props palette, not by arming a raw model
-   stem). Thumbnails render off-screen; note the host clips every panel draw, so the
-   thumbnail pre-render lifts the scissor (`EndScissorMode`/restore) around it. Still
-   future: drag-to-place props, texture-slot assignment from a texture click, and
-   copy-on-import of stock assets into the game folder ([game-projects.md](game-projects.md)).
-7c. ~~**Play Test launch**~~ **Done** — `File ▸ Play Test` / **`Ctrl+R`** saves the current
-   map then `posix_spawn`s the game binary (resolved next to the editor binary via
-   `GetApplicationDirectory`) on it, detached (SIGCHLD ignored → auto-reaped) so the editor
-   keeps running. `EdScene_PlayTest` is the one entry point (menu + hotkey both call it);
+7b. ~~**Asset browser**~~ **Done, since trimmed to maps** — the **ASSETS** panel
+   (`edassets.{c,h}` index) lists the overlay's **maps** with a filter and opens one on
+   click (via the unsaved-changes guard). The earlier models/textures browse lists (and
+   their `edthumb.{c,h}` off-screen thumbnails) were **removed** as click-to-log dead
+   weight; props place from the catalog-backed Props palette (TOOLS), not by arming a raw
+   model stem. Still future (returns with the asset-import browser): model/texture
+   browsing + thumbnails, drag-to-place props, texture-slot assignment, and copy-on-import
+   of stock assets into the game folder ([game-projects.md](game-projects.md)).
+7c. ~~**Play Test launch**~~ **Done (game-agnostic)** — `File ▸ Play Test` / **`Ctrl+R`**
+   saves the current map then `posix_spawn`s the game binary on it, detached (SIGCHLD
+   ignored → auto-reaped) so the editor keeps running. The binary **name is resolved from
+   the open game's manifest** — `EdProject_Read(Eng_GetGameRoot())` → `binary` key, else
+   `id`, else the legacy `shooter` — then found next to the editor binary via
+   `GetApplicationDirectory`, so any game project launches its own exe (not a hardcoded
+   `shooter`). `EdScene_PlayTest` is the one entry point (menu + hotkey both call it);
    untitled scratch maps are refused. The seam holds: the editor hands the game a **path
    string**, never a header. Game side (`src/game/`): `main.c` treats a positional `.map`
    arg as a boot map and `GameMod_Init` calls the new `Menu_StartSoloOnMap`, dropping

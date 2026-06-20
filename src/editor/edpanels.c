@@ -196,14 +196,22 @@ static void PanelPalette(EdHost *h, Rectangle c, void *u) {
     BeginScissorMode((int)c.x, (int)c.y, (int)c.width, (int)c.height);
 
     // ---- category column ---------------------------------------------------
-    float by = colR.y, bh = 22 * sc;
+    // 7 rows total: "Select" + PAL_CATCOUNT (5) categories + 1 gap row between
+    // Select and the categories. Divide the available height so all rows fit
+    // without clipping (T3-1). Gap between Select and categories = 1 row-pitch.
+    // Minimum button height: 16 scaled px so text stays legible at any panel size.
+    const int kCatRows = 1 + PAL_CATCOUNT;  // Select row + category rows
+    const int kGapRows = 1;                  // extra pitch gap after Select
+    float bh = fmaxf(16.0f * sc,
+                     colR.height / (float)(kCatRows + kGapRows));
+    float by = colR.y;
     if (Eng_UiToolButton((Rectangle){ colR.x, by, colR.width, bh }, "Select", s->placeTool == ED_PLACE_NONE))
         s->placeTool = ED_PLACE_NONE;
-    by += bh + 6 * sc;
+    by += bh * (1 + kGapRows);   // one button height + one gap pitch
     for (int ci = 0; ci < PAL_CATCOUNT; ci++) {
         if (Eng_UiToolButton((Rectangle){ colR.x, by, colR.width, bh }, kPalCatNames[ci], g_palCat == ci))
             g_palCat = ci;
-        by += bh + 2 * sc;
+        by += bh;
     }
 
     // ---- search box --------------------------------------------------------
@@ -710,10 +718,19 @@ static void RegisterPanels(EdHost *h) {
     // PALETTE content browser — editor-ux-review.md §4). Right = INSPECTOR +
     // ASSETS (maps). Bottom = PALETTE (primary, flexible) over a short CONSOLE.
     EdHost_AddPanel(h, &(EdPanel){ .id="hierarchy", .title="HIERARCHY", .zone=ED_DOCK_LEFT,   .draw=PanelHierarchy });
+    // INSPECTOR is the sole right-zone panel so it owns the full right-column height.
     EdHost_AddPanel(h, &(EdPanel){ .id="inspector", .title="INSPECTOR", .zone=ED_DOCK_RIGHT,  .draw=PanelInspector });
-    EdHost_AddPanel(h, &(EdPanel){ .id="assets",    .title="ASSETS",    .zone=ED_DOCK_RIGHT,  .draw=PanelAssets });
+    // Bottom zone = PALETTE (primary) / CONSOLE / ASSETS as tabs. PALETTE is
+    // registered first so it stays the default-active tab (the placement palette
+    // is the core map-building surface). ASSETS moved here off the right zone
+    // (T1-1): the right zone was split 50/50 with the inspector and clipped its
+    // lower fields (obstacle size/height fell below the fold) — INSPECTOR now owns
+    // the full right column.
     EdHost_AddPanel(h, &(EdPanel){ .id="palette",   .title="PALETTE",   .zone=ED_DOCK_BOTTOM, .draw=PanelPalette });
-    EdHost_AddPanel(h, &(EdPanel){ .id="console",   .title="CONSOLE",   .zone=ED_DOCK_BOTTOM, .draw=PanelConsole, .prefH=40 });
+    // Bottom zone is assumed tabbed; prefH is mostly moot but set to a sane minimum
+    // so a non-tabbed fallback layout doesn't collapse to a single line (T3-2).
+    EdHost_AddPanel(h, &(EdPanel){ .id="console",   .title="CONSOLE",   .zone=ED_DOCK_BOTTOM, .draw=PanelConsole, .prefH=70 });
+    EdHost_AddPanel(h, &(EdPanel){ .id="assets",    .title="ASSETS",    .zone=ED_DOCK_BOTTOM, .draw=PanelAssets });
 }
 
 // ============================================================================
@@ -799,6 +816,18 @@ static void ToolStrip(EdHost *h, Rectangle strip, void *u) {
         int tw = MeasureText(txt, (int)(12 * sc));
         Eng_UiText(txt, strip.x + strip.width - tw - 10 * sc,
                    strip.y + (strip.height - 12 * sc) / 2.0f, 12, ENG_UI_GOLD);
+    }
+
+    // Out-of-bounds placement warning (T1-3): shown in amber for 3 s after a
+    // placement that fell back to sector 0 because the click was outside every
+    // sector footprint. The warning is set by PlaceAt (edplace.c) via
+    // s->placeWarn / s->placeWarnUntil; we just read and render it here.
+    if (s->placeWarn[0] && GetTime() < s->placeWarnUntil) {
+        static const Color kWarnAmber = { 255, 190, 50, 255 };
+        int ww = MeasureText(s->placeWarn, (int)(11 * sc));
+        float wx = strip.x + (strip.width - ww) * 0.5f;
+        float wy = strip.y + (strip.height - 11 * sc) / 2.0f;
+        Eng_UiText(s->placeWarn, wx, wy, 11, kWarnAmber);
     }
 }
 

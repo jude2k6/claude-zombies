@@ -19,6 +19,7 @@
 #include "mapedit.h"
 #include "app.h"      // Eng_RequestClose
 
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdint.h>
@@ -642,16 +643,78 @@ static void OvSection(float X, float W, float *y, float s, const char *label) {
     GuiLabel((Rectangle){ X, *y, W, 16 * s }, label); *y += 18 * s;
 }
 
+// Scroll accumulator for SettingsModal body; reset when the modal opens.
+static float g_settingsScroll = 0;
+static bool  g_settingsResetScroll = false;  // set by a_settings, consumed first draw
+
 static void SettingsModal(EdHost *h, Rectangle area, void *u) {
     (void)u; EdScene *s = EdHost_Scene(h);
     float sc = EdHost_UiScale(h);
     Eng_UiSetScale(sc); Eng_UiApplyFont(13);
-    float pw = 420 * sc, ph = 552 * sc;
+    float pw = 420 * sc;
+    float ph = 552 * sc;
+    ph = fminf(ph, area.height - 12 * sc);   // clamp to available screen height
     float px = (area.width - pw) / 2.0f, py = (area.height - ph) / 2.0f; if (py < 6 * sc) py = 6 * sc;
     Eng_UiPanelBg((Rectangle){ px - 2, py - 2, pw + 4, ph + 4 }, (Color){ 60, 66, 80, 255 });
     Eng_UiPanelBg((Rectangle){ px, py, pw, ph },                 (Color){ 24, 27, 34, 255 });
-    float X = px + 16 * sc, W = pw - 32 * sc, y = py + 12 * sc;
-    Eng_UiText("EDITOR SETTINGS", X, y, 18, ENG_UI_GOLD); y += 28 * sc;
+
+    // Reset scroll on first draw after modal opens.
+    if (g_settingsResetScroll) { g_settingsScroll = 0; g_settingsResetScroll = false; }
+
+    float X = px + 16 * sc, W = pw - 32 * sc;
+
+    // ---- Title bar (pinned, not scrolled) ------------------------------------
+    float titleH = 40 * sc;   // "EDITOR SETTINGS" text + gap below
+    Eng_UiText("EDITOR SETTINGS", X, py + 12 * sc, 18, ENG_UI_GOLD);
+
+    // ---- Button row (pinned to the bottom, not scrolled) --------------------
+    float btnH  = 32 * sc;
+    float by    = py + ph - btnH;
+    float hw    = (W - 8 * sc) / 2.0f;
+    if (GuiButton((Rectangle){ X, by, hw, 24 * sc }, "Save")) {
+        EdScene_SaveSettings(s, s->cfg);
+        EdHost_Log(h, ED_LOG_INFO, "settings saved to editor.cfg");
+    }
+    if (GuiButton((Rectangle){ X + hw + 8 * sc, by, hw, 24 * sc }, "Close"))
+        EdHost_SetModal(h, NULL, NULL);
+
+    // ---- Scrollable body (scissored) ----------------------------------------
+    float bodyY  = py + titleH;
+    float bodyH  = ph - titleH - btnH;
+    Rectangle bodyRect = { px, bodyY, pw, bodyH };
+
+    // Accumulate mouse-wheel scroll when cursor is over the panel.
+    if (CheckCollisionPointRec(GetMousePosition(), (Rectangle){ px, py, pw, ph }))
+        g_settingsScroll -= GetMouseWheelMove() * 22 * sc * 2.0f;
+
+    // Virtual layout pass to measure content height (no draw calls).
+    float cy = 0;  // relative accumulator
+    cy += 18 * sc; // CAMERA header
+    cy += 5 * 24 * sc; // 5 sliders
+    cy += 18 * sc; // VIEW header
+    cy += 26 * sc; // default view toggle
+    cy += 2 * 24 * sc; // FOV + zoom sliders
+    cy += 18 * sc; // GRID/SNAP header
+    cy += 3 * 24 * sc; // 3 sliders
+    cy += 2 * 24 * sc; // 2 checkboxes
+    cy += 24 * sc; // snap step slider
+    cy += 18 * sc; // EDITING header
+    cy += 24 * sc; // checkbox
+    cy += 24 * sc; // undo slider
+    cy += 18 * sc; // DISPLAY header
+    cy += 24 * sc; // vsync checkbox
+    cy += 24 * sc; // fps slider
+    float contentH = cy;
+
+    // Clamp scroll to [0, max scrollable].
+    float maxScroll = contentH - bodyH;
+    if (maxScroll < 0) maxScroll = 0;
+    if (g_settingsScroll < 0) g_settingsScroll = 0;
+    if (g_settingsScroll > maxScroll) g_settingsScroll = maxScroll;
+
+    BeginScissorMode((int)bodyRect.x, (int)bodyRect.y, (int)bodyRect.width, (int)bodyRect.height);
+
+    float y = bodyY - g_settingsScroll;
 
     OvSection(X, W, &y, sc, "CAMERA");
     OvSlider(X, W, &y, sc, "Fly speed",  &s->camFlySpeed,  2, 60,         "%.0f");
@@ -688,42 +751,85 @@ static void SettingsModal(EdHost *h, Rectangle area, void *u) {
     float fps = (float)s->fpsCap;
     OvSlider(X, W, &y, sc, "FPS cap*", &fps, 0, 240, "%.0f"); s->fpsCap = (int)fps;
 
-    float by = py + ph - 32 * sc, hw = (W - 8 * sc) / 2.0f;
-    if (GuiButton((Rectangle){ X, by, hw, 24 * sc }, "Save")) {
-        EdScene_SaveSettings(s, s->cfg);
-        EdHost_Log(h, ED_LOG_INFO, "settings saved to editor.cfg");
-    }
-    if (GuiButton((Rectangle){ X + hw + 8 * sc, by, hw, 24 * sc }, "Close")) EdHost_SetModal(h, NULL, NULL);
+    EndScissorMode();
 }
 
-static void a_settings(EdHost *h, void *u) { (void)u; EdHost_SetModal(h, SettingsModal, NULL); }
+static void a_settings(EdHost *h, void *u) {
+    (void)u;
+    g_settingsResetScroll = true;
+    EdHost_SetModal(h, SettingsModal, NULL);
+}
 
 // ---- Map Settings modal (Fix #3) --------------------------------------------
 // Shows the map-property editor (name / atmosphere / textures) in a modal panel
 // so the Inspector's default empty state can be a quiet "Nothing selected" hint.
 
+// Scroll accumulator for MapSettingsModal body; reset when the modal opens.
+static float g_mapSettingsScroll = 0;
+static bool  g_mapSettingsResetScroll = false;  // set by a_map_settings, consumed first draw
+
 static void MapSettingsModal(EdHost *h, Rectangle area, void *u) {
     (void)u;
     float sc = EdHost_UiScale(h);
     Eng_UiSetScale(sc); Eng_UiApplyFont(13);
-    float pw = 380 * sc, ph = 500 * sc;
+    float pw = 380 * sc;
+    float ph = 500 * sc;
+    ph = fminf(ph, area.height - 12 * sc);   // clamp to available screen height
     float px = (area.width  - pw) / 2.0f;
     float py = (area.height - ph) / 2.0f; if (py < 6 * sc) py = 6 * sc;
     Eng_UiPanelBg((Rectangle){ px - 2, py - 2, pw + 4, ph + 4 }, (Color){ 60, 66, 80, 255 });
     Eng_UiPanelBg((Rectangle){ px, py, pw, ph },                 (Color){ 24, 27, 34, 255 });
 
-    float X = px + 16 * sc, W = pw - 32 * sc, y = py + 12 * sc;
-    Eng_UiText("MAP SETTINGS", X, y, 18, ENG_UI_GOLD); y += 28 * sc;
+    // Reset scroll on first draw after modal opens.
+    if (g_mapSettingsResetScroll) { g_mapSettingsScroll = 0; g_mapSettingsResetScroll = false; }
 
-    Rectangle body = { X, y, W, py + ph - 40 * sc - y };
-    PanelInspector_DrawMapProps(h, body);
+    float X = px + 16 * sc, W = pw - 32 * sc;
 
-    float by = py + ph - 32 * sc;
+    // ---- Title bar (pinned, not scrolled) ------------------------------------
+    float titleH = 40 * sc;   // "MAP SETTINGS" text + gap below
+    Eng_UiText("MAP SETTINGS", X, py + 12 * sc, 18, ENG_UI_GOLD);
+
+    // ---- Button row (pinned to the bottom, not scrolled) --------------------
+    float btnH = 32 * sc;
+    float by   = py + ph - btnH;
     if (GuiButton((Rectangle){ X + (W - 100 * sc) / 2.0f, by, 100 * sc, 24 * sc }, "Close"))
         EdHost_SetModal(h, NULL, NULL);
+
+    // ---- Scrollable body (scissored) ----------------------------------------
+    float bodyY = py + titleH;
+    float bodyH = ph - titleH - btnH;
+    Rectangle bodyRect = { px, bodyY, pw, bodyH };
+
+    // Accumulate mouse-wheel scroll when cursor is over the panel.
+    if (CheckCollisionPointRec(GetMousePosition(), (Rectangle){ px, py, pw, ph }))
+        g_mapSettingsScroll -= GetMouseWheelMove() * 22 * sc * 2.0f;
+
+    // Estimate content height: map name + atmosphere (fog colour picker +
+    // fog start/end sliders + sky tint checkbox + optional sky picker) +
+    // textures (5 rows). Use a generous upper bound; the scissor clips the rest.
+    // The content height is dominated by the two GuiColorPicker widgets (~80px
+    // each at sc=1), so we estimate conservatively and let over-scroll clamp.
+    float contentH = 600 * sc;   // generous upper bound; real content <= this
+
+    float maxScroll = contentH - bodyH;
+    if (maxScroll < 0) maxScroll = 0;
+    if (g_mapSettingsScroll < 0) g_mapSettingsScroll = 0;
+    if (g_mapSettingsScroll > maxScroll) g_mapSettingsScroll = maxScroll;
+
+    BeginScissorMode((int)bodyRect.x, (int)bodyRect.y, (int)bodyRect.width, (int)bodyRect.height);
+
+    // PanelInspector_DrawMapProps draws from body.y downward; offset by scroll.
+    Rectangle scrolledBody = { X, bodyY - g_mapSettingsScroll, W, contentH };
+    PanelInspector_DrawMapProps(h, scrolledBody);
+
+    EndScissorMode();
 }
 
-static void a_map_settings(EdHost *h, void *u) { (void)u; EdHost_SetModal(h, MapSettingsModal, NULL); }
+static void a_map_settings(EdHost *h, void *u) {
+    (void)u;
+    g_mapSettingsResetScroll = true;
+    EdHost_SetModal(h, MapSettingsModal, NULL);
+}
 
 static void a_rescan(EdHost *h, void *u) {
     (void)u;

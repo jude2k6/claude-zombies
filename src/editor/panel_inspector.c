@@ -121,26 +121,53 @@ static bool InspFloatBox(EdHost *h, float X, float W, float *y, float sc,
     return changed;
 }
 
+// String text-box edit-state, keyed by field label — mirrors InspFloatState /
+// InspFloatSlot but for char-array fields (T2-5). Slots are shared across all
+// text fields shown for one entity and released on selection change (same point
+// as the float slots). INSP_TEX_BUF_LEN must be >= the largest buffer any caller
+// passes (MAPDOC_TEX_NAME_LEN is the largest today).
+#define INSP_TEX_BUF_LEN   MAPDOC_TEX_NAME_LEN
+#define INSP_TEXT_FIELDS    4   // max distinct text fields shown for one entity
+typedef struct {
+    const char *key;                    // field label; NULL = free slot
+    bool        editing;                // in text-entry mode?
+    char        buf[INSP_TEX_BUF_LEN]; // live edit buffer
+} InspTextState;
+static InspTextState g_inspText[INSP_TEXT_FIELDS];
+
+// Find (or lazily claim) the edit-state slot for `key`. Compared by content for
+// safety (same as InspFloatSlot). Returns NULL only if the table is full.
+static InspTextState *InspTextSlot(const char *key) {
+    for (int i = 0; i < INSP_TEXT_FIELDS; i++)
+        if (g_inspText[i].key && strcmp(g_inspText[i].key, key) == 0) return &g_inspText[i];
+    for (int i = 0; i < INSP_TEXT_FIELDS; i++)
+        if (!g_inspText[i].key) {
+            g_inspText[i].key     = key;
+            g_inspText[i].editing = false;
+            g_inspText[i].buf[0]  = '\0';
+            return &g_inspText[i];
+        }
+    return NULL;
+}
+
 // Per-surface texture-override field for WALL / OBSTACLE. Reads/writes the
 // MapDoc TEX field via the engine accessors; a blank string clears the override
 // so the surface falls back to the map's wall_ext slot. Commits on edit-toggle.
+// Now keyed through InspTextSlot (T2-5) to remove the function-static pattern.
 static void InspTexField(EdHost *h, EdScene *s, float X, float W, float *y, float sc) {
-    static char buf[MAPDOC_TEX_NAME_LEN] = "";
-    static bool edit = false;
-    static int  lastId = -1;
+    InspTextState *st = InspTextSlot("tex");
+    if (!st) return;
     char cur[MAPDOC_TEX_NAME_LEN] = "";
     Eng_GetSurfaceTex(&s->doc, s->selectedId, cur, sizeof cur);
-    if (lastId != s->selectedId) {
-        lastId = s->selectedId;
-        snprintf(buf, sizeof buf, "%s", cur);
-        edit = false;
-    }
+    // Sync buffer from the doc whenever we are not actively editing it.
+    if (!st->editing) snprintf(st->buf, sizeof st->buf, "%s", cur);
     Eng_UiText("tex", X, *y + 1 * sc, 12, ENG_UI_TEXT);
-    bool was = edit;
-    if (GuiTextBox((Rectangle){ X + 60 * sc, *y, W - 60 * sc, 18 * sc }, buf, sizeof buf, was)) {
-        edit = !was;
-        if (was && strcmp(buf, cur) != 0) {
-            Eng_SetSurfaceTex(&s->doc, s->selectedId, buf);
+    bool was = st->editing;
+    if (GuiTextBox((Rectangle){ X + 60 * sc, *y, W - 60 * sc, 18 * sc },
+                   st->buf, sizeof st->buf, was)) {
+        st->editing = !was;
+        if (was && strcmp(st->buf, cur) != 0) {
+            Eng_SetSurfaceTex(&s->doc, s->selectedId, st->buf);
             EdHost_CommitEdit(h);
         }
     }
@@ -287,6 +314,10 @@ void PanelInspector_DrawMapProps(EdHost *h, Rectangle area) {
 
 // Scroll state for the per-entity inspector field list (Fix #4).
 static float g_inspScroll = 0;
+// Last frame's measured content height (T2-2): used to clamp scroll BEFORE drawing
+// so we never clip the last rows. Initialised to a generous estimate; updated every
+// frame after drawing so it converges on the real height within one frame.
+static float g_inspContentH = 600.0f;
 
 void PanelInspector(EdHost *h, Rectangle c, void *u) {
     (void)u; EdScene *s = EdHost_Scene(h);
@@ -298,7 +329,9 @@ void PanelInspector(EdHost *h, Rectangle c, void *u) {
     if (s->selectedId != g_inspLastId) {
         g_inspLastId = s->selectedId;
         for (int i = 0; i < INSP_FLOAT_FIELDS; i++) g_inspFloat[i].key = NULL;
-        g_inspScroll = 0;   // reset scroll when selection changes
+        for (int i = 0; i < INSP_TEXT_FIELDS;  i++) g_inspText[i].key  = NULL; // T2-5
+        g_inspScroll = 0;        // reset scroll when selection changes
+        g_inspContentH = 600.0f; // reset height estimate; will re-measure this frame
     }
 
     // End any continuous-edit coalescing run once the mouse is released, so the
@@ -308,7 +341,7 @@ void PanelInspector(EdHost *h, Rectangle c, void *u) {
     // ---- Fix #3: nothing selected → quiet hint only -------------------------
     if (s->selectedId < 0) {
         Eng_UiText("Nothing selected", X + 4 * sc, c.y + 8 * sc, 12, ENG_UI_DIM);
-        Eng_UiText("Use Tools \xe2\x80\xba Map Settings\xe2\x80\xa6 to edit map properties.",
+        Eng_UiText("Use Tools > Map Settings... to edit map properties.",
                    X + 4 * sc, c.y + 24 * sc, 10, ENG_UI_DIM);
         return;
     }
@@ -321,18 +354,12 @@ void PanelInspector(EdHost *h, Rectangle c, void *u) {
     EngMapEntKind k;
     EngMapEnt_Ptr(&s->doc, EngMapEnt_Find(&s->doc, s->selectedId), &k);
 
-    // First pass: measure total content height by running a virtual layout.
-    // We do this with a dummy y that we don't clip — just accumulate.
-    // This is cheap (no draw calls) and keeps the scrollbar accurate.
-    // (A simpler alternative: fixed estimated heights per kind — but measuring
-    //  is exact and handles ramp links which vary by kind.)
-    //
-    // For simplicity we cap the scroll by a generous estimate instead of a full
-    // two-pass render; fields never exceed ~600 virtual px for any entity kind.
-    // The scroll is clamped once content is drawn below.
-
-    // Clamp scroll (conservative: allow scrolling down up to 600 virtual px).
-    float maxScroll = 600 * sc;
+    // Clamp scroll against last frame's measured content height (T2-2).
+    // g_inspContentH is updated AFTER drawing each frame so the clamp here is
+    // exact for every frame after the first (first frame falls back to the 600px
+    // estimate stored in the static initialiser). This eliminates the one-frame
+    // clip that the old 600*sc hard-code caused for tall entities.
+    float maxScroll = g_inspContentH > c.height ? g_inspContentH - c.height : 0.0f;
     if (g_inspScroll < 0) g_inspScroll = 0;
     if (g_inspScroll > maxScroll) g_inspScroll = maxScroll;
 
@@ -577,9 +604,12 @@ void PanelInspector(EdHost *h, Rectangle c, void *u) {
 
     EndScissorMode();
 
-    // Now clamp scroll to the actual content height so it can't over-scroll.
+    // Measure the true content height from this frame's final y position (T2-2).
+    // Store it in g_inspContentH so the NEXT frame's pre-draw clamp is exact.
+    // Also apply it immediately to snap out any over-scroll that the pre-draw
+    // estimate allowed (e.g. on the very first frame with a new selection).
     float contentH = (y + g_inspScroll) - c.y;
-    float realMax = contentH - c.height;
-    if (realMax < 0) realMax = 0;
+    g_inspContentH = contentH > 0.0f ? contentH : 0.0f;
+    float realMax = g_inspContentH > c.height ? g_inspContentH - c.height : 0.0f;
     if (g_inspScroll > realMax) g_inspScroll = realMax;
 }

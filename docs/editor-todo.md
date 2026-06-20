@@ -157,6 +157,18 @@ A second teardown after the UX waves landed. Grounded in the current code + live
 newly found or sharpened. Ranked by value-per-effort; line numbers may drift —
 grep the named function.
 
+> **STATUS — all 12 shipped (four parallel agents on disjoint files, integrated +
+> built + verified by the main session).** Caveats: **T2-4** landed as a real group
+> rotate/scale (per-member start arrays as file statics in edscene.c), not a
+> primary-only fallback. **T2-5** converted `InspTexField` only; the spawn-mob /
+> map-name buffers stay single-instance statics (noted, low value). **T3-4(b)** (minus
+> sign renders as `~`) was confirmed to be an **editor-font glyph gap**, not a
+> formatting bug — left for a font fix (out of scope for these files). **T2-3** is
+> editor-side: a sector's gizmo Y *drag* is suppressed but the Y handle still draws
+> (full visual suppression needs an engine axis-mask — deferred). Follow-on found
+> during verification: moving ASSETS to the bottom zone (T1-1) made it the default
+> tab, so the registration order was fixed to keep **PALETTE** the default bottom tab.
+
 ### Tier 1 — high value, do first
 
 **T1-1. INSPECTOR is starved by ASSETS sharing the right zone — fields go below

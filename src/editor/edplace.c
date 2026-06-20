@@ -31,14 +31,29 @@ static Vector3 DirNormal(const char *d) {
     return (Vector3){ 0, 0, -1 };
 }
 
-// The sector whose footprint contains (x,z), or sector 0 as a fallback when none
-// does (so a placed entity always belongs somewhere). -1 only when no sectors.
-static int SectorAt(EdScene *s, float x, float z) {
+// Find the sector whose footprint contains (x,z). Returns the sector index when
+// the point is inside a footprint, or -1 when outside every sector (or when
+// there are no sectors at all). This is the inner test — callers use SectorAt.
+static int SectorHit(const EdScene *s, float x, float z) {
     for (int i = 0; i < s->doc.sectorCount; i++) {
         const MapDocSector *sc = &s->doc.sectors[i];
         if (fabsf(x - sc->x) <= sc->sx * 0.5f && fabsf(z - sc->z) <= sc->sz * 0.5f) return i;
     }
-    return s->doc.sectorCount > 0 ? 0 : -1;
+    return -1;
+}
+
+// The sector whose footprint contains (x,z), or sector 0 as a fallback when
+// none does (so a placed entity always belongs somewhere). -1 only when there
+// are no sectors at all. When the fallback fires, sets s->placeWarn for 3 s so
+// the viewport tool-strip overlay can show an amber warning (T1-3).
+static int SectorAt(EdScene *s, float x, float z) {
+    int hit = SectorHit(s, x, z);
+    if (hit >= 0) return hit;
+    if (s->doc.sectorCount <= 0) return -1;
+    // Point is outside every sector footprint — fall back to sector 0 and warn.
+    snprintf(s->placeWarn, sizeof s->placeWarn, "placed outside all sectors -> sector 0");
+    s->placeWarnUntil = GetTime() + 3.0;
+    return 0;
 }
 
 static int AddSpawn(EdScene *s, const char *mob, float x, float z) {

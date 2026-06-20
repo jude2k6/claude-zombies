@@ -575,7 +575,13 @@ void EdScene_Paste(EdScene *s) {
             case ENGMAPENT_PROP:     s->doc.props[h.index]     = c->u.prop;     s->doc.props[h.index].id     = nid; break;
             case ENGMAPENT_WALLBUY:  s->doc.wallbuys[h.index]  = c->u.wallbuy;  s->doc.wallbuys[h.index].id  = nid; break;
             case ENGMAPENT_PERK:     s->doc.perks[h.index]     = c->u.perk;     s->doc.perks[h.index].id     = nid; break;
-            case ENGMAPENT_SECTOR:   s->doc.sectors[h.index]   = c->u.sector;   s->doc.sectors[h.index].id   = nid; break;
+            case ENGMAPENT_SECTOR:   s->doc.sectors[h.index]   = c->u.sector;   s->doc.sectors[h.index].id   = nid;
+                // Give the pasted sector a unique name so ramp LINK resolution
+                // (which resolves by name) is not ambiguous. Mirror the naming
+                // convention in EngMapEnt_Add: "sec<id>".
+                snprintf(s->doc.sectors[h.index].name,
+                         sizeof s->doc.sectors[h.index].name, "sec%d", nid);
+                break;
             default: EngMapEnt_Delete(&s->doc, nid); continue;
         }
         // Offset walls by both endpoints; all other kinds carry a single x/z.
@@ -617,6 +623,12 @@ bool EdScene_GizmoModeApplies(const EdScene *s) {
     return (k == ENGMAPENT_PROP);
 }
 
+// Per-member start yaw/scale captured at drag-begin for group rotate/scale.
+// Static locals are valid here because only one drag can be live at a time —
+// the dragging flag and s->drag.axis gate all access below.
+static float g_dragStartYaws[ED_MAX_ENTS];
+static float g_dragStartScales[ED_MAX_ENTS];
+
 static void UpdateGizmo(EdScene *s, bool allowGrab) {
     Vector3 origin;
     if (!SelectedOrigin(s, &origin)) { s->dragging = false; return; }
@@ -630,6 +642,21 @@ static void UpdateGizmo(EdScene *s, bool allowGrab) {
         if (!EdScene_GizmoModeApplies(s)) return;
 
         EngGizmoAxis hot = Eng_GizmoHitTest(s->cam, mouse, s->vpW, s->vpH, origin, s->mode, handleSize);
+
+        // T2-3: For SECTOR selections, the Y axis does nothing — Eng_SetPos
+        // only moves x/z, and floor height is owned by DrawSectorHeightHandle.
+        // Suppress Y-involving translate handles editor-side so a drag can't
+        // start on them. The Y arm still visually draws (engine draws all
+        // handles); full visual suppression would need an engine axis-mask
+        // (deferred).
+        if (s->mode == ENG_GIZMO_TRANSLATE) {
+            EngMapEntKind primKind;
+            EngMapEnt_PtrConst(&s->doc, EngMapEnt_Find(&s->doc, s->selectedId), &primKind);
+            if (primKind == ENGMAPENT_SECTOR &&
+                (hot == ENG_GIZMO_AXIS_Y || hot == ENG_GIZMO_AXIS_XY || hot == ENG_GIZMO_AXIS_YZ))
+                hot = ENG_GIZMO_AXIS_NONE;
+        }
+
         Eng_GizmoDebugDraw(origin, s->mode, handleSize, hot);
 
         if (allowGrab && hot != ENG_GIZMO_AXIS_NONE && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
@@ -646,6 +673,17 @@ static void UpdateGizmo(EdScene *s, bool allowGrab) {
                 }
                 Eng_GetYaw(&s->doc, s->selectedId, &s->dragStartYaw);
                 Eng_GetScale(&s->doc, s->selectedId, &s->dragStartScale);
+                // Snapshot per-member start yaw/scale for group rotate/scale.
+                for (int i = 0; i < s->selCount; i++) {
+                    g_dragStartYaws[i]   = 0.0f;
+                    g_dragStartScales[i] = 1.0f;
+                    EngMapEntKind mk;
+                    EngMapEnt_PtrConst(&s->doc, EngMapEnt_Find(&s->doc, s->selIds[i]), &mk);
+                    if (mk == ENGMAPENT_PROP) {
+                        Eng_GetYaw(&s->doc, s->selIds[i], &g_dragStartYaws[i]);
+                        Eng_GetScale(&s->doc, s->selIds[i], &g_dragStartScales[i]);
+                    }
+                }
                 s->dragTag = EdScene_NextTag(s);
                 s->dragging = true;
             }
@@ -669,7 +707,15 @@ static void UpdateGizmo(EdScene *s, bool allowGrab) {
             break;
         }
         case ENG_GIZMO_ROTATE:
-            Eng_SetYaw(&s->doc, s->selectedId, s->dragStartYaw + d.rotateRadians * RAD2DEG);
+            // Apply the same yaw delta to every selected prop (only props
+            // support yaw; skip non-props as EdScene_GizmoModeApplies does).
+            for (int i = 0; i < s->selCount; i++) {
+                EngMapEntKind mk;
+                EngMapEnt_PtrConst(&s->doc, EngMapEnt_Find(&s->doc, s->selIds[i]), &mk);
+                if (mk != ENGMAPENT_PROP) continue;
+                Eng_SetYaw(&s->doc, s->selIds[i],
+                           g_dragStartYaws[i] + d.rotateRadians * RAD2DEG);
+            }
             break;
         case ENG_GIZMO_SCALE: {
             // d.scale is a per-axis multiplier; pick the component for the active axis.
@@ -679,9 +725,15 @@ static void UpdateGizmo(EdScene *s, bool allowGrab) {
                 case ENG_GIZMO_AXIS_Z:  factor = d.scale.z; break;
                 default:                factor = d.scale.x; break;
             }
-            float newScale = s->dragStartScale * factor;
-            if (newScale < 0.05f) newScale = 0.05f;
-            Eng_SetScale(&s->doc, s->selectedId, newScale);
+            // Apply the same scale factor to every selected prop.
+            for (int i = 0; i < s->selCount; i++) {
+                EngMapEntKind mk;
+                EngMapEnt_PtrConst(&s->doc, EngMapEnt_Find(&s->doc, s->selIds[i]), &mk);
+                if (mk != ENGMAPENT_PROP) continue;
+                float newScale = g_dragStartScales[i] * factor;
+                if (newScale < 0.05f) newScale = 0.05f;
+                Eng_SetScale(&s->doc, s->selIds[i], newScale);
+            }
             break;
         }
     }
@@ -1022,8 +1074,26 @@ static void DrawRampOverlay(EdScene *s) {
 // ---- lifecycle -------------------------------------------------------------
 
 void EdScene_Init(EdScene *s) {
-    if (MapDoc_Parse(s->path, &s->doc, stderr) > 0)
-        fprintf(stderr, "editor: '%s' parsed with errors (continuing)\n", s->path);
+    if (MapDoc_Parse(s->path, &s->doc, stderr) > 0) {
+        // Parse errors on the CLI-supplied path: log clearly and reset to a
+        // fresh empty document so we never silently save wreckage over the
+        // original file (EdScene_Open and recovery paths return false on > 0;
+        // this path must be equally safe).
+        fprintf(stderr, "editor: ERROR: '%s' parsed with errors — "
+                "resetting to empty document to protect the original file\n", s->path);
+        // Reset doc to a clean default (one sector, like EdScene_New), and
+        // redirect the path to "untitled.map" so an accidental Ctrl+S can't
+        // clobber the corrupt source. NOTE: do NOT call EdScene_New here —
+        // hist is not yet initialized so EngMapHistory_Free inside New would
+        // free a garbage pointer.
+        memset(&s->doc, 0, sizeof s->doc);
+        int sid = EngMapEnt_Add(&s->doc, ENGMAPENT_SECTOR);
+        if (sid >= 0) {
+            Eng_SetSectorSize(&s->doc, sid, 40.0f, 40.0f);
+            Eng_SetSectorHeights(&s->doc, sid, 0.0f, 0.0f);
+        }
+        snprintf(s->path, sizeof s->path, "untitled.map");
+    }
     EngMapHistory_Init(&s->hist, s->undoDepth);
     EngMapHistory_Commit(&s->hist, &s->doc, 0);
     Eng_DebugSetEnabled(true);

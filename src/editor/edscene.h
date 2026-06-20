@@ -182,6 +182,14 @@ typedef struct EdScene {
     // the selected ramp. The Inspector reads/sets this directly on EdScene.
     int           linkPick;
 
+    // Transient out-of-bounds placement warning (T1-3): set by PlaceAt/SectorAt
+    // in edplace.c when a click lands outside every sector footprint and falls
+    // back to sector 0. Rendered by the viewport ToolStrip overlay in edpanels.c
+    // for 3 seconds (placeWarnUntil is a GetTime()-based expiry). No per-frame
+    // tick needed — the overlay polls GetTime() to decide visibility.
+    char          placeWarn[96];
+    double        placeWarnUntil;
+
     // ---- mob catalog (scanned from data/mobs/) -----------------------------
     EdMobDef      mobDefs[ED_MAX_MOBDEFS];
     int           mobDefCount;

@@ -1,0 +1,11 @@
+# Juggernog — raises max HP. `id` is what a map's `PERK <id>` stores
+# (MapDocPerk.perk) and what the game maps to its perk effect. Shared by the
+# editor palette and the game's perk data (the effect itself stays in code).
+
+id        JUG
+name      Juggernog
+category  perk
+
+cost      2500
+tint      220 40 40 255
+model     perk_juggernog.obj

@@ -1,0 +1,45 @@
+# Ray Gun — wonder weapon. Mystery-box only.
+
+id              RAYGUN
+name            Ray Gun
+packed_name     Porter's X2
+category        SPECIAL
+fire_mode       SEMI
+
+damage          1000
+mag_size        20
+reserve_max     160
+fire_cooldown   0.22
+reload_time     2.6
+pellets         1
+spread_deg      0.0
+
+buy_price       10000
+ammo_price      4500
+tint            120 255 160 255
+
+bullet_speed    80.0
+bullet_life     1.10
+tracer_width    0.060
+
+recoil_pitch    0.85
+recoil_yaw      0.25
+
+# Energy weapon — barely drops over distance.
+dropoff         80.0  120.0  0.90
+
+# Plasma burst on impact — chunks adjacent zombies with linear falloff.
+splash          3.5   500
+
+model           raygun.obj
+model_scale     11.0
+model_yaw       0.0
+
+sfx             RAYGUN 0.75 1.00
+haptic          0.28 0.30 0.55 0.10
+# Wonder weapon: half the box odds of a primary (~11% of rolls).
+mbox_weight     0.5
+
+vm_grip_pos     0 0.07 0
+vm_grip_rot     0 0 0
+vm_grip_scale   0.65

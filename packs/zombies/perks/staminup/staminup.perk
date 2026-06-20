@@ -1,0 +1,9 @@
+# Stamin-Up — faster movement. See juggernog.perk for the format.
+
+id        STAMIN
+name      Stamin-Up
+category  perk
+
+cost      2000
+tint      60 140 220 255
+model     perk_staminup.obj

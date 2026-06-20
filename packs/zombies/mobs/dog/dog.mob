@@ -1,0 +1,28 @@
+# Dog (Hellhound) — the "reuse" case: a new mob, zero new code. It points its
+# `behaviour` at the SAME chaser archetype the zombie uses, just faster and
+# weaker. Proves a mob is content: drop a .mob file, no recompile.
+#
+# NOTE: reuses zombie.glb as a placeholder model until a rigged dog.glb is
+# authored (keep its .blend source beside it when it lands).
+
+id              DOG
+name            Hellhound
+category        mob
+
+model           zombie.glb
+model_scale     0.8
+model_yaw       0.0
+tint            200 120 80 255
+anim_walk       walk
+anim_attack     attack_a
+anim_death      death
+anim_idle       walk
+
+behaviour       chaser
+move_speed      3.4
+path_repath     0.4
+
+health_base     90
+damage          40
+attack_windup   0.3
+attack_range    1.3

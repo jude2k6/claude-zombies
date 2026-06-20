@@ -1,0 +1,11 @@
+# Zombies — the reference game's themed content pack.
+# deffile format (key value). The filesystem (the type subdirs present) is the
+# source of truth for what the pack provides; this manifest is metadata.
+# See docs/content-packs.md.
+
+id            zombies
+name          Zombies
+version       1
+author        first-party
+description   CoD-style zombies: enemy mobs, perk machines, the ray gun wonder weapon, and the Pack-a-Punch / Mystery Box / power-up props.
+requires      stdlib

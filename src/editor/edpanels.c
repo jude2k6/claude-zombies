@@ -13,6 +13,8 @@
 #include "builtins_internal.h"
 #include "edscene.h"
 #include "edthumb.h"   // EdThumb_Model — GLB thumbnails for the content browser
+#include "edimport.h"  // EdImport_Item — copy-on-import from a pack tile
+#include "content.h"   // Eng_GetGameRoot — import target
 
 #include "raygui.h"
 #include "ui.h"
@@ -62,6 +64,12 @@ typedef struct {
     bool        active;
     EdActionFn  onPlace;        // plugin place-tool: invoked on click (else NULL → arm `tool`)
     void       *onUser;
+    // Import provenance: when this tile is offered from a pack the game hasn't
+    // imported, `pack` is the source pack id and srcDef/srcRoot locate it. A
+    // click then copy-imports it before arming. NULL/"" pack = already in-game.
+    const char *pack;
+    const char *srcDef;
+    const char *srcRoot;
 } PalTile;
 
 static int  g_palCat = PAL_GEOMETRY;
@@ -73,13 +81,21 @@ static bool  g_palFilterEdit = false;
 // (Color){...} compound literals pass as single arguments. Returns the new count.
 static int PalEmit(PalTile *out, int n, int max, const char *label,
                    const char *model, Color sw, int geom,
-                   EdPlaceTool tool, const char *id, bool active) {
-    if (n >= max || !ContainsCI(label, g_palFilter)) return n;
+                   EdPlaceTool tool, const char *id, bool active,
+                   const char *pack, const char *srcDef, const char *srcRoot) {
+    bool importable = pack && pack[0];
+    // The search box matches the label, and also the pack id for importable
+    // tiles (so typing a pack name browses everything that pack offers).
+    if (n >= max) return n;
+    if (!ContainsCI(label, g_palFilter) &&
+        !(importable && ContainsCI(pack, g_palFilter))) return n;
     PalTile *t = &out[n];
     snprintf(t->label, sizeof t->label, "%s", label);
     t->model = model; t->swatch = sw; t->geom = geom;
     t->tool  = tool;  t->active = active;
     t->onPlace = NULL; t->onUser = NULL;   // built-in tile (not a plugin tool)
+    t->pack = importable ? pack : NULL;
+    t->srcDef = srcDef; t->srcRoot = srcRoot;
     snprintf(t->id, sizeof t->id, "%s", id);
     return n + 1;
 }
@@ -90,38 +106,42 @@ static int PaletteBuildTiles(EdHost *h, PalTile out[], int max) {
     int n = 0;
     switch (g_palCat) {
     case PAL_GEOMETRY:
-        n = PalEmit(out, n, max, "Wall",      "", (Color){150,150,160,255}, 1, ED_PLACE_WALL,      "", s->placeTool==ED_PLACE_WALL);
-        n = PalEmit(out, n, max, "Sector",    "", (Color){ 90,110,150,255}, 2, ED_PLACE_SECTOR,    "", s->placeTool==ED_PLACE_SECTOR);
-        n = PalEmit(out, n, max, "Obstacle",  "", (Color){170,140, 90,255}, 3, ED_PLACE_OBSTACLE,  "", s->placeTool==ED_PLACE_OBSTACLE);
-        n = PalEmit(out, n, max, "Barricade", "", (Color){200,170, 80,255}, 4, ED_PLACE_BARRICADE, "", s->placeTool==ED_PLACE_BARRICADE);
+        n = PalEmit(out, n, max, "Wall",      "", (Color){150,150,160,255}, 1, ED_PLACE_WALL,      "", s->placeTool==ED_PLACE_WALL,      NULL, NULL, NULL);
+        n = PalEmit(out, n, max, "Sector",    "", (Color){ 90,110,150,255}, 2, ED_PLACE_SECTOR,    "", s->placeTool==ED_PLACE_SECTOR,    NULL, NULL, NULL);
+        n = PalEmit(out, n, max, "Obstacle",  "", (Color){170,140, 90,255}, 3, ED_PLACE_OBSTACLE,  "", s->placeTool==ED_PLACE_OBSTACLE,  NULL, NULL, NULL);
+        n = PalEmit(out, n, max, "Barricade", "", (Color){200,170, 80,255}, 4, ED_PLACE_BARRICADE, "", s->placeTool==ED_PLACE_BARRICADE, NULL, NULL, NULL);
         break;
     case PAL_SPAWNS:
-        n = PalEmit(out, n, max, "Player", "", (Color){80,130,210,255}, 0, ED_PLACE_PLAYER, "", s->placeTool==ED_PLACE_PLAYER);
+        n = PalEmit(out, n, max, "Player", "", (Color){80,130,210,255}, 0, ED_PLACE_PLAYER, "", s->placeTool==ED_PLACE_PLAYER, NULL, NULL, NULL);
         for (int i = 0; i < s->mobDefCount; i++) {
             const EdMobDef *m = &s->mobDefs[i];
             n = PalEmit(out, n, max, m->name, m->model, m->tint, 0, ED_PLACE_MOB, m->id,
-                        s->placeTool==ED_PLACE_MOB && strcmp(s->placeMobId, m->id)==0);
+                        s->placeTool==ED_PLACE_MOB && strcmp(s->placeMobId, m->id)==0,
+                        m->pack, m->srcDef, m->srcRoot);
         }
         break;
     case PAL_PROPS:
         for (int i = 0; i < s->propDefCount; i++) {
             const EdPropDef *pd = &s->propDefs[i];
             n = PalEmit(out, n, max, pd->name, pd->model, (Color){130,130,140,255}, 0, ED_PLACE_PROP, pd->id,
-                        s->placeTool==ED_PLACE_PROP && strcmp(s->placePropId, pd->id)==0);
+                        s->placeTool==ED_PLACE_PROP && strcmp(s->placePropId, pd->id)==0,
+                        pd->pack, pd->srcDef, pd->srcRoot);
         }
         break;
     case PAL_WALLBUYS:
         for (int i = 0; i < s->weaponDefCount; i++) {
             const EdPropDef *wd = &s->weaponDefs[i];
             n = PalEmit(out, n, max, wd->name, wd->model, (Color){180,150,90,255}, 0, ED_PLACE_WALLBUY, wd->id,
-                        s->placeTool==ED_PLACE_WALLBUY && strcmp(s->placeWeaponId, wd->id)==0);
+                        s->placeTool==ED_PLACE_WALLBUY && strcmp(s->placeWeaponId, wd->id)==0,
+                        wd->pack, wd->srcDef, wd->srcRoot);
         }
         break;
     case PAL_PERKS:
         for (int i = 0; i < s->perkDefCount; i++) {
             const EdPropDef *kd = &s->perkDefs[i];
             n = PalEmit(out, n, max, kd->name, kd->model, (Color){90,170,120,255}, 0, ED_PLACE_PERK, kd->id,
-                        s->placeTool==ED_PLACE_PERK && strcmp(s->placePerkId, kd->id)==0);
+                        s->placeTool==ED_PLACE_PERK && strcmp(s->placePerkId, kd->id)==0,
+                        kd->pack, kd->srcDef, kd->srcRoot);
         }
         break;
     case PAL_PLUGINS:
@@ -147,7 +167,7 @@ static int PaletteBuildTiles(EdHost *h, PalTile out[], int max) {
 static void PaletteArm(EdScene *s, const PalTile *t) {
     s->placeTool = t->tool;
     switch (t->tool) {
-    case ED_PLACE_MOB:     snprintf(s->placeMobId,    sizeof s->placeMobId,    "%s", t->id); break;
+    case ED_PLACE_MOB:     snprintf(s->placeMobId,    sizeof s->placeMobId,    "%.*s", (int)sizeof s->placeMobId - 1, t->id); break;
     case ED_PLACE_PROP:    snprintf(s->placePropId,   sizeof s->placePropId,   "%s", t->id); break;
     case ED_PLACE_PERK:    snprintf(s->placePerkId,   sizeof s->placePerkId,   "%s", t->id); break;
     case ED_PLACE_WALLBUY: snprintf(s->placeWeaponId, sizeof s->placeWeaponId, "%s", t->id); break;
@@ -277,6 +297,18 @@ static void PanelPalette(EdHost *h, Rectangle c, void *u) {
             DrawRectangleRec(sw, tiles[i].swatch);
         }
 
+        // importable-from-pack tile: dim the preview + a source chip so it reads
+        // as "available to import" rather than already placeable (a click imports
+        // it). The chip names the source pack (browse-by-pack at a glance).
+        if (tiles[i].pack) {
+            DrawRectangleRec(q, (Color){ 10, 12, 16, 110 });
+            float chH = 12 * sc;
+            Rectangle chip = { q.x, q.y, q.width, chH };
+            DrawRectangleRec(chip, (Color){ 56, 86, 148, 235 });
+            char ctxt[20]; snprintf(ctxt, sizeof ctxt, "%.10s", tiles[i].pack);
+            Eng_UiText(ctxt, chip.x + 3 * sc, chip.y + 1 * sc, 9, (Color){ 232, 238, 250, 255 });
+        }
+
         // label
         const char *lbl = tiles[i].label;
         int fw = MeasureText(lbl, (int)(10 * sc));
@@ -284,8 +316,30 @@ static void PanelPalette(EdHost *h, Rectangle c, void *u) {
                    tiles[i].active ? ENG_UI_GOLD : ENG_UI_TEXT);
 
         if (interactive && hot && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-            if (tiles[i].onPlace) tiles[i].onPlace(h, tiles[i].onUser);  // plugin tool
-            else PaletteArm(s, &tiles[i]);
+            if (tiles[i].pack) {
+                // Copy-on-import from the pack into the open game, then re-scan so
+                // it becomes a normal placeable tile, and arm it immediately.
+                const char *game = Eng_GetGameRoot();
+                if (game && game[0] && tiles[i].srcDef && tiles[i].srcRoot) {
+                    int nf = EdImport_Item(tiles[i].srcDef, tiles[i].srcRoot, game);
+                    if (nf > 0) {
+                        EdHost_Log(h, ED_LOG_INFO, "imported '%s' from pack '%s' (%d files)",
+                                   tiles[i].label, tiles[i].pack, nf);
+                        EdScene_RescanContent(s);
+                        PaletteArm(s, &tiles[i]);   // tool + id stay valid post-rescan
+                    } else {
+                        EdHost_Log(h, ED_LOG_ERROR, "import '%s' from pack '%s' FAILED",
+                                   tiles[i].label, tiles[i].pack);
+                    }
+                } else {
+                    EdHost_Log(h, ED_LOG_ERROR,
+                               "import: no game open — File \xe2\x96\xb8 Game project \xe2\x96\xb8 Open Game first");
+                }
+            } else if (tiles[i].onPlace) {
+                tiles[i].onPlace(h, tiles[i].onUser);  // plugin tool
+            } else {
+                PaletteArm(s, &tiles[i]);
+            }
         }
     }
     EndScissorMode();

@@ -5,6 +5,7 @@
 #include "edimport.h"
 
 #include "deffile.h"   // Eng_DefForEachLine
+#include "pack.h"      // Eng_PackReadManifest — provenance for the .import sidecar
 #include "raylib.h"    // FS: LoadFileData/SaveFileData, LoadDirectoryFilesEx, GetFileName, ...
 
 #include <stdio.h>
@@ -147,6 +148,27 @@ int EdImport_Item(const char *srcDefPath, const char *srcRoot, const char *gameD
     snprintf(defDst, sizeof defDst, "%s/%s", itemPath, GetFileName(srcDefPath));
     int copied = CopyFileBinary(srcDefPath, defDst);
     if (copied == 0) return 0;   // couldn't even copy the def → failure
+
+    // Provenance sidecar (docs/content-packs.md §5): record the source pack +
+    // version + path so the editor can later show origin / "update from pack".
+    {
+        char sidecar[1024];
+        snprintf(sidecar, sizeof sidecar, "%s/%s.import", itemPath,
+                 GetFileNameWithoutExt(srcDefPath));
+        FILE *sf = fopen(sidecar, "w");
+        if (sf) {
+            EngPackInfo info;
+            const char *srcName = GetFileName(srcRoot);
+            int version = 1;
+            if (Eng_PackReadManifest(srcRoot, &info)) { srcName = info.id; version = info.version; }
+            fprintf(sf, "# Import provenance (docs/content-packs.md §5).\n");
+            fprintf(sf, "source   %s\n", srcName);
+            fprintf(sf, "version  %d\n", version);
+            fprintf(sf, "src      %s\n", srcDefPath);
+            fclose(sf);
+            copied++;
+        }
+    }
 
     // Copy the referenced model + its deps. Two source conventions exist: a
     // weapon names its model relative to its OWN dir (raygun.obj beside

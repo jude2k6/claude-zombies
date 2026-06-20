@@ -1,7 +1,8 @@
 # Content Packs — stdlib + importable packs, copied into a game
 
-> **Status: Phases 1–4 SHIPPED; phase 5 (provenance sidecars) deferred.** Captures the
-> content-packs model worked out 2026-06-20. It extends the games-as-projects overlay
+> **Status: Phases 1–5 SHIPPED** (palette badges + per-item import + provenance sidecars
+> landed; only "update from pack" remains as polish). Captures the content-packs model worked
+> out 2026-06-20. It extends the games-as-projects overlay
 > ([game-projects.md](game-projects.md)) with a *pack* — a distributable bundle of placeables —
 > and a copy-on-import flow at whole-pack or per-item granularity.
 >
@@ -21,10 +22,19 @@
 > Verified: clean `-Wall -Wextra` build; a link-test imports the zombies pack (21 files,
 > incl. the raygun viewmodel) into a fresh game folder; editor `--check` still parses maps.
 >
-> **Not yet built:** §8 phase 5 (provenance `.import` sidecars + "update from pack"), and the
-> richer per-tile pack **badges / browse-by-pack** inside the content-browser palette (§6) — the
-> menu-driven import is the shipped surface; the palette half is a follow-up. The resolved-design
-> decisions (§9) are settled.
+> **Done (palette UX + sidecars):** the content browser (`src/editor/edpanels.c`) now lists
+> items from installed packs the open game hasn't imported, dimmed with a **source-pack chip**;
+> clicking one copy-imports it (`EdImport_Item`), re-scans, and arms it for placement
+> (`EdScene_ScanMobs`/`EdScanIdNameCatalog` add a pack pass carrying provenance into
+> `EdMobDef`/`EdPropDef`). The palette search also matches the pack id (browse-by-pack). Every
+> import writes a `.import` **provenance sidecar** (source pack + version + path) beside the
+> copied def. The launcher also has **Install Pack…** (`src/editor/edlauncher.c`).
+> Verified: link-test shows an empty game surfaces 2 importable mobs + 4 importable perks tagged
+> `pack='zombies'`, per-item import writes the sidecar, and an already-imported item is de-duped
+> (no badge); editor `--check` still parses maps.
+>
+> **Not yet built:** "update from pack" / "show changes" using the sidecars (read-back side of
+> §8 phase 5). The resolved-design decisions (§9) are settled.
 
 ---
 
@@ -226,15 +236,19 @@ This is a no-backwards-compat move (per the project rule) — one clean cut, not
    def + the unique model/`.mtl`/`map_Kd` textures it references; `EdImport_Pack` does a whole
    pack. Binary-safe (LoadFileData/SaveFileData). Mirrors the source layout (weapon model beside
    the def vs. mob/perk/prop model in shared `models/`) so the game resolves the copy unchanged.
-4. **Editor UX — ✅ SHIPPED (menus)** (`src/editor/edmenus.c`): **File ▸ Game project ▸
+4. **Editor UX — ✅ SHIPPED** — menus (`src/editor/edmenus.c`): **File ▸ Game project ▸
    Import Pack…** (folder picker → import into the open game, then rescan the palette),
    **Install Pack…** (folder picker → copy a source into `packs/`, reusing the now-public
-   `EdProject_CopyTree`), and dynamic **Import: \<pack\>** quick-entries from `Eng_PackList`.
-   The richer per-tile pack badges + browse-by-pack inside the content browser remain a follow-up.
-5. **Provenance sidecars (deferred)** — `.import` origin tracking + "update from pack".
+   `EdProject_CopyTree`), and dynamic **Import: \<pack\>** quick-entries from `Eng_PackList`;
+   plus **Install Pack…** on the launcher (`edlauncher.c`). **Palette** (`edpanels.c`): pack
+   items the game lacks show as dimmed tiles with a source-pack chip; a click copy-imports +
+   re-scans + arms; the search matches the pack id (browse-by-pack). Provenance flows from the
+   catalog scan (`edcatalog.c`) through `EdMobDef`/`EdPropDef`.
+5. **Provenance sidecars — ✅ SHIPPED (write side)** — `EdImport_Item` writes a `.import`
+   sidecar (source pack + version + path) beside each copied def. *Remaining:* the read-back
+   ("update from pack" / "show origin") UI.
 
-Phases 1–4 (format + scan + editor menus) are shipped; the palette badges (part of 4) and
-phase 5 are later polish.
+Phases 1–5 are shipped; only "update from pack" (reading the sidecars) remains as polish.
 
 ---
 

@@ -13,6 +13,7 @@
 
 #include "deffile.h"   // shared .def reader (engine-side, game-clean)
 #include "content.h"   // Eng_ContentDirs
+#include "pack.h"      // Eng_PackList / Eng_PackDirs — packs as import sources
 
 #include <stdio.h>
 #include <string.h>
@@ -83,6 +84,38 @@ void EdScene_ScanMobs(EdScene *s) {
             if (dup) continue;
             if (!mp.def.name[0]) snprintf(mp.def.name, sizeof mp.def.name, "%s", mp.def.id);
             EdBuildModelPath(mp.def.model, sizeof mp.def.model, files.paths[i], mp.modelFile);
+            s->mobDefs[s->mobDefCount++] = mp.def;
+            if (nSeen < ED_MAX_MOBDEFS) snprintf(seen[nSeen++], ED_MOBID_LEN, "%s", mp.def.id);
+        }
+        UnloadDirectoryFiles(files);
+    }
+
+    // Pack pass: offer mobs from installed packs the open game hasn't imported
+    // yet, flagged with provenance (pack/srcDef/srcRoot) so the palette can show
+    // an import badge and copy-on-import on click. De-dup against in-game ids so
+    // an already-imported mob isn't offered twice. (docs/content-packs.md §6)
+    EngPackInfo packs[8];
+    int nPacks = Eng_PackList(packs, (int)(sizeof packs / sizeof packs[0]));
+    for (int p = 0; p < nPacks && s->mobDefCount < ED_MAX_MOBDEFS; p++) {
+        char pdir[1][512];
+        if (Eng_PackDirs(packs[p].dir, "mobs", pdir, 1) == 0) continue;
+        FilePathList files = LoadDirectoryFilesEx(pdir[0], ".mob", true);
+        for (unsigned i = 0; i < files.count && s->mobDefCount < ED_MAX_MOBDEFS; i++) {
+            char *text = LoadFileText(files.paths[i]);
+            if (!text) continue;
+            EdMobParse mp = { .def = { .name = "", .tint = { 200, 80, 80, 255 } }, .sawId = false, .modelFile = "" };
+            Eng_DefForEachLine(text, EdMobLineCb, &mp);
+            UnloadFileText(text);
+            if (!mp.sawId) continue;
+            bool dup = false;
+            for (int k = 0; k < nSeen; k++)
+                if (strcmp(seen[k], mp.def.id) == 0) { dup = true; break; }
+            if (dup) continue;
+            if (!mp.def.name[0]) snprintf(mp.def.name, sizeof mp.def.name, "%s", mp.def.id);
+            EdBuildModelPath(mp.def.model, sizeof mp.def.model, files.paths[i], mp.modelFile);
+            snprintf(mp.def.pack,    sizeof mp.def.pack,    "%s", packs[p].id);
+            snprintf(mp.def.srcDef,  sizeof mp.def.srcDef,  "%s", files.paths[i]);
+            snprintf(mp.def.srcRoot, sizeof mp.def.srcRoot, "%s", packs[p].dir);
             s->mobDefs[s->mobDefCount++] = mp.def;
             if (nSeen < ED_MAX_MOBDEFS) snprintf(seen[nSeen++], ED_MOBID_LEN, "%s", mp.def.id);
         }
@@ -160,6 +193,37 @@ static int EdScanIdNameCatalog(const char *subdir, const char *ext,
         }
         UnloadDirectoryFiles(files);
     }
+
+    // Pack pass: offer items from installed packs not already in the game,
+    // flagged with provenance for copy-on-import (docs/content-packs.md §6).
+    EngPackInfo packs[8];
+    int nPacks = Eng_PackList(packs, (int)(sizeof packs / sizeof packs[0]));
+    for (int p = 0; p < nPacks && count < max; p++) {
+        char pdir[1][512];
+        if (Eng_PackDirs(packs[p].dir, subdir, pdir, 1) == 0) continue;
+        FilePathList files = LoadDirectoryFilesEx(pdir[0], ext, true);
+        for (unsigned i = 0; i < files.count && count < max; i++) {
+            char *text = LoadFileText(files.paths[i]);
+            if (!text) continue;
+            EdPropParse pp = { .def = { .name = "" }, .sawId = false, .modelFile = "" };
+            Eng_DefForEachLine(text, EdPropLineCb, &pp);
+            UnloadFileText(text);
+            if (!pp.sawId) continue;
+            bool dup = false;
+            for (int k = 0; k < nSeen && k < ED_MAX_PROPDEFS; k++)
+                if (strcmp(seen[k], pp.def.id) == 0) { dup = true; break; }
+            if (dup) continue;
+            if (!pp.def.name[0]) snprintf(pp.def.name, sizeof pp.def.name, "%s", pp.def.id);
+            EdBuildModelPath(pp.def.model, sizeof pp.def.model, files.paths[i], pp.modelFile);
+            snprintf(pp.def.pack,    sizeof pp.def.pack,    "%s", packs[p].id);
+            snprintf(pp.def.srcDef,  sizeof pp.def.srcDef,  "%s", files.paths[i]);
+            snprintf(pp.def.srcRoot, sizeof pp.def.srcRoot, "%s", packs[p].dir);
+            out[count++] = pp.def;
+            if (nSeen < ED_MAX_PROPDEFS) snprintf(seen[nSeen++], ED_PROPID_LEN, "%s", pp.def.id);
+        }
+        UnloadDirectoryFiles(files);
+    }
+
     if (placeId && count > 0) snprintf(placeId, placeCap, "%s", out[0].id);
     return count;
 }

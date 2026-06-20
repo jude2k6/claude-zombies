@@ -63,11 +63,20 @@ typedef enum {
 #define ED_MAX_MOBDEFS 24
 #define ED_MOBID_LEN   24
 #define ED_MODELPATH_LEN 256     // resolved .glb path for a thumbnail (may be empty)
+// Import-source provenance for content packs (docs/content-packs.md §6): when a
+// def is offered from a pack the open game hasn't imported yet, `pack` holds the
+// source pack id and `srcDef`/`srcRoot` locate it for copy-on-import. An empty
+// `pack` means the item is already in the game/stdlib and directly placeable.
+#define ED_PACKID_LEN  64
+#define ED_SRCPATH_LEN 256
 typedef struct {
     char  id[ED_MOBID_LEN];   // SPAWN MOB <id> written on placement
     char  name[48];           // palette label
     Color tint;               // marker colour
     char  model[ED_MODELPATH_LEN]; // resolved .glb path for the browser thumbnail ("" = none)
+    char  pack[ED_PACKID_LEN];      // "" = in game/stdlib; else importable from this pack
+    char  srcDef[ED_SRCPATH_LEN];   // pack def path (for import)
+    char  srcRoot[ED_SRCPATH_LEN];  // pack root dir  (for import)
 } EdMobDef;
 
 // A placeable definition scanned from a content catalog — the editor's view of
@@ -81,6 +90,9 @@ typedef struct {
     char  id[ED_PROPID_LEN];  // id written on placement (e.g. MapDocProp.name)
     char  name[48];           // palette label
     char  model[ED_MODELPATH_LEN]; // resolved .glb path for the browser thumbnail ("" = none)
+    char  pack[ED_PACKID_LEN];      // "" = in game/stdlib; else importable from this pack
+    char  srcDef[ED_SRCPATH_LEN];   // pack def path (for import)
+    char  srcRoot[ED_SRCPATH_LEN];  // pack root dir  (for import)
 } EdPropDef;
 
 // A draw/pick proxy: one selectable box per MapDoc entity, tagged by stable id.

@@ -76,42 +76,17 @@ target_include_directories(engine PUBLIC
 )
 target_link_libraries(engine PUBLIC raylib enet)
 
-# ---- game executable (games/shooter/src/ — rules + content, links the engine) --
-# The reference game's logic lives INSIDE its project folder (games/shooter/src/),
-# alongside its data (maps/ mobs/ perks/ ...), so the game is a self-contained
-# games-as-projects folder rather than code in the engine tree. src/ at the repo
-# root is now engine + editor only. See docs/game-projects.md.
-add_executable(shooter
-    games/shooter/src/main.c
-    games/shooter/src/world.c
-    games/shooter/src/level.c
-    games/shooter/src/player.c
-    games/shooter/src/weapons.c
-    games/shooter/src/mobs.c
-    games/shooter/src/mob_ai.c
-    games/shooter/src/perks.c
-    games/shooter/src/entities.c
-    games/shooter/src/interact.c
-    games/shooter/src/game.c
-    games/shooter/src/protocol.c
-    games/shooter/src/render.c
-    games/shooter/src/viewmodel.c
-    games/shooter/src/devtools.c
-    games/shooter/src/hud.c
-    games/shooter/src/menu.c
-    games/shooter/src/audio_director.c
-    games/shooter/src/settings.c
-    games/shooter/src/assets.c
-    games/shooter/src/props.c
-)
-target_include_directories(shooter PRIVATE
-    ${CMAKE_SOURCE_DIR}/games/shooter/src
-)
-target_link_libraries(shooter PRIVATE engine ${CMAKE_DL_LIBS})
-# -rdynamic so Tier-2 .so mob behaviours (dlopen'd from ./behaviours) resolve
-# the host's Game_RegisterBehaviour / world symbols — same seam as the editor's
-# dynamic plugins.
-set_target_properties(shooter PROPERTIES ENABLE_EXPORTS ON)
+# ---- AddressSanitizer / UBSan (opt-in) -------------------------------------
+# Declared here, BEFORE the game subdir, so the game's own CMakeLists can consume
+# it. The engine half is applied below; the game half lives in its CMakeLists.
+option(SHOOTER_ASAN "Build with AddressSanitizer/UBSan" OFF)
+
+# ---- the reference game (games-as-projects GameModule) ----------------------
+# The game's logic + data live together in games/shooter/, and games/shooter/src/
+# has its OWN CMakeLists that defines the `shooter` target (linking the `engine`
+# target above). The repo root no longer lists the game's source files — it just
+# pulls in the game project. See docs/game-projects.md.
+add_subdirectory(games/shooter/src)
 
 # ---- editor executable (src/editor/ — the scene/map builder) ----------------
 # A SIBLING application to the game: its own GameModule on the engine, linking
@@ -172,18 +147,14 @@ if(NOT MSVC)
     target_compile_options(editor_example_plugin PRIVATE -Wall -Wextra -Wno-unused-parameter)
 endif()
 
-# ---- warning flags (our code only, not FetchContent deps) ------------------
+# ---- warning flags (engine only here; the game + editor set their own) ------
 if(NOT MSVC)
-    target_compile_options(engine  PRIVATE -Wall -Wextra -Wno-unused-parameter)
-    target_compile_options(shooter PRIVATE -Wall -Wextra -Wno-unused-parameter)
+    target_compile_options(engine PRIVATE -Wall -Wextra -Wno-unused-parameter)
 endif()
 
-# ---- AddressSanitizer / UBSan (opt-in) -------------------------------------
-option(SHOOTER_ASAN "Build with AddressSanitizer/UBSan" OFF)
+# ---- AddressSanitizer / UBSan — engine half (game half is in its CMakeLists) -
 if(SHOOTER_ASAN AND NOT MSVC)
-    target_compile_options(engine  PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
-    target_compile_options(shooter PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
-    target_link_options(shooter PRIVATE -fsanitize=address,undefined)
+    target_compile_options(engine PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
 endif()
 
 # ---- engine/game seam check ------------------------------------------------
@@ -198,42 +169,6 @@ add_custom_target(seam-check
 )
 add_dependencies(engine seam-check)
 
-# ---- content (overlay roots) -----------------------------------------------
-# Copy the content trees next to the executable so the overlay resolves from a
-# path relative to the binary (see docs/game-projects.md, docs/content-packs.md):
-#   stdlib/ — the read-only universal base (runtime fallback, game-over-stdlib)
-#   packs/  — importable pack SOURCES (not runtime-loaded; the editor imports from them)
-#   games/  — the per-game folders (writable; game content wins)
-# Re-runs whenever something under a tree changes — but ONLY when the `shooter`
-# target itself relinks, so a content-only edit needs a touched source.
-add_custom_command(TARGET shooter POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-        ${CMAKE_SOURCE_DIR}/stdlib $<TARGET_FILE_DIR:shooter>/stdlib
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-        ${CMAKE_SOURCE_DIR}/packs $<TARGET_FILE_DIR:shooter>/packs
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-        ${CMAKE_SOURCE_DIR}/games $<TARGET_FILE_DIR:shooter>/games
-    COMMENT "Copying stdlib/ + packs/ + games/ next to shooter binary"
-)
-
-# ---- per-OS bits -----------------------------------------------------------
-if(UNIX AND NOT APPLE)
-    target_link_libraries(shooter PRIVATE m pthread dl)
-endif()
-
-if(APPLE)
-    target_link_libraries(shooter PRIVATE
-        "-framework IOKit" "-framework Cocoa" "-framework OpenGL")
-endif()
-
-if(WIN32)
-    target_link_libraries(shooter PRIVATE ws2_32 winmm iphlpapi)
-    if(MSVC)
-        target_compile_options(shooter PRIVATE /W3 /utf-8)
-        target_compile_definitions(shooter PRIVATE _CRT_SECURE_NO_WARNINGS)
-        target_compile_options(shooter PRIVATE /std:c11)
-    endif()
-    if(MINGW AND CMAKE_BUILD_TYPE STREQUAL "Release")
-        target_link_options(shooter PRIVATE -static -static-libgcc)
-    endif()
-endif()
+# Content staging next to the binary + the game's per-OS link bits now live with
+# the game target in games/shooter/src/CMakeLists.txt (the shooter target is
+# defined there). The engine + editor remain configured above.

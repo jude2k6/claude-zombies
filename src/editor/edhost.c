@@ -17,6 +17,9 @@
 #include <string.h>
 #include <stdlib.h>
 
+// Forward declaration — implemented in edmenus.c (builtins).
+extern void EdBuiltins_OpenCommandPalette(EdHost *h);
+
 // ---- capacities ------------------------------------------------------------
 #define ED_MAX_MENUS        8
 #define ED_MAX_MENU_ITEMS  32
@@ -771,6 +774,8 @@ void EdHost_Frame(EdHost *h, int W, int H) {
         bool ok = EdScene_PlayTest(h->scene, m, sizeof m);
         EdHost_Log(h, ok ? ED_LOG_INFO : ED_LOG_ERROR, "%s", m);
     }
+    // Ctrl+P: open the Command Palette (suppressed while a modal owns input).
+    if (!modal && ctrl && IsKeyPressed(KEY_P)) EdBuiltins_OpenCommandPalette(h);
     if (ctrl && (IsKeyPressed(KEY_EQUAL) || IsKeyPressed(KEY_KP_ADD)))
         h->scene->uiScale = (h->scene->uiScale + 0.1f > 3.0f) ? 3.0f : h->scene->uiScale + 0.1f;
     if (ctrl && (IsKeyPressed(KEY_MINUS) || IsKeyPressed(KEY_KP_SUBTRACT)))

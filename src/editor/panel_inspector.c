@@ -21,6 +21,7 @@
 #include <stdlib.h>   // strtod, for inspector number fields
 #include <string.h>
 #include <ctype.h>    // isspace, validating numeric input
+#include <limits.h>   // INT_MAX, for InspIntBox clamp sentinels
 
 // ============================================================================
 //  Inspector helpers — tiny field widgets used by PanelInspector
@@ -65,7 +66,7 @@ typedef struct {
     bool        editing;    // is this box in text-entry mode?
     char        buf[32];    // live edit buffer
 } InspFloatState;
-#define INSP_FLOAT_FIELDS 8   // max distinct float fields shown for one entity
+#define INSP_FLOAT_FIELDS 12  // max distinct float fields shown for one entity
 static InspFloatState g_inspFloat[INSP_FLOAT_FIELDS];
 static int  g_inspLastId = -1;  // reset buffers when selection changes
 
@@ -121,6 +122,44 @@ static bool InspFloatBox(EdHost *h, float X, float W, float *y, float sc,
     return changed;
 }
 
+// Draw an integer field via a GuiTextBox (keyed by label, same slot table as
+// InspFloatBox). Parses and rounds to int; rejects non-numeric input; optionally
+// clamps to [min, max] when min <= max.  Returns true and writes *v if changed.
+static bool InspIntBox(EdHost *h, float X, float W, float *y, float sc,
+                       const char *label, int *v, int clampMin, int clampMax) {
+    InspFloatState *st = InspFloatSlot(label);
+    if (!st) return false;
+    Eng_UiText(label, X, *y + 1 * sc, 12, ENG_UI_TEXT);
+    bool changed = false;
+    bool wasEdit = st->editing;
+    if (!wasEdit) snprintf(st->buf, sizeof st->buf, "%d", *v);
+    if (GuiTextBox((Rectangle){ X + 60 * sc, *y, W - 60 * sc, 18 * sc },
+                   st->buf, sizeof st->buf, wasEdit)) {
+        st->editing = !wasEdit;
+        if (wasEdit) {
+            char *end = NULL;
+            double parsed = strtod(st->buf, &end);
+            bool valid = (end != st->buf);
+            while (valid && *end) {
+                if (!isspace((unsigned char)*end)) valid = false;
+                end++;
+            }
+            if (valid) {
+                int iv = (int)(parsed + 0.5);
+                if (clampMin <= clampMax) {
+                    if (iv < clampMin) iv = clampMin;
+                    if (iv > clampMax) iv = clampMax;
+                }
+                if (iv != *v) { *v = iv; changed = true; }
+            } else if (st->buf[0]) {
+                EdHost_Log(h, ED_LOG_WARN, "%s: ignored non-numeric input \"%s\"", label, st->buf);
+            }
+        }
+    }
+    *y += 22 * sc;
+    return changed;
+}
+
 // String text-box edit-state, keyed by field label — mirrors InspFloatState /
 // InspFloatSlot but for char-array fields (T2-5). Slots are shared across all
 // text fields shown for one entity and released on selection change (same point
@@ -150,6 +189,33 @@ static InspTextState *InspTextSlot(const char *key) {
     return NULL;
 }
 
+// Draw a generic char-array text field keyed by `label`.  Reads/writes into
+// `buf` (length `bufLen`).  Commits via EdHost_CommitEdit on edit-toggle if the
+// value changed.  Returns true if a change was committed this frame.
+static bool InspTextField(EdHost *h, float X, float W, float *y, float sc,
+                          const char *label, char *buf, int bufLen) {
+    InspTextState *st = InspTextSlot(label);
+    if (!st) return false;
+    if (!st->editing) snprintf(st->buf, sizeof st->buf, "%s", buf);
+    Eng_UiText(label, X, *y + 1 * sc, 12, ENG_UI_TEXT);
+    bool was = st->editing;
+    bool changed = false;
+    if (GuiTextBox((Rectangle){ X + 60 * sc, *y, W - 60 * sc, 18 * sc },
+                   st->buf, (int)sizeof(st->buf) < bufLen ? (int)sizeof(st->buf) : bufLen,
+                   was)) {
+        st->editing = !was;
+        if (was && strcmp(st->buf, buf) != 0) {
+            // Bounded copy into the (possibly smaller) destination — explicit so
+            // the compiler doesn't flag a %s truncation it can't prove is safe.
+            size_t n = strnlen(st->buf, (size_t)bufLen - 1);
+            memcpy(buf, st->buf, n); buf[n] = '\0';
+            changed = true;
+        }
+    }
+    *y += 22 * sc;
+    return changed;
+}
+
 // Per-surface texture-override field for WALL / OBSTACLE. Reads/writes the
 // MapDoc TEX field via the engine accessors; a blank string clears the override
 // so the surface falls back to the map's wall_ext slot. Commits on edit-toggle.
@@ -174,6 +240,39 @@ static void InspTexField(EdHost *h, EdScene *s, float X, float W, float *y, floa
     *y += 20 * sc;
     Eng_UiText("(blank = map default)", X, *y, 9, ENG_UI_DIM);
     *y += 14 * sc;
+}
+
+// Collect distinct non-empty door names from walls that have door.present.
+// Fills `out` with up to `maxOut` unique names and returns the count.
+// Used by the "Locked by" cycle button for spawns and windows.
+#define INSP_MAX_DOOR_NAMES 32
+static int CollectDoorNames(const MapDoc *d, char out[][MAPDOC_DOOR_NAME_LEN], int maxOut) {
+    int count = 0;
+    for (int i = 0; i < d->wallCount && count < maxOut; i++) {
+        if (!d->walls[i].door.present) continue;
+        if (d->walls[i].door.name[0] == '\0') continue;
+        // dedup
+        bool dup = false;
+        for (int j = 0; j < count; j++)
+            if (strcmp(out[j], d->walls[i].door.name) == 0) { dup = true; break; }
+        if (!dup) snprintf(out[count++], MAPDOC_DOOR_NAME_LEN, "%s", d->walls[i].door.name);
+    }
+    return count;
+}
+
+// Cycle a lockedBy string to the next door name (or back to "" = none).
+// Current == "" means "none"; cycles through the collected door names and wraps.
+static void CycleLockedBy(const MapDoc *d, char *lockedBy) {
+    char names[INSP_MAX_DOOR_NAMES][MAPDOC_DOOR_NAME_LEN];
+    int  n = CollectDoorNames(d, names, INSP_MAX_DOOR_NAMES);
+    if (n == 0) { lockedBy[0] = '\0'; return; }
+    // Find current position
+    int cur = -1;  // -1 = currently "<none>"
+    for (int i = 0; i < n; i++)
+        if (strcmp(lockedBy, names[i]) == 0) { cur = i; break; }
+    int next = cur + 1;
+    if (next >= n) { lockedBy[0] = '\0'; }  // wrap to none
+    else            snprintf(lockedBy, MAPDOC_DOOR_NAME_LEN, "%s", names[next]);
 }
 
 // Display name for a sector array index (for ramp link buttons). -1 / OOB =
@@ -433,6 +532,27 @@ void PanelInspector(EdHost *h, Rectangle c, void *u) {
         }
         y += 26 * sc;
 
+        // "Locked by" cycle button — gates this spawn behind a named door.
+        // Only relevant for mob spawns (PLAYER spawns never gate), but shown for
+        // all spawns so a mis-tagged spawn can still be cleared.
+        {
+            MapDocSpawn *sp = (MapDocSpawn *)EngMapEnt_Ptr(&s->doc,
+                                  EngMapEnt_Find(&s->doc, s->selectedId), NULL);
+            if (sp) {
+                const char *lb = sp->lockedBy[0] ? sp->lockedBy : "<none>";
+                Eng_UiText("locked by", X, y + 1 * sc, 12, ENG_UI_TEXT);
+                char lbLbl[MAPDOC_DOOR_NAME_LEN + 8];
+                snprintf(lbLbl, sizeof lbLbl, "%s", lb);
+                if (GuiButton((Rectangle){ X + 60 * sc, y, W - 60 * sc, 20 * sc }, lbLbl)) {
+                    CycleLockedBy(&s->doc, sp->lockedBy);
+                    EdHost_CommitEdit(h);
+                }
+                y += 24 * sc;
+                Eng_UiText("(click to cycle named doors)", X, y, 9, ENG_UI_DIM);
+                y += 14 * sc;
+            }
+        }
+
     } else if (k == ENGMAPENT_WINDOW) {
         // Window facing toggle group.
         char dir[4]; Eng_GetWindowDir(&s->doc, s->selectedId, dir, sizeof dir);
@@ -447,6 +567,25 @@ void PanelInspector(EdHost *h, Rectangle c, void *u) {
             EdHost_CommitEdit(h);
         }
         y += 26 * sc;
+
+        // "Locked by" cycle button — gates this window behind a named door.
+        {
+            MapDocWindow *win = (MapDocWindow *)EngMapEnt_Ptr(&s->doc,
+                                    EngMapEnt_Find(&s->doc, s->selectedId), NULL);
+            if (win) {
+                const char *lb = win->lockedBy[0] ? win->lockedBy : "<none>";
+                Eng_UiText("locked by", X, y + 1 * sc, 12, ENG_UI_TEXT);
+                char lbLbl[MAPDOC_DOOR_NAME_LEN + 8];
+                snprintf(lbLbl, sizeof lbLbl, "%s", lb);
+                if (GuiButton((Rectangle){ X + 60 * sc, y, W - 60 * sc, 20 * sc }, lbLbl)) {
+                    CycleLockedBy(&s->doc, win->lockedBy);
+                    EdHost_CommitEdit(h);
+                }
+                y += 24 * sc;
+                Eng_UiText("(click to cycle named doors)", X, y, 9, ENG_UI_DIM);
+                y += 14 * sc;
+            }
+        }
 
     } else if (k == ENGMAPENT_PROP) {
         // Prop yaw + uniform scale sliders.
@@ -480,6 +619,46 @@ void PanelInspector(EdHost *h, Rectangle c, void *u) {
                 EdHost_CommitEdit(h);
             }
             y += 4 * sc;
+
+            // ---- Door sub-inspector -------------------------------------------
+            y += 2 * sc;
+            Eng_UiText("DOOR", X, y, 13, (Color){ 200, 205, 215, 255 }); y += 18 * sc;
+
+            // door.present toggle
+            bool wasDoor = w->door.present;
+            GuiCheckBox((Rectangle){ X, y, 14 * sc, 14 * sc }, " door", &w->door.present);
+            if (w->door.present != wasDoor) EdHost_CommitEdit(h);
+            y += 20 * sc;
+
+            if (w->door.present) {
+                // center: position along the wall's running axis (any value ok)
+                float dCenter = w->door.center;
+                if (InspFloatBox(h, X, W, &y, sc, "center", &dCenter)) {
+                    w->door.center = dCenter;
+                    EdHost_CommitEdit(h);
+                }
+
+                // width: must be >= 0
+                float dWidth = w->door.width;
+                if (InspFloatBox(h, X, W, &y, sc, "width", &dWidth)) {
+                    if (dWidth < 0.0f) dWidth = 0.0f;
+                    w->door.width = dWidth;
+                    EdHost_CommitEdit(h);
+                }
+
+                // cost: int >= 0; no hard upper bound
+                int dCost = w->door.cost;
+                if (InspIntBox(h, X, W, &y, sc, "cost", &dCost, 0, INT_MAX)) {
+                    w->door.cost = dCost;
+                    EdHost_CommitEdit(h);
+                }
+
+                // name (AS clause)
+                if (InspTextField(h, X, W, &y, sc, "name", w->door.name,
+                                  (int)sizeof(w->door.name))) {
+                    EdHost_CommitEdit(h);
+                }
+            }
         }
         InspTexField(h, s, X, W, &y, sc);
 

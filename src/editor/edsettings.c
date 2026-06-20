@@ -34,6 +34,14 @@ void EdScene_LoadSettings(EdScene *s, EngCfg *cfg) {
     s->snapStep           = EngCfg_Float(cfg, "grid.snapStep",  1.0f);
     s->barricadeAutoSpawn = EngCfg_Bool (cfg, "edit.barricadeAutoSpawn", true);
     s->undoDepth          = EngCfg_Int  (cfg, "edit.undoDepth", ENGMAPHISTORY_DEFAULT_DEPTH);
+    // Gizmo handle scale multiplier (1.0 = engine default; 1.4 = larger, more
+    // clickable handles).  Clamped to [0.5, 4.0] so extreme values don't break
+    // the viewport.  A Settings-dialog slider is a follow-up (edmenus.c).
+    s->gizmoScale         = EngCfg_Float(cfg, "edit.gizmoScale", 1.4f);
+    if (s->gizmoScale < 0.5f) s->gizmoScale = 0.5f;
+    if (s->gizmoScale > 4.0f) s->gizmoScale = 4.0f;
+    // gizmoHidden is a transient screenshot aid — always starts off at launch.
+    s->gizmoHidden        = false;
     s->uiScale            = EngCfg_Float(cfg, "ui.scale",       0.0f);  // 0 = use recommendation
     s->winW               = EngCfg_Int  (cfg, "win.width",      1280);
     s->winH               = EngCfg_Int  (cfg, "win.height",     800);
@@ -84,6 +92,7 @@ void EdScene_PutSettingKeys(const EdScene *s, FILE *f) {
     EngCfg_PutFloat(f, "grid.snapStep", s->snapStep);
     EngCfg_PutBool (f, "edit.barricadeAutoSpawn", s->barricadeAutoSpawn);
     EngCfg_PutInt  (f, "edit.undoDepth", s->undoDepth);
+    EngCfg_PutFloat(f, "edit.gizmoScale", s->gizmoScale);
     EngCfg_PutFloat(f, "ui.scale",      s->uiScale);
     EngCfg_PutInt  (f, "win.width",     s->winW);
     EngCfg_PutInt  (f, "win.height",    s->winH);

@@ -29,6 +29,203 @@
 #define ED_GAME_MAX    8
 
 // ============================================================================
+//  Command Palette  (Ctrl+P)
+// ============================================================================
+
+#define CMD_PAL_MAX  256   // max items we snapshot
+
+typedef struct {
+    const EdMenuItem *item;
+    char              menu[48];   // copy of item->menu at snapshot time
+} CmdPalEntry;
+
+static char         g_palQuery[64];
+static CmdPalEntry  g_palEntries[CMD_PAL_MAX];
+static int          g_palCount;
+static int          g_palSel;    // selected row (into the *filtered* set)
+
+// Case-insensitive substring check.
+static bool pal_contains(const char *haystack, const char *needle) {
+    if (!needle[0]) return true;
+    size_t nl = strlen(needle);
+    for (; *haystack; haystack++) {
+        size_t i;
+        for (i = 0; i < nl; i++) {
+            char h = haystack[i]; char n = needle[i];
+            if (h >= 'A' && h <= 'Z') h += 32;
+            if (n >= 'A' && n <= 'Z') n += 32;
+            if (h != n) break;
+        }
+        if (i == nl) return true;
+    }
+    return false;
+}
+
+// Snapshot callback — collect items once when the palette opens.
+static void pal_collect(const char *menu, const char *label, const char *shortcut,
+                        const EdMenuItem *item, void *user) {
+    (void)menu; (void)label; (void)shortcut; (void)user;
+    if (!item->label) return;   // skip separators
+    if (g_palCount >= CMD_PAL_MAX) return;
+    g_palEntries[g_palCount].item = item;
+    snprintf(g_palEntries[g_palCount].menu, sizeof g_palEntries[0].menu,
+             "%s", item->menu ? item->menu : "");
+    g_palCount++;
+}
+
+static void CmdPaletteModal(EdHost *h, Rectangle area, void *user) {
+    (void)user;
+    float sc = EdHost_UiScale(h);
+    Eng_UiSetScale(sc); Eng_UiApplyFont(13);
+
+    float pw = 480 * sc, ph = 360 * sc;
+    ph = fminf(ph, area.height - 20 * sc);
+    float px = (area.width  - pw) / 2.0f;
+    float py = (area.height - ph) / 2.0f; if (py < 8 * sc) py = 8 * sc;
+
+    // Background panel
+    Eng_UiPanelBg((Rectangle){ px - 2, py - 2, pw + 4, ph + 4 }, (Color){ 60, 66, 80, 255 });
+    Eng_UiPanelBg((Rectangle){ px, py, pw, ph },                 (Color){ 20, 23, 30, 255 });
+
+    float X = px + 12 * sc, W = pw - 24 * sc, y = py + 10 * sc;
+
+    // Title
+    Eng_UiText("COMMAND PALETTE", X, y, 14, ENG_UI_GOLD); y += 22 * sc;
+
+    // Query text box
+    bool queryChanged = false;
+    {
+        char prev[64]; snprintf(prev, sizeof prev, "%s", g_palQuery);
+        GuiTextBox((Rectangle){ X, y, W, 22 * sc }, g_palQuery, sizeof g_palQuery, true);
+        if (strcmp(prev, g_palQuery) != 0) { queryChanged = true; }
+    }
+    y += 28 * sc;
+
+    if (queryChanged) g_palSel = 0;
+
+    // Build filtered list for this frame.
+    // We build it on the stack since we need it for both input and draw.
+    static int    g_filtIdx[CMD_PAL_MAX];
+    int filtCount = 0;
+    for (int i = 0; i < g_palCount; i++) {
+        const EdMenuItem *it = g_palEntries[i].item;
+        // Compose search string: "Menu Label"
+        char combined[128];
+        snprintf(combined, sizeof combined, "%s %s",
+                 g_palEntries[i].menu, it->label ? it->label : "");
+        if (!pal_contains(combined, g_palQuery)) continue;
+        g_filtIdx[filtCount++] = i;
+    }
+
+    // Keyboard navigation
+    if (IsKeyPressed(KEY_DOWN)) {
+        g_palSel++;
+        if (g_palSel >= filtCount) g_palSel = filtCount > 0 ? filtCount - 1 : 0;
+    }
+    if (IsKeyPressed(KEY_UP)) {
+        g_palSel--;
+        if (g_palSel < 0) g_palSel = 0;
+    }
+
+    // Escape closes
+    if (IsKeyPressed(KEY_ESCAPE)) { EdHost_SetModal(h, NULL, NULL); return; }
+
+    // Click outside closes
+    Vector2 mp = GetMousePosition();
+    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) &&
+        !CheckCollisionPointRec(mp, (Rectangle){ px, py, pw, ph })) {
+        EdHost_SetModal(h, NULL, NULL);
+        return;
+    }
+
+    // Enter executes selected item
+    if (IsKeyPressed(KEY_ENTER) && filtCount > 0 && g_palSel < filtCount) {
+        const EdMenuItem *it = g_palEntries[g_filtIdx[g_palSel]].item;
+        bool enabled = !it->enabled || it->enabled(h, it->user);
+        if (enabled && it->onClick) {
+            EdHost_SetModal(h, NULL, NULL);
+            it->onClick(h, it->user);
+            return;
+        }
+    }
+
+    // Draw list rows
+    float rowH   = 22 * sc;
+    float listH  = ph - (y - py) - 8 * sc;
+    int   maxVis = (int)(listH / rowH);
+
+    // Scroll offset so selected row stays visible
+    static int g_palScroll = 0;
+    if (queryChanged) g_palScroll = 0;
+    if (g_palSel < g_palScroll)              g_palScroll = g_palSel;
+    if (g_palSel >= g_palScroll + maxVis)    g_palScroll = g_palSel - maxVis + 1;
+    if (g_palScroll < 0)                     g_palScroll = 0;
+
+    BeginScissorMode((int)X, (int)y, (int)W, (int)listH);
+
+    for (int r = g_palScroll; r < filtCount && r < g_palScroll + maxVis; r++) {
+        int ei = g_filtIdx[r];
+        const EdMenuItem *it = g_palEntries[ei].item;
+        bool enabled = !it->enabled || it->enabled(h, it->user);
+        bool selected = (r == g_palSel);
+
+        float ry = y + (r - g_palScroll) * rowH;
+
+        // Row background
+        if (selected) {
+            DrawRectangle((int)X, (int)ry, (int)W, (int)rowH,
+                          (Color){ 60, 100, 180, 200 });
+        } else if (CheckCollisionPointRec(mp, (Rectangle){ X, ry, W, rowH })) {
+            DrawRectangle((int)X, (int)ry, (int)W, (int)rowH,
+                          (Color){ 40, 44, 55, 200 });
+            // Click on row: select + execute
+            if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && enabled && it->onClick) {
+                g_palSel = r;
+                EdHost_SetModal(h, NULL, NULL);
+                it->onClick(h, it->user);
+                EndScissorMode();
+                return;
+            } else if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                g_palSel = r;
+            }
+        }
+
+        // "Menu ▸ Label" on the left
+        char label[128];
+        snprintf(label, sizeof label, "%s \xe2\x96\xb8 %s",
+                 g_palEntries[ei].menu, it->label ? it->label : "");
+        Color textCol = enabled ? ENG_UI_TEXT : (Color){ 100, 105, 115, 255 };
+        Eng_UiText(label, X + 6 * sc, ry + 4 * sc, 12, textCol);
+
+        // Shortcut on the right (dimmed)
+        if (it->shortcut && it->shortcut[0]) {
+            float scw = MeasureText(it->shortcut, (int)(12 * sc));
+            Eng_UiText(it->shortcut, X + W - scw - 8 * sc, ry + 4 * sc, 12,
+                       (Color){ 130, 130, 150, 200 });
+        }
+    }
+
+    EndScissorMode();
+
+    // Count hint
+    if (filtCount == 0) {
+        Eng_UiText("No matching commands.", X + 6 * sc, y + 6 * sc, 12,
+                   (Color){ 120, 120, 130, 200 });
+    }
+}
+
+void EdBuiltins_OpenCommandPalette(EdHost *h) {
+    g_palQuery[0] = '\0';
+    g_palSel      = 0;
+    g_palCount    = 0;
+    EdHost_ForEachMenuItem(h, pal_collect, NULL);
+    EdHost_SetModal(h, CmdPaletteModal, NULL);
+}
+
+// thunk so the palette can be registered as a normal menu item
+static void a_open_cmd_palette(EdHost *h, void *u) { (void)u; EdBuiltins_OpenCommandPalette(h); }
+
+// ============================================================================
 //  Unsaved-changes guard — Feature 4
 // ============================================================================
 
@@ -595,6 +792,8 @@ static void RegisterMenus(EdHost *h) {
     // One slot per menu name — see RecentsDynProvider for the combined layout.
     EdHost_SetMenuDynamic(h, "File", RecentsDynProvider, NULL);
 
+    EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="Edit", .label="Command Palette...", .shortcut="Ctrl+P", .onClick=a_open_cmd_palette });
+    EdHost_AddMenuSeparator(h, "Edit");
     EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="Edit", .label="Undo", .shortcut="Ctrl+Z", .onClick=a_undo, .enabled=q_can_undo });
     EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="Edit", .label="Redo", .shortcut="Ctrl+Y", .onClick=a_redo, .enabled=q_can_redo });
     EdHost_AddMenuSeparator(h, "Edit");
@@ -863,6 +1062,127 @@ static void a_validate(EdHost *h, void *u) {
                    "  %s %s", issues[i].severity == MAPDOC_ERROR ? "[E]" : "[w]", issues[i].msg);
 }
 
+// ============================================================================
+//  Align / Distribute
+// ============================================================================
+
+// enabled guards
+static bool q_sel2(EdHost *h, void *u) { (void)u; return EdHost_Scene(h)->selCount >= 2; }
+static bool q_sel3(EdHost *h, void *u) { (void)u; return EdHost_Scene(h)->selCount >= 3; }
+
+// Helper: collect (x,z) for each selected entity.  Returns count.
+// Out arrays must be at least selCount in size.
+static int align_gather(EdScene *s, float *xs, float *zs) {
+    int n = s->selCount;
+    for (int i = 0; i < n; i++) {
+        float x = 0, z = 0;
+        Eng_GetPos(&s->doc, s->selIds[i], &x, &z);
+        xs[i] = x; zs[i] = z;
+    }
+    return n;
+}
+
+// Align: set every selected entity's X to the minimum X across the selection.
+static void a_align_min_x(EdHost *h, void *u) {
+    (void)u; EdScene *s = EdHost_Scene(h);
+    int n = s->selCount; if (n < 2) return;
+    float xs[ED_MAX_ENTS], zs[ED_MAX_ENTS];
+    align_gather(s, xs, zs);
+    float target = xs[0];
+    for (int i = 1; i < n; i++) if (xs[i] < target) target = xs[i];
+    for (int i = 0; i < n; i++) Eng_SetPos(&s->doc, s->selIds[i], target, zs[i]);
+    EdHost_CommitEdit(h);
+}
+
+// Align: set every selected entity's X to the maximum X across the selection.
+static void a_align_max_x(EdHost *h, void *u) {
+    (void)u; EdScene *s = EdHost_Scene(h);
+    int n = s->selCount; if (n < 2) return;
+    float xs[ED_MAX_ENTS], zs[ED_MAX_ENTS];
+    align_gather(s, xs, zs);
+    float target = xs[0];
+    for (int i = 1; i < n; i++) if (xs[i] > target) target = xs[i];
+    for (int i = 0; i < n; i++) Eng_SetPos(&s->doc, s->selIds[i], target, zs[i]);
+    EdHost_CommitEdit(h);
+}
+
+// Align: set every selected entity's Z to the minimum Z across the selection.
+static void a_align_min_z(EdHost *h, void *u) {
+    (void)u; EdScene *s = EdHost_Scene(h);
+    int n = s->selCount; if (n < 2) return;
+    float xs[ED_MAX_ENTS], zs[ED_MAX_ENTS];
+    align_gather(s, xs, zs);
+    float target = zs[0];
+    for (int i = 1; i < n; i++) if (zs[i] < target) target = zs[i];
+    for (int i = 0; i < n; i++) Eng_SetPos(&s->doc, s->selIds[i], xs[i], target);
+    EdHost_CommitEdit(h);
+}
+
+// Align: set every selected entity's Z to the maximum Z across the selection.
+static void a_align_max_z(EdHost *h, void *u) {
+    (void)u; EdScene *s = EdHost_Scene(h);
+    int n = s->selCount; if (n < 2) return;
+    float xs[ED_MAX_ENTS], zs[ED_MAX_ENTS];
+    align_gather(s, xs, zs);
+    float target = zs[0];
+    for (int i = 1; i < n; i++) if (zs[i] > target) target = zs[i];
+    for (int i = 0; i < n; i++) Eng_SetPos(&s->doc, s->selIds[i], xs[i], target);
+    EdHost_CommitEdit(h);
+}
+
+// Simple insertion sort on a parallel index array by a key array.
+static void sort_by(int *idx, int n, float *key) {
+    for (int i = 1; i < n; i++) {
+        int   ti = idx[i];
+        float tk = key[ti];
+        int j = i - 1;
+        while (j >= 0 && key[idx[j]] > tk) { idx[j+1] = idx[j]; j--; }
+        idx[j+1] = ti;
+    }
+}
+
+// Distribute: spread entities evenly along X between the first and last (by X).
+static void a_dist_x(EdHost *h, void *u) {
+    (void)u; EdScene *s = EdHost_Scene(h);
+    int n = s->selCount; if (n < 3) return;
+    float xs[ED_MAX_ENTS], zs[ED_MAX_ENTS];
+    align_gather(s, xs, zs);
+
+    // Build sorted index array by X.
+    int idx[ED_MAX_ENTS];
+    for (int i = 0; i < n; i++) idx[i] = i;
+    sort_by(idx, n, xs);
+
+    float xMin = xs[idx[0]], xMax = xs[idx[n-1]];
+    float step = (xMax - xMin) / (float)(n - 1);
+    for (int r = 1; r < n - 1; r++) {
+        int i = idx[r];
+        Eng_SetPos(&s->doc, s->selIds[i], xMin + step * r, zs[i]);
+    }
+    EdHost_CommitEdit(h);
+}
+
+// Distribute: spread entities evenly along Z between the first and last (by Z).
+static void a_dist_z(EdHost *h, void *u) {
+    (void)u; EdScene *s = EdHost_Scene(h);
+    int n = s->selCount; if (n < 3) return;
+    float xs[ED_MAX_ENTS], zs[ED_MAX_ENTS];
+    align_gather(s, xs, zs);
+
+    // Build sorted index array by Z.
+    int idx[ED_MAX_ENTS];
+    for (int i = 0; i < n; i++) idx[i] = i;
+    sort_by(idx, n, zs);
+
+    float zMin = zs[idx[0]], zMax = zs[idx[n-1]];
+    float step = (zMax - zMin) / (float)(n - 1);
+    for (int r = 1; r < n - 1; r++) {
+        int i = idx[r];
+        Eng_SetPos(&s->doc, s->selIds[i], xs[i], zMin + step * r);
+    }
+    EdHost_CommitEdit(h);
+}
+
 static void RegisterMapTools(EdHost *h) {
     // Tools: Map Settings first (Fix #3), then Validate. Editor preferences stay
     // at the bottom of Edit (audit P1-D). Help is registered here — after Tools —
@@ -873,6 +1193,15 @@ static void RegisterMapTools(EdHost *h) {
     EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="Tools", .label="Map statistics",  .onClick=a_stats });
     EdHost_AddMenuSeparator(h, "Tools");
     EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="Tools", .label="Rescan content",  .onClick=a_rescan });
+    EdHost_AddMenuSeparator(h, "Tools");
+    // Align submenu — needs ≥ 2 selected entities.
+    EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="Tools", .submenu="Align", .label="Min X", .onClick=a_align_min_x, .enabled=q_sel2 });
+    EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="Tools", .submenu="Align", .label="Max X", .onClick=a_align_max_x, .enabled=q_sel2 });
+    EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="Tools", .submenu="Align", .label="Min Z", .onClick=a_align_min_z, .enabled=q_sel2 });
+    EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="Tools", .submenu="Align", .label="Max Z", .onClick=a_align_max_z, .enabled=q_sel2 });
+    // Distribute submenu — needs ≥ 3 selected entities.
+    EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="Tools", .submenu="Distribute", .label="Across X", .onClick=a_dist_x, .enabled=q_sel3 });
+    EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="Tools", .submenu="Distribute", .label="Across Z", .onClick=a_dist_z, .enabled=q_sel3 });
     EdHost_AddMenuSeparator(h, "Edit");
     EdHost_AddMenuItem(h, &(EdMenuItem){ .menu="Edit", .label="Preferences...", .onClick=a_settings });
 

@@ -630,9 +630,15 @@ void EdScene_Redo(EdScene *s) { if (EngMapHistory_Redo(&s->hist, &s->doc)) s->di
 // ---- gizmo drag (translate) → mapedit → history ----------------------------
 
 static float GizmoHandleSize(EdScene *s, Vector3 origin) {
+    // Raw size scales with distance (fly) or orthographic zoom level.  The
+    // persisted s->gizmoScale multiplier lets the user tune handle prominence
+    // without an engine change (default 1.4 — noticeably bigger than stock).
+    float raw;
     if (s->view == ED_VIEW_FLY)
-        return Vector3Distance(s->cam.position, origin) * 0.12f + 0.5f;
-    return s->orthoH * 0.06f + 0.5f;
+        raw = Vector3Distance(s->cam.position, origin) * 0.12f + 0.5f;
+    else
+        raw = s->orthoH * 0.06f + 0.5f;
+    return raw * s->gizmoScale;
 }
 
 // Does the active gizmo mode apply to the current selection? TRANSLATE works for
@@ -681,7 +687,28 @@ static void UpdateGizmo(EdScene *s, bool allowGrab) {
                 hot = ENG_GIZMO_AXIS_NONE;
         }
 
-        Eng_GizmoDebugDraw(origin, s->mode, handleSize, hot);
+        // Visual-only hide: skip draw + labels but allow drag to start normally.
+        if (!s->gizmoHidden) {
+            Eng_GizmoDebugDraw(origin, s->mode, handleSize, hot);
+
+            // B. Per-axis labels at the tip of each arm.  Only drawn when not
+            // mid-drag (would flicker) and only for the axes this mode/selection
+            // actually uses.  Mirror the T2-3 SECTOR Y-suppression above so the
+            // label set matches the live handles exactly.
+            {
+                bool sectorPrimary = false;
+                if (s->mode == ENG_GIZMO_TRANSLATE) {
+                    EngMapEntKind pk;
+                    EngMapEnt_PtrConst(&s->doc, EngMapEnt_Find(&s->doc, s->selectedId), &pk);
+                    sectorPrimary = (pk == ENGMAPENT_SECTOR);
+                }
+                float tip = handleSize * 1.05f;   // just beyond the handle head
+                Eng_DebugText3D((Vector3){ origin.x + tip, origin.y,       origin.z       }, "X", RED);
+                if (!sectorPrimary)
+                    Eng_DebugText3D((Vector3){ origin.x,       origin.y + tip, origin.z       }, "Y", GREEN);
+                Eng_DebugText3D((Vector3){ origin.x,       origin.y,       origin.z + tip }, "Z", BLUE);
+            }
+        }
 
         if (allowGrab && hot != ENG_GIZMO_AXIS_NONE && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
             s->drag = Eng_GizmoBeginDrag(s->cam, mouse, s->vpW, s->vpH, origin, s->mode, hot);
@@ -715,7 +742,9 @@ static void UpdateGizmo(EdScene *s, bool allowGrab) {
         return;
     }
 
-    Eng_GizmoDebugDraw(origin, s->mode, handleSize, s->drag.axis);
+    // Visual-only hide: skip draw while dragging too, but still run the drag math.
+    if (!s->gizmoHidden)
+        Eng_GizmoDebugDraw(origin, s->mode, handleSize, s->drag.axis);
     EngGizmoDelta d = Eng_GizmoUpdateDrag(s->drag, s->cam, mouse, s->vpW, s->vpH);
 
     switch (s->mode) {
@@ -1399,6 +1428,9 @@ void EdScene_UpdateViewport(EdScene *s, Rectangle vp, bool inputAllowed) {
 
         if (IsKeyPressed(KEY_M)) s->materialMode = !s->materialMode;
         if (IsKeyPressed(KEY_G)) s->gridVisible = !s->gridVisible;
+        // H: visual-only gizmo hide (clean screenshots). Drag interaction still
+        // works while hidden — only the draw + axis labels are suppressed.
+        if (IsKeyPressed(KEY_H)) s->gizmoHidden = !s->gizmoHidden;
         // T: toggle measure / distance tool.
         if (IsKeyPressed(KEY_T)) {
             s->measureMode = !s->measureMode;

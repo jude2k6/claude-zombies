@@ -283,6 +283,18 @@ typedef struct EdScene {
     bool          vsync;
     int           fpsCap;
 
+    // ---- gizmo appearance -------------------------------------------------
+    // Multiplier applied to the raw GizmoHandleSize result (default 1.4 so
+    // handles are clearly larger than the engine default).  Persisted in
+    // editor.cfg as "edit.gizmoScale".  A Settings-dialog slider is a
+    // follow-up (lives in edmenus.c).
+    float         gizmoScale;
+
+    // Visual-only hide flag: H key toggles.  Hides gizmo draw + axis labels
+    // but does NOT disable drag interaction.  NOT persisted — screenshot aid
+    // that should always default off at launch.
+    bool          gizmoHidden;
+
     EngCfg       *cfg;              // editor.cfg handle (retained by LoadSettings)
 } EdScene;
 

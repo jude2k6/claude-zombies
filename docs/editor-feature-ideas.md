@@ -60,6 +60,16 @@
 > hook list — covering scene-direct `EdScene_Commit*`, not just the host wrappers
 > (continuous gizmo-drag commits still don't notify, by design — they'd fire per
 > frame).
+>
+> **SHIPPED 2026-06-20 (parallel wave 3):** **4.1 Command Palette** (`Ctrl+P` or
+> Edit ▸ Command Palette — a fuzzy/substring modal over every registered menu item,
+> arrow-key nav + Enter to run, built on `6.1 EdHost_ForEachMenuItem`), **1.5 Align /
+> Distribute** (Tools ▸ Align ▸ Min/Max X·Z and Tools ▸ Distribute ▸ Across X·Z, over
+> the multi-selection; enabled at ≥2 / ≥3 selected), **2.5 Gizmo handle polish**
+> (larger configurable handles via the persisted `edit.gizmoScale`, colour-coded X/Y/Z
+> axis labels, and an `H`-key visual hide for clean screenshots), and **3.5 Door
+> Editor** (a WALL door sub-inspector — present/center/width/cost/name — plus a
+> "Locked by" cycle button on SPAWN/WINDOW that walks the map's named doors).
 
 ---
 

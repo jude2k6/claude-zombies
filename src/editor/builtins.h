@@ -25,4 +25,7 @@ void EdBuiltins_RememberGame(EdHost *h, const char *dir);
 // "<path>.autosave" than the map. Idempotent per path; call once per frame.
 void EdBuiltins_RecoveryGuard(EdHost *h);
 
+// Open the Command Palette modal (Ctrl+P): fuzzy search over all menu items.
+void EdBuiltins_OpenCommandPalette(EdHost *h);
+
 #endif

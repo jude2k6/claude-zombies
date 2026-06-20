@@ -59,10 +59,12 @@ typedef enum {
 // as docs/editor-content-extensibility.md §3.
 #define ED_MAX_MOBDEFS 24
 #define ED_MOBID_LEN   24
+#define ED_MODELPATH_LEN 256     // resolved .glb path for a thumbnail (may be empty)
 typedef struct {
     char  id[ED_MOBID_LEN];   // SPAWN MOB <id> written on placement
     char  name[48];           // palette label
     Color tint;               // marker colour
+    char  model[ED_MODELPATH_LEN]; // resolved .glb path for the browser thumbnail ("" = none)
 } EdMobDef;
 
 // A placeable definition scanned from a content catalog — the editor's view of
@@ -75,6 +77,7 @@ typedef struct {
 typedef struct {
     char  id[ED_PROPID_LEN];  // id written on placement (e.g. MapDocProp.name)
     char  name[48];           // palette label
+    char  model[ED_MODELPATH_LEN]; // resolved .glb path for the browser thumbnail ("" = none)
 } EdPropDef;
 
 // A draw/pick proxy: one selectable box per MapDoc entity, tagged by stable id.

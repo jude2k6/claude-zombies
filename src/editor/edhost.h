@@ -104,6 +104,15 @@ void EdHost_AddPanel(EdHost *h, const EdPanel *panel);
 // Segments are drawn left-to-right separated by "  |  ", in registration order.
 void EdHost_AddStatusItem(EdHost *h, EdStatusFn fn, void *user);
 
+// ---- viewport tool-strip overlay -------------------------------------------
+// Register a draw callback for the thin band the host reserves at the TOP of the
+// viewport (the 3D scene renders below it). `strip` is that band's rect in window
+// pixels. Overlays own their own hit-tests (gate them on EdHost_PanelsInteractive);
+// the scene never receives clicks landing on the strip. Used by the built-in
+// tool-strip (active tool / view / gizmo / snap badges + a PLACING ghost cue).
+typedef void (*EdViewportOverlayFn)(EdHost *h, Rectangle strip, void *user);
+void EdHost_AddViewportOverlay(EdHost *h, EdViewportOverlayFn fn, void *user);
+
 // ---- modal overlay ---------------------------------------------------------
 // A single full-window modal panel (e.g. the Settings dialog). While set, it is
 // drawn over everything and captures all input (the viewport + panels are

@@ -1385,6 +1385,29 @@ void EdScene_DrawViewport(EdScene *s, Rectangle vp) {
         Eng_DebugBox(bb, (Color){ 90, 200, 255, 255 });
     }
 
+    // Placement ghost: when a POINT/LINE tool is armed and the cursor is over the
+    // viewport, preview where a click would drop the entity (a snapped marker +
+    // footprint hint), so the armed tool reads in the viewport, not only the
+    // tool-strip (editor-ux-review.md §5 / §1-D). Sector RECT-drag has its own
+    // live preview above; skip the ghost mid-drag.
+    if (s->placeTool != ED_PLACE_NONE && !s->sectorDragging &&
+        s->vpMouse.x >= 0 && s->vpMouse.x <= s->vpW &&
+        s->vpMouse.y >= 0 && s->vpMouse.y <= s->vpH) {
+        Ray ray = Eng_PickRayFromScreen(s->cam, s->vpMouse, s->vpW, s->vpH);
+        Vector3 g;
+        if (Eng_PickRayGroundY(ray, 0.0f, &g)) {
+            g.x = EdSnap(s, g.x); g.z = EdSnap(s, g.z);
+            Color ghost = { 120, 220, 255, 220 };
+            Eng_DebugSphere(g, ED_MARKER * 0.6f, ghost);
+            BoundingBox gb = { { g.x - 1, 0.0f, g.z - 1 }, { g.x + 1, 1.5f, g.z + 1 } };
+            Eng_DebugBox(gb, ghost);
+            // Wall: rubber-band the segment from the pending first endpoint.
+            if (s->placeTool == ED_PLACE_WALL && s->wallPending)
+                Eng_DebugLine((Vector3){ s->wallStartX, 0.1f, s->wallStartZ },
+                              (Vector3){ g.x, 0.1f, g.z }, ghost);
+        }
+    }
+
     // Edge-resize handles for the selected sector / endpoint handles for the
     // selected wall (when no placement tool armed).
     DrawSectorHandles(s);

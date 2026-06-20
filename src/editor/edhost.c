@@ -23,6 +23,7 @@
 #define ED_MAX_PANELS      32
 #define ED_MAX_STATUS       8
 #define ED_MAX_PLUGINS     32
+#define ED_MAX_OVERLAYS     4
 #define ED_LOG_LINES      256
 #define ED_LOG_LEN        180
 
@@ -33,6 +34,7 @@
 #define ED_PANEL_HDR   20
 #define ED_DROPDOWN_W  220
 #define ED_ITEM_H      22
+#define ED_STRIP_H     22   // viewport tool-strip band reserved at the top of the viewport
 
 typedef struct {
     char         label[24];
@@ -55,6 +57,10 @@ struct EdHost {
 
     struct { EdStatusFn fn; void *user; } status[ED_MAX_STATUS];
     int      statusCount;
+
+    // viewport tool-strip overlays (drawn in a reserved band atop the viewport)
+    struct { EdViewportOverlayFn fn; void *user; } overlays[ED_MAX_OVERLAYS];
+    int      overlayCount;
 
     // dock-zone sizes in UNSCALED px (multiplied by uiScale at layout time).
     float    leftW, rightW, bottomH;
@@ -116,6 +122,13 @@ void EdHost_AddStatusItem(EdHost *h, EdStatusFn fn, void *user) {
     h->statusCount++;
 }
 
+void EdHost_AddViewportOverlay(EdHost *h, EdViewportOverlayFn fn, void *user) {
+    if (h->overlayCount >= ED_MAX_OVERLAYS) return;
+    h->overlays[h->overlayCount].fn = fn;
+    h->overlays[h->overlayCount].user = user;
+    h->overlayCount++;
+}
+
 void EdHost_SetModal(EdHost *h, EdModalFn fn, void *user) {
     h->modalFn = fn; h->modalUser = user;
 }
@@ -166,7 +179,7 @@ EdHost *EdHost_Create(EdScene *scene) {
     h->openSubmenu = -1;
     h->leftW    = 160;
     h->rightW   = 180;
-    h->bottomH  = 80;
+    h->bottomH  = 150;   // taller now the bottom hosts the PALETTE browser + CONSOLE
     return h;
 }
 
@@ -553,9 +566,16 @@ void EdHost_Frame(EdHost *h, int W, int H) {
         if (h->splitterDrag) L = ComputeLayout(h, W, H);  // reflect new sizes now
     }
 
+    // Reserve a tool-strip band at the top of the viewport; the 3D scene renders
+    // (and takes input) only BELOW it, so strip clicks never reach the scene.
+    float stripH = (h->overlayCount > 0) ? ED_STRIP_H * s : 0.0f;
+    Rectangle strip   = { L.viewport.x, L.viewport.y, L.viewport.width, stripH };
+    Rectangle sceneVp = { L.viewport.x, L.viewport.y + stripH,
+                          L.viewport.width, L.viewport.height - stripH };
+
     // viewport input gating
     Vector2 m = GetMousePosition();
-    bool ptIn = CheckCollisionPointRec(m, L.viewport);
+    bool ptIn = CheckCollisionPointRec(m, sceneVp);
     if (!(IsMouseButtonDown(MOUSE_BUTTON_LEFT) || IsMouseButtonDown(MOUSE_BUTTON_RIGHT) ||
           IsMouseButtonDown(MOUSE_BUTTON_MIDDLE)))
         h->vpActive = false;
@@ -598,8 +618,17 @@ void EdHost_Frame(EdHost *h, int W, int H) {
     if (modal && IsKeyPressed(KEY_ESCAPE)) { h->modalFn = NULL; }
 
     // update + draw the scene viewport (after gating, before chrome)
-    EdScene_UpdateViewport(h->scene, L.viewport, vpInput);
-    EdScene_DrawViewport(h->scene, L.viewport);
+    EdScene_UpdateViewport(h->scene, sceneVp, vpInput);
+    EdScene_DrawViewport(h->scene, sceneVp);
+
+    // viewport tool-strip (over the reserved band, above the 3D scene)
+    if (stripH > 0) {
+        DrawRectangleRec(strip, (Color){ 28, 32, 40, 255 });
+        DrawRectangle((int)strip.x, (int)(strip.y + strip.height - 1),
+                      (int)strip.width, 1, (Color){ 50, 56, 68, 255 });
+        for (int i = 0; i < h->overlayCount; i++)
+            h->overlays[i].fn(h, strip, h->overlays[i].user);
+    }
 
     // panels (locked out while modal / a menu is open so widgets don't fire)
     bool lock = modal || dropdownOpen;

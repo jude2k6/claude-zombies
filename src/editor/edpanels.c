@@ -12,6 +12,7 @@
 #include "builtins.h"
 #include "builtins_internal.h"
 #include "edscene.h"
+#include "edthumb.h"   // EdThumb_Model — GLB thumbnails for the content browser
 
 #include "raygui.h"
 #include "ui.h"
@@ -20,167 +21,243 @@
 #include <stdio.h>
 #include <string.h>
 #include <ctype.h>    // tolower, for case-insensitive filter
+#include <math.h>     // fmaxf — palette gesture glyphs
+
+// Case-insensitive substring test (defined near PanelAssets); used by the
+// content browser's search box too.
+static bool ContainsCI(const char *hay, const char *needle);
 
 // ============================================================================
 //  Panels: Tools palette (L), Hierarchy (L), Inspector (R), Console (B)
 // ============================================================================
 
-// ---- Tools palette ---------------------------------------------------------
-// Is a row at [y, y+hh] at least partly inside the panel rect c? Used to skip
-// drawing AND input-processing widgets scrolled out of the panel, so a button
-// parked off-panel can't be clicked through the menu bar above it.
-static bool ToolRowVisible(Rectangle c, float y, float hh) {
-    return (y + hh > c.y) && (y < c.y + c.height);
+// ============================================================================
+//  PALETTE — the content browser (Unity-style; editor-ux-review.md §4)
+//
+//  Replaces the old left-dock TOOLS button-stack. A two-pane bottom-dock panel:
+//  a CATEGORY column (Select / Geometry / Spawns / Props / Wallbuys / Perks) on
+//  the left, and a wrapping TILE GRID on the right. Asset-backed kinds (mobs,
+//  props, wallbuys, perks) show a real GLB thumbnail (edthumb.{c,h}); GEOMETRY
+//  primitives show a procedural gesture glyph (no model to preview). Clicking a
+//  tile arms the same placeTool state the old palette set — the downstream
+//  placement path (edplace.c) is unchanged. A search box filters the grid.
+//
+//  Thumbnails render off-screen via BeginTextureMode, which honours the active
+//  GL scissor — so the grid pre-renders them with the panel scissor LIFTED
+//  (EndScissorMode → render → restore), exactly as PanelAssets used to.
+// ============================================================================
+
+typedef enum { PAL_GEOMETRY = 0, PAL_SPAWNS, PAL_PROPS, PAL_WALLBUYS, PAL_PERKS, PAL_CATCOUNT } PalCat;
+static const char *kPalCatNames[PAL_CATCOUNT] = { "Geometry", "Spawns", "Props", "Wallbuys", "Perks" };
+
+// One resolved tile to draw. `geom` 1..4 = a primitive gesture glyph (no model);
+// 0 = an asset/spawn tile (thumbnail `model` if non-empty, else `swatch`).
+typedef struct {
+    char        label[48];
+    const char *model;          // thumbnail path ("" = none)
+    Color       swatch;         // fallback square colour
+    int         geom;           // 0 none / 1 wall / 2 sector / 3 obstacle / 4 barricade
+    EdPlaceTool tool;
+    char        id[ED_PROPID_LEN]; // mob/prop/perk/weapon id ("" = n/a)
+    bool        active;
+} PalTile;
+
+static int  g_palCat = PAL_GEOMETRY;
+static float g_palScroll = 0;
+static char  g_palFilter[64] = "";
+static bool  g_palFilterEdit = false;
+
+// Append one tile (filtered by the search box). A function, not a macro, so the
+// (Color){...} compound literals pass as single arguments. Returns the new count.
+static int PalEmit(PalTile *out, int n, int max, const char *label,
+                   const char *model, Color sw, int geom,
+                   EdPlaceTool tool, const char *id, bool active) {
+    if (n >= max || !ContainsCI(label, g_palFilter)) return n;
+    PalTile *t = &out[n];
+    snprintf(t->label, sizeof t->label, "%s", label);
+    t->model = model; t->swatch = sw; t->geom = geom;
+    t->tool  = tool;  t->active = active;
+    snprintf(t->id, sizeof t->id, "%s", id);
+    return n + 1;
 }
 
-// Draw the PLACEMENT tools (Select / Spawns / Geometry / Props / Wallbuys /
-// Perks) into a panel's running layout, advancing *yp. These live in their own
-// always-visible left-column TOOLS panel (PanelTools below) so placement is never
-// hidden behind the asset filter — the single biggest "user will fumble" issue
-// from the 2026-06-19 review (TODO item 1).
-// Every section is data-driven off the scanned catalogs (mobs/props/perks/
-// weapons), so a new catalog file is a new button with no rebuild. `area` is the
-// panel content rect; rows scrolled out of it are skipped (ToolRowVisible) so an
-// off-panel button can't be clicked. The caller owns the scroll + scissor.
-static void DrawPlaceTools(EdHost *h, Rectangle area, float *yp, float sc) {
-    EdScene *s = EdHost_Scene(h);
-    float X = area.x, W = area.width;
-    float rowH = 22 * sc, gap = 25 * sc;   // button height + inter-row stride
-    float y = *yp;
-
-    // Select / move is always first.
-    if (ToolRowVisible(area, y, rowH) &&
-        Eng_UiToolButton((Rectangle){ X, y, W, rowH }, "Select / move", s->placeTool == ED_PLACE_NONE))
-        s->placeTool = ED_PLACE_NONE;
-    y += gap;
-
-    // ---- Spawns ------------------------------------------------------------
-    if (ToolRowVisible(area, y, 12 * sc)) GuiLabel((Rectangle){ X, y, W, 12 * sc }, "Spawns");
-    y += 14 * sc;
-    if (ToolRowVisible(area, y, rowH) &&
-        Eng_UiToolButton((Rectangle){ X, y, W, rowH }, "Player spawn", s->placeTool == ED_PLACE_PLAYER))
-        s->placeTool = ED_PLACE_PLAYER;
-    y += gap;
-    // One button per mob from the data/mobs catalog (data-driven; see
-    // EdScene_ScanMobs). Clicking arms ED_PLACE_MOB with that mob's tag.
-    for (int i = 0; i < s->mobDefCount; i++) {
-        const EdMobDef *m = &s->mobDefs[i];
-        bool active = (s->placeTool == ED_PLACE_MOB && strcmp(s->placeMobId, m->id) == 0);
-        if (ToolRowVisible(area, y, rowH) &&
-            Eng_UiToolButton((Rectangle){ X, y, W, rowH }, m->name, active)) {
-            s->placeTool = ED_PLACE_MOB;
-            snprintf(s->placeMobId, sizeof s->placeMobId, "%s", m->id);
+// Build the tile list for the active category, applying the search filter.
+static int PaletteBuildTiles(EdScene *s, PalTile out[], int max) {
+    int n = 0;
+    switch (g_palCat) {
+    case PAL_GEOMETRY:
+        n = PalEmit(out, n, max, "Wall",      "", (Color){150,150,160,255}, 1, ED_PLACE_WALL,      "", s->placeTool==ED_PLACE_WALL);
+        n = PalEmit(out, n, max, "Sector",    "", (Color){ 90,110,150,255}, 2, ED_PLACE_SECTOR,    "", s->placeTool==ED_PLACE_SECTOR);
+        n = PalEmit(out, n, max, "Obstacle",  "", (Color){170,140, 90,255}, 3, ED_PLACE_OBSTACLE,  "", s->placeTool==ED_PLACE_OBSTACLE);
+        n = PalEmit(out, n, max, "Barricade", "", (Color){200,170, 80,255}, 4, ED_PLACE_BARRICADE, "", s->placeTool==ED_PLACE_BARRICADE);
+        break;
+    case PAL_SPAWNS:
+        n = PalEmit(out, n, max, "Player", "", (Color){80,130,210,255}, 0, ED_PLACE_PLAYER, "", s->placeTool==ED_PLACE_PLAYER);
+        for (int i = 0; i < s->mobDefCount; i++) {
+            const EdMobDef *m = &s->mobDefs[i];
+            n = PalEmit(out, n, max, m->name, m->model, m->tint, 0, ED_PLACE_MOB, m->id,
+                        s->placeTool==ED_PLACE_MOB && strcmp(s->placeMobId, m->id)==0);
         }
-        y += gap;
-    }
-
-    // ---- Geometry ----------------------------------------------------------
-    if (ToolRowVisible(area, y, 12 * sc)) GuiLabel((Rectangle){ X, y, W, 12 * sc }, "Geometry");
-    y += 14 * sc;
-    if (ToolRowVisible(area, y, rowH) &&
-        Eng_UiToolButton((Rectangle){ X, y, W, rowH }, "Barricade", s->placeTool == ED_PLACE_BARRICADE))
-        s->placeTool = ED_PLACE_BARRICADE;
-    y += gap;
-    {
-        // Wall: label shows "(click 2)" cue when first endpoint is pending.
-        const char *wallLabel = (s->placeTool == ED_PLACE_WALL && s->wallPending)
-                                ? "Wall  (click 2)" : "Wall  (2-click)";
-        if (ToolRowVisible(area, y, rowH) &&
-            Eng_UiToolButton((Rectangle){ X, y, W, rowH }, wallLabel, s->placeTool == ED_PLACE_WALL)) {
-            s->placeTool = ED_PLACE_WALL;
-            s->wallPending = false;   // reset on re-arm so a stale start is cleared
+        break;
+    case PAL_PROPS:
+        for (int i = 0; i < s->propDefCount; i++) {
+            const EdPropDef *pd = &s->propDefs[i];
+            n = PalEmit(out, n, max, pd->name, pd->model, (Color){130,130,140,255}, 0, ED_PLACE_PROP, pd->id,
+                        s->placeTool==ED_PLACE_PROP && strcmp(s->placePropId, pd->id)==0);
         }
-    }
-    y += gap;
-    if (ToolRowVisible(area, y, rowH) &&
-        Eng_UiToolButton((Rectangle){ X, y, W, rowH }, "Obstacle", s->placeTool == ED_PLACE_OBSTACLE))
-        s->placeTool = ED_PLACE_OBSTACLE;
-    y += gap;
-    if (ToolRowVisible(area, y, rowH) &&
-        Eng_UiToolButton((Rectangle){ X, y, W, rowH }, "Sector (drag)", s->placeTool == ED_PLACE_SECTOR))
-        s->placeTool = ED_PLACE_SECTOR;
-    y += gap;
-
-    // ---- Props (data-driven from props/*.prop, like Spawns) ----------------
-    if (ToolRowVisible(area, y, 12 * sc)) GuiLabel((Rectangle){ X, y, W, 12 * sc }, "Props");
-    y += 14 * sc;
-    if (s->propDefCount == 0) {
-        if (ToolRowVisible(area, y, rowH))
-            GuiLabel((Rectangle){ X, y, W, rowH }, "  (no props/ catalog)");
-        y += gap;
-    }
-    for (int i = 0; i < s->propDefCount; i++) {
-        const EdPropDef *pd = &s->propDefs[i];
-        bool active = (s->placeTool == ED_PLACE_PROP && strcmp(s->placePropId, pd->id) == 0);
-        if (ToolRowVisible(area, y, rowH) &&
-            Eng_UiToolButton((Rectangle){ X, y, W, rowH }, pd->name, active)) {
-            s->placeTool = ED_PLACE_PROP;
-            snprintf(s->placePropId, sizeof s->placePropId, "%s", pd->id);
+        break;
+    case PAL_WALLBUYS:
+        for (int i = 0; i < s->weaponDefCount; i++) {
+            const EdPropDef *wd = &s->weaponDefs[i];
+            n = PalEmit(out, n, max, wd->name, wd->model, (Color){180,150,90,255}, 0, ED_PLACE_WALLBUY, wd->id,
+                        s->placeTool==ED_PLACE_WALLBUY && strcmp(s->placeWeaponId, wd->id)==0);
         }
-        y += gap;
-    }
-
-    // ---- Wallbuys (data-driven from the weapons/*.weapon catalog) ----------
-    if (ToolRowVisible(area, y, 12 * sc)) GuiLabel((Rectangle){ X, y, W, 12 * sc }, "Wallbuys");
-    y += 14 * sc;
-    if (s->weaponDefCount == 0) {
-        if (ToolRowVisible(area, y, rowH)) GuiLabel((Rectangle){ X, y, W, rowH }, "  (no weapons/ catalog)");
-        y += gap;
-    }
-    for (int i = 0; i < s->weaponDefCount; i++) {
-        const EdPropDef *wd = &s->weaponDefs[i];
-        bool active = (s->placeTool == ED_PLACE_WALLBUY && strcmp(s->placeWeaponId, wd->id) == 0);
-        if (ToolRowVisible(area, y, rowH) &&
-            Eng_UiToolButton((Rectangle){ X, y, W, rowH }, wd->name, active)) {
-            s->placeTool = ED_PLACE_WALLBUY;
-            snprintf(s->placeWeaponId, sizeof s->placeWeaponId, "%s", wd->id);
+        break;
+    case PAL_PERKS:
+        for (int i = 0; i < s->perkDefCount; i++) {
+            const EdPropDef *kd = &s->perkDefs[i];
+            n = PalEmit(out, n, max, kd->name, kd->model, (Color){90,170,120,255}, 0, ED_PLACE_PERK, kd->id,
+                        s->placeTool==ED_PLACE_PERK && strcmp(s->placePerkId, kd->id)==0);
         }
-        y += gap;
+        break;
+    default: break;
     }
-
-    // ---- Perks (data-driven from the perks/*.perk catalog) -----------------
-    if (ToolRowVisible(area, y, 12 * sc)) GuiLabel((Rectangle){ X, y, W, 12 * sc }, "Perks");
-    y += 14 * sc;
-    if (s->perkDefCount == 0) {
-        if (ToolRowVisible(area, y, rowH)) GuiLabel((Rectangle){ X, y, W, rowH }, "  (no perks/ catalog)");
-        y += gap;
-    }
-    for (int i = 0; i < s->perkDefCount; i++) {
-        const EdPropDef *kd = &s->perkDefs[i];
-        bool active = (s->placeTool == ED_PLACE_PERK && strcmp(s->placePerkId, kd->id) == 0);
-        if (ToolRowVisible(area, y, rowH) &&
-            Eng_UiToolButton((Rectangle){ X, y, W, rowH }, kd->name, active)) {
-            s->placeTool = ED_PLACE_PERK;
-            snprintf(s->placePerkId, sizeof s->placePerkId, "%s", kd->id);
-        }
-        y += gap;
-    }
-
-    *yp = y;
+    return n;
 }
 
-// ---- Tools palette panel (left dock, always visible) -----------------------
-// Wraps DrawPlaceTools with its own scroll + scissor, mirroring PanelAssets'
-// browse list. Lives in ED_DOCK_LEFT above HIERARCHY so the placement tools are
-// always reachable regardless of the asset filter (TODO item 1).
-static float g_toolsScroll = 0;
+// Arm the tool a tile represents (mirrors the old DrawPlaceTools click bodies).
+static void PaletteArm(EdScene *s, const PalTile *t) {
+    s->placeTool = t->tool;
+    switch (t->tool) {
+    case ED_PLACE_MOB:     snprintf(s->placeMobId,    sizeof s->placeMobId,    "%s", t->id); break;
+    case ED_PLACE_PROP:    snprintf(s->placePropId,   sizeof s->placePropId,   "%s", t->id); break;
+    case ED_PLACE_PERK:    snprintf(s->placePerkId,   sizeof s->placePerkId,   "%s", t->id); break;
+    case ED_PLACE_WALLBUY: snprintf(s->placeWeaponId, sizeof s->placeWeaponId, "%s", t->id); break;
+    case ED_PLACE_WALL:    s->wallPending = false; break;   // clear a stale first endpoint
+    default: break;
+    }
+}
 
-static void PanelTools(EdHost *h, Rectangle c, void *u) {
-    (void)u;
+// A small procedural glyph for a GEOMETRY primitive (no model to thumbnail).
+static void PaletteGeomGlyph(int geom, Rectangle q, Color c) {
+    float cx = q.x + q.width * 0.5f, cy = q.y + q.height * 0.5f;
+    float r = q.width * 0.32f, th = fmaxf(2.0f, q.width * 0.06f);
+    switch (geom) {
+    case 1: // Wall: a thick segment between two endpoint dots
+        DrawLineEx((Vector2){ cx - r, cy + r*0.5f }, (Vector2){ cx + r, cy - r*0.5f }, th, c);
+        DrawCircle((int)(cx - r), (int)(cy + r*0.5f), th, c);
+        DrawCircle((int)(cx + r), (int)(cy - r*0.5f), th, c);
+        break;
+    case 2: // Sector: a footprint outline (drag-rect)
+        DrawRectangleLinesEx((Rectangle){ cx - r, cy - r, r*2, r*2 }, th, c);
+        break;
+    case 3: // Obstacle: a filled box
+        DrawRectangleRec((Rectangle){ cx - r, cy - r, r*2, r*2 }, c);
+        break;
+    case 4: // Barricade: a box with planks
+        DrawRectangleLinesEx((Rectangle){ cx - r, cy - r, r*2, r*2 }, th, c);
+        DrawLineEx((Vector2){ cx - r, cy - r*0.3f }, (Vector2){ cx + r, cy - r*0.3f }, th, c);
+        DrawLineEx((Vector2){ cx - r, cy + r*0.3f }, (Vector2){ cx + r, cy + r*0.3f }, th, c);
+        break;
+    default: break;
+    }
+}
+
+static void PanelPalette(EdHost *h, Rectangle c, void *u) {
+    (void)u; EdScene *s = EdHost_Scene(h);
     float sc = EdHost_UiScale(h);
+    bool interactive = EdHost_PanelsInteractive(h);
 
-    if (CheckCollisionPointRec(GetMousePosition(), c))
-        g_toolsScroll -= GetMouseWheelMove() * 22 * sc * 2.0f;
-    static float prevTotal = 0;
-    float maxScroll = prevTotal - c.height; if (maxScroll < 0) maxScroll = 0;
-    if (g_toolsScroll < 0) g_toolsScroll = 0;
-    if (g_toolsScroll > maxScroll) g_toolsScroll = maxScroll;
+    // ---- layout: category column (left) | search + grid (right) ------------
+    float colW = 78 * sc;
+    Rectangle colR  = { c.x, c.y, colW, c.height };
+    Rectangle rightR= { c.x + colW + 6 * sc, c.y, c.width - colW - 6 * sc, c.height };
+    float searchH = 20 * sc;
+    Rectangle searchR = { rightR.x, rightR.y, rightR.width, searchH };
+    Rectangle gridR = { rightR.x, rightR.y + searchH + 4 * sc,
+                        rightR.width, rightR.height - searchH - 4 * sc };
 
-    BeginScissorMode((int)c.x, (int)c.y, (int)c.width, (int)c.height);
-    float y = c.y - g_toolsScroll;
-    DrawPlaceTools(h, c, &y, sc);
+    // ---- build the active category's tiles ---------------------------------
+    PalTile tiles[ED_MAX_PROPDEFS + ED_MAX_MOBDEFS + 8];
+    int nTiles = PaletteBuildTiles(s, tiles, (int)(sizeof tiles / sizeof tiles[0]));
+
+    // ---- tile grid metrics -------------------------------------------------
+    float cellW = 64 * sc, cellH = 78 * sc, pad = 6 * sc;
+    int cols = (int)((gridR.width + pad) / cellW); if (cols < 1) cols = 1;
+    int nRows = (nTiles + cols - 1) / cols;
+    float total = nRows * cellH;
+
+    // ---- pre-render thumbnails with the panel scissor LIFTED ---------------
+    // (BeginTextureMode honours the GL scissor; rendering under it yields an
+    //  empty texture — same gotcha PanelAssets documented.)
     EndScissorMode();
-    prevTotal = (y + g_toolsScroll) - c.y;
+    for (int i = 0; i < nTiles; i++)
+        if (tiles[i].model && tiles[i].model[0]) EdThumb_Model(tiles[i].model, 96);
+    BeginScissorMode((int)c.x, (int)c.y, (int)c.width, (int)c.height);
+
+    // ---- category column ---------------------------------------------------
+    float by = colR.y, bh = 22 * sc;
+    if (Eng_UiToolButton((Rectangle){ colR.x, by, colR.width, bh }, "Select", s->placeTool == ED_PLACE_NONE))
+        s->placeTool = ED_PLACE_NONE;
+    by += bh + 6 * sc;
+    for (int ci = 0; ci < PAL_CATCOUNT; ci++) {
+        if (Eng_UiToolButton((Rectangle){ colR.x, by, colR.width, bh }, kPalCatNames[ci], g_palCat == ci))
+            g_palCat = ci;
+        by += bh + 2 * sc;
+    }
+
+    // ---- search box --------------------------------------------------------
+    if (GuiTextBox(searchR, g_palFilter, sizeof g_palFilter, g_palFilterEdit))
+        g_palFilterEdit = !g_palFilterEdit;
+
+    // ---- tile grid (scrolled + scissored to gridR) -------------------------
+    if (CheckCollisionPointRec(GetMousePosition(), gridR))
+        g_palScroll -= GetMouseWheelMove() * cellH * 0.5f;
+    float maxScroll = total - gridR.height; if (maxScroll < 0) maxScroll = 0;
+    if (g_palScroll < 0) g_palScroll = 0;
+    if (g_palScroll > maxScroll) g_palScroll = maxScroll;
+
+    BeginScissorMode((int)gridR.x, (int)gridR.y, (int)gridR.width, (int)gridR.height);
+    for (int i = 0; i < nTiles; i++) {
+        int row = i / cols, col = i % cols;
+        float tx = gridR.x + col * cellW;
+        float ty = gridR.y - g_palScroll + row * cellH;
+        if (ty + cellH < gridR.y || ty > gridR.y + gridR.height) continue;
+
+        Rectangle cell = { tx, ty, cellW - pad, cellH - pad };
+        Rectangle q    = { cell.x, cell.y, cell.width, cell.width };   // square image area
+        bool hot = CheckCollisionPointRec(GetMousePosition(), cell);
+
+        // background + selection / hover highlight
+        DrawRectangleRec(q, (Color){ 30, 34, 42, 255 });
+        if (tiles[i].active) DrawRectangleLinesEx(cell, 2 * sc, ENG_UI_GOLD);
+        else if (hot)        DrawRectangleLinesEx(cell, 1 * sc, (Color){ 90, 100, 120, 255 });
+
+        // image: thumbnail, gesture glyph, or colour swatch
+        Texture2D th = (tiles[i].model && tiles[i].model[0]) ? EdThumb_Model(tiles[i].model, 96) : (Texture2D){0};
+        if (th.id) {
+            Rectangle src = { 0, 0, (float)th.width, -(float)th.height };  // flip Y (RT)
+            DrawTexturePro(th, src, q, (Vector2){0,0}, 0, WHITE);
+        } else if (tiles[i].geom) {
+            PaletteGeomGlyph(tiles[i].geom, q, tiles[i].swatch);
+        } else {
+            Rectangle sw = { q.x + q.width*0.28f, q.y + q.height*0.28f, q.width*0.44f, q.height*0.44f };
+            DrawRectangleRec(sw, tiles[i].swatch);
+        }
+
+        // label
+        const char *lbl = tiles[i].label;
+        int fw = MeasureText(lbl, (int)(10 * sc));
+        Eng_UiText(lbl, cell.x + (cell.width - fw) * 0.5f, q.y + q.height + 2 * sc, 10,
+                   tiles[i].active ? ENG_UI_GOLD : ENG_UI_TEXT);
+
+        if (interactive && hot && IsMouseButtonPressed(MOUSE_BUTTON_LEFT))
+            PaletteArm(s, &tiles[i]);
+    }
+    EndScissorMode();
+
+    if (nTiles == 0)
+        Eng_UiText("(no items)", gridR.x + 4 * sc, gridR.y + 2 * sc, 11, ENG_UI_DIM);
 }
 
 // ---- Hierarchy — sector tree (§6 of editor-ux-review.md) ------------------
@@ -629,11 +706,14 @@ static void PanelConsole(EdHost *h, Rectangle c, void *u) {
 }
 
 static void RegisterPanels(EdHost *h) {
-    EdHost_AddPanel(h, &(EdPanel){ .id="tools",     .title="TOOLS",     .zone=ED_DOCK_LEFT,   .draw=PanelTools });
+    // Left = HIERARCHY only (the placement palette moved to the bottom-dock
+    // PALETTE content browser — editor-ux-review.md §4). Right = INSPECTOR +
+    // ASSETS (maps). Bottom = PALETTE (primary, flexible) over a short CONSOLE.
     EdHost_AddPanel(h, &(EdPanel){ .id="hierarchy", .title="HIERARCHY", .zone=ED_DOCK_LEFT,   .draw=PanelHierarchy });
     EdHost_AddPanel(h, &(EdPanel){ .id="inspector", .title="INSPECTOR", .zone=ED_DOCK_RIGHT,  .draw=PanelInspector });
     EdHost_AddPanel(h, &(EdPanel){ .id="assets",    .title="ASSETS",    .zone=ED_DOCK_RIGHT,  .draw=PanelAssets });
-    EdHost_AddPanel(h, &(EdPanel){ .id="console",   .title="CONSOLE",   .zone=ED_DOCK_BOTTOM, .draw=PanelConsole });
+    EdHost_AddPanel(h, &(EdPanel){ .id="palette",   .title="PALETTE",   .zone=ED_DOCK_BOTTOM, .draw=PanelPalette });
+    EdHost_AddPanel(h, &(EdPanel){ .id="console",   .title="CONSOLE",   .zone=ED_DOCK_BOTTOM, .draw=PanelConsole, .prefH=40 });
 }
 
 // ============================================================================
@@ -647,19 +727,81 @@ static void st_map(EdHost *h, char *out, int cap, void *u) {
 static void st_count(EdHost *h, char *out, int cap, void *u) {
     (void)u; snprintf(out, cap, "%d ents", EdHost_Scene(h)->proxyCount);
 }
-static void st_view(EdHost *h, char *out, int cap, void *u) {
-    (void)u; EdScene *s = EdHost_Scene(h);
-    const char *v = s->view == ED_VIEW_FLY ? "fly" : s->view == ED_VIEW_ORBIT ? "iso" : "top";
-    // Gizmo mode moved out of the Tools panel (audit P0-B); surface it read-only
-    // here so the active transform mode (keys 1/2/3) stays discoverable.
-    const char *g = s->mode == ENG_GIZMO_TRANSLATE ? "move"
-                  : s->mode == ENG_GIZMO_ROTATE    ? "rotate" : "scale";
-    // Flag a rotate/scale mode that can't act on the current selection so the
-    // user sees why no gizmo appears, instead of a silent no-op (TODO item 2).
-    const char *na = (s->selectedId >= 0 && !EdScene_GizmoModeApplies(s)) ? " (n/a)" : "";
-    snprintf(out, cap, "view: %s  %s%s%s%s", v, g, na,
-             s->snapEnabled ? "  snap" : "", s->gridVisible ? "" : "  no-grid");
+// ---- viewport tool-strip (editor-ux-review.md §5) --------------------------
+// A thin band over the top of the viewport carrying the active tool / view /
+// gizmo / snap / grid (relocated off the status bar, where they sat far from the
+// viewport they describe), plus a "PLACING: …" cue when a tool is armed. The
+// view/gizmo/snap/grid chips are clickable; the strip is a viewport overlay
+// (EdHost_AddViewportOverlay), so the host reserves its band and the scene never
+// gets clicks landing on it.
+
+// One label-sized chip; advances *x. Returns true on a left-click (gated).
+static bool StripBtn(float *x, float by, float bh, const char *label,
+                     bool active, bool interactive, float sc) {
+    float w = MeasureText(label, (int)(12 * sc)) + 16 * sc;
+    Rectangle r = { *x, by, w, bh };
+    bool hot = CheckCollisionPointRec(GetMousePosition(), r);
+    Color bg = active ? (Color){ 70, 80, 100, 255 }
+             : hot    ? (Color){ 48, 54, 66, 255 } : (Color){ 36, 41, 51, 255 };
+    DrawRectangleRec(r, bg);
+    int fw = MeasureText(label, (int)(12 * sc));
+    Eng_UiText(label, r.x + (w - fw) / 2.0f, r.y + (bh - 12 * sc) / 2.0f, 12,
+               active ? ENG_UI_GOLD : ENG_UI_TEXT);
+    *x += w + 4 * sc;
+    return interactive && hot && IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
 }
+
+static const char *PlaceToolName(const EdScene *s) {
+    switch (s->placeTool) {
+    case ED_PLACE_PLAYER:    return "Player spawn";
+    case ED_PLACE_MOB:       return TextFormat("spawn %s", s->placeMobId);
+    case ED_PLACE_BARRICADE: return "Barricade";
+    case ED_PLACE_WALL:      return s->wallPending ? "Wall (click 2 of 2)" : "Wall (click 1 of 2)";
+    case ED_PLACE_OBSTACLE:  return "Obstacle";
+    case ED_PLACE_PROP:      return TextFormat("prop %s", s->placePropId);
+    case ED_PLACE_SECTOR:    return "Sector (drag)";
+    case ED_PLACE_WALLBUY:   return TextFormat("wallbuy %s", s->placeWeaponId);
+    case ED_PLACE_PERK:      return TextFormat("perk %s", s->placePerkId);
+    default:                 return "";
+    }
+}
+
+static void ToolStrip(EdHost *h, Rectangle strip, void *u) {
+    (void)u; EdScene *s = EdHost_Scene(h);
+    float sc = EdHost_UiScale(h);
+    bool it = EdHost_PanelsInteractive(h);
+    float by = strip.y + 3 * sc, bh = strip.height - 6 * sc;
+    float x  = strip.x + 8 * sc;
+
+    if (StripBtn(&x, by, bh, "Select", s->placeTool == ED_PLACE_NONE, it, sc))
+        s->placeTool = ED_PLACE_NONE;
+
+    const char *vn = s->view == ED_VIEW_FLY ? "view: fly"
+                   : s->view == ED_VIEW_ORBIT ? "view: iso" : "view: top";
+    if (StripBtn(&x, by, bh, vn, false, it, sc)) {
+        EdViewMode nv = s->view == ED_VIEW_ORBIT ? ED_VIEW_TOP
+                      : s->view == ED_VIEW_TOP   ? ED_VIEW_FLY : ED_VIEW_ORBIT;
+        EdScene_SwitchView(s, nv);
+    }
+
+    const char *gn = s->mode == ENG_GIZMO_TRANSLATE ? "move"
+                   : s->mode == ENG_GIZMO_ROTATE    ? "rotate" : "scale";
+    bool na = (s->selectedId >= 0 && !EdScene_GizmoModeApplies(s));
+    if (StripBtn(&x, by, bh, TextFormat("%s%s", gn, na ? " (n/a)" : ""), false, it, sc))
+        s->mode = (EngGizmoMode)((s->mode + 1) % 3);
+
+    if (StripBtn(&x, by, bh, "snap", s->snapEnabled, it, sc)) s->snapEnabled = !s->snapEnabled;
+    if (StripBtn(&x, by, bh, "grid", s->gridVisible, it, sc)) s->gridVisible = !s->gridVisible;
+
+    // PLACING cue, right-aligned, when a placement tool is armed.
+    if (s->placeTool != ED_PLACE_NONE) {
+        const char *txt = TextFormat("PLACING: %s", PlaceToolName(s));
+        int tw = MeasureText(txt, (int)(12 * sc));
+        Eng_UiText(txt, strip.x + strip.width - tw - 10 * sc,
+                   strip.y + (strip.height - 12 * sc) / 2.0f, 12, ENG_UI_GOLD);
+    }
+}
+
 static void st_sel(EdHost *h, char *out, int cap, void *u) {
     (void)u; EdScene *s = EdHost_Scene(h);
     if (s->selectedId < 0) { out[0] = '\0'; return; }   // no dead "no selection" text (audit P1-C)
@@ -672,8 +814,9 @@ static void st_sel(EdHost *h, char *out, int cap, void *u) {
 static void RegisterStatusBar(EdHost *h) {
     EdHost_AddStatusItem(h, st_map,   NULL);
     EdHost_AddStatusItem(h, st_count, NULL);
-    EdHost_AddStatusItem(h, st_view,  NULL);
     EdHost_AddStatusItem(h, st_sel,   NULL);
+    // view/gizmo/snap/grid moved to the viewport tool-strip (editor-ux-review §5).
+    EdHost_AddViewportOverlay(h, ToolStrip, NULL);
 }
 
 // ============================================================================

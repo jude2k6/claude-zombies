@@ -1,9 +1,10 @@
 # Editor UI/UX Review + Redesign — 2026-06-20
 
-> **Status: DESIGN + first wave SHIPPED.** A critical UX teardown of the map editor
-> (`src/editor/`) and a proposed redesign, captured from a 2026-06-20 review session. The
-> first wave of cheap high-impact fixes (§7 #1–#5, #8) is done and on `main`; the content
-> browser (#6) and viewport tool-strip (#7) remain design-only. See
+> **Status: DESIGN + waves 1–2 SHIPPED.** A critical UX teardown of the map editor
+> (`src/editor/`) and a proposed redesign, captured from a 2026-06-20 review session. Both
+> implementation waves are done and on `main`: §7 #1–#5 + #8 (wave 1), then #6 + its model-path
+> prereq + #7 (wave 2). What's left is future polish (tabbed docking, browser recents,
+> drag-to-place, relocating the ASSETS maps-browser). See
 > [§9 Implementation status](#9-implementation-status). This is the *target*; the canonical
 > "how it works today" reference stays [scene-builder.md](scene-builder.md), and the broader
 > backlog is [editor-feature-ideas.md](editor-feature-ideas.md) (this doc supersedes its §4.x
@@ -365,14 +366,22 @@ session:
 | 4 | Inspector scrolls (stop clipping fields) | `panel_inspector.c` | ✅ done — mouse-wheel scroll (`g_inspScroll`), reset on selection change. Pane is still short while ASSETS shares the right zone (resolved by #6) |
 | 5 | Hierarchy → sector tree + kind descriptors | `edpanels.c` | ✅ done — sectors are collapsible parents; children indented with descriptors (`obstacle 4×4`, `wall [door]`, `PLAYER`) |
 | 8 | Menu order File/Edit/View/Tools/Help | `edmenus.c` | ✅ done — Help is now last; Tools holds Map Settings + Validate |
-| 6 | Content browser (bottom dock: tree + thumbnail grid) | `edpanels.c`, `edassets`, `edthumb`, `edscene` | ⬜ design only |
-| 6-prereq | Model path on `EdMobDef`/`EdPropDef` (thumbnail blocker) | `edscene.h`, `edcatalog.c` | ⬜ deferred |
-| 7 | Viewport tool-strip + `PLACING:` ghost; new `EdHost_AddViewportOverlay` | `edhost.c`, `EdScene_DrawViewport` | ⬜ design only |
+| 6 | Content browser (bottom dock: category column + thumbnail/icon grid) replacing the TOOLS palette | `edpanels.c`, `edthumb`, `edscene`, `edcatalog` | ✅ done — `PanelPalette`: a category column (Select / Geometry / Spawns / Props / Wallbuys / Perks) + a wrapping tile grid with a search box. Asset kinds (mobs/props/wallbuys/perks) show real GLB thumbnails; Geometry shows procedural gesture glyphs. TOOLS dropped from the left dock (HIERARCHY now owns it); browser lives in the bottom dock over a short CONSOLE. Clicking a tile arms the same `placeTool` state. |
+| 6-prereq | Model path on `EdMobDef`/`EdPropDef` (thumbnail blocker) | `edscene.h`, `edcatalog.c` | ✅ done — defs carry a `model` field (the bare filename, resolved like the game via `Eng_LoadModel`→`models/`). `EdThumb_Model` renders it. |
+| 7 | Viewport tool-strip + `PLACING:` ghost; new `EdHost_AddViewportOverlay` | `edhost.{c,h}`, `edpanels.c`, `edscene.c` | ✅ done — host reserves a band atop the viewport + a `EdHost_AddViewportOverlay` hook; `ToolStrip` draws `[Select] [view] [gizmo] [snap] [grid]` (clickable) + a right-aligned `PLACING: …` cue; view/gizmo/snap/grid moved off the status bar. `EdScene_DrawViewport` draws a snapped ground ghost (+ wall rubber-band) when a tool is armed. |
 
 Wave-1 (2026-06-20) — **#1, #2, #3, #4, #5, #8 shipped.** Three parallel worktree agents on
 disjoint file sets, integrated + built + screenshot-verified by the main session: **A** =
 `edhost.c` (#1+#2); **B** = `panel_inspector.c` + `edmenus.c` (#3+#4+#8, grouped because the Map
 Settings modal spans both); **C** = `edpanels.c` (#5). (Worktree builds stalled re-cloning raylib
 via FetchContent + a Bash-permission prompt, so the main session pulled the disjoint edits into the
-main tree and built once where raylib was cached.) #6/#7 deferred as the heavy, cross-file L-items
-for a focused follow-up.
+main tree and built once where raylib was cached.)
+
+Wave-2 (2026-06-20) — **#6 (+ prereq) and #7 shipped**, done in the main session (not
+parallelized — they're entangled across `edpanels.c`/`edscene.c`/`edhost.c` and #6 needs the model
+-path prereq first), built + screenshot-verified incrementally.
+
+Remaining future polish (not blocking): true tabbed docking (PALETTE/CONSOLE as tabs rather than a
+short stack); recents/favourites in the browser; drag-from-tile-into-viewport placement; the
+ASSETS maps-browser still sits in the right zone (the §2 "repurpose/relocate" wasn't part of waves
+1–2 — it remains a File-menu/start-screen candidate).

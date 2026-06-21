@@ -29,27 +29,51 @@ talking.
               pan/volume from Audio_Positional(peerPlayerPos)   ← positional voice
 ```
 
-Two engine **primitives** are missing today (capture + a voice-playback helper); the
-**feature** (when to talk, the wire packet, positional mixing, the indicator) is
-**policy** and lives in a plugin/game. That split is the whole design.
+The engine adds only a **deaf pipe** — capture + per-speaker playback (+ optional codec),
+primitives that know nothing but samples; the **feature** (when to talk, the wire packet,
+positional mixing, the indicator) is **policy** in an *optional reference plugin*. How
+primitive to leave it, and why that's the best of both, is §2 — the heart of the design.
 
 ---
 
-## 2. Where each piece lives (primitives vs. policy)
+## 2. How primitive to leave it — the seam
 
-Per the engine's cardinal rule — *the engine ships primitives, the application brings
-policy* ([engine-layers.md](engine-layers.md)):
+The guiding decision for this whole feature: **the engine ships a "deaf pipe" — audio
+primitives that know only *samples* — and the opinionated rest is an *optional
+first-party reference plugin*, never welded into the engine core.** Voice chat is the
+audio version of the rule the roadmap already states for movement: *"an optional
+reference controller may ship as a convenience, never a requirement"*
+([engine-roadmap.md](engine-roadmap.md)). A game that wants party voice, server-mixed
+voice, or no voice swaps/skips the plugin without fighting an engine opinion; a game that
+just wants working voice loads the plugin and gets it for free. That is strictly better
+than baking voice into the engine **and** strictly better than shipping only raw
+primitives.
+
+**The seam test** — apply it to any voice sub-feature, now or later:
+
+> **Does this piece need to know what a *player*, a *packet*, or a *screen* is?**
+> No (it only touches audio samples) → **engine primitive.**  Yes → **plugin/game policy.**
+
+This is the same line as the rest of the tree: `net.h` ships transport but not the wire
+schema; the mixer knows *how* to play, never *when*; `collide.h` ships sweep math but not
+the controller ([engine-layers.md](engine-layers.md)).
 
 | Concern | Owner | Why |
 |---|---|---|
-| **Mic capture** (open device, pull PCM frames) | **engine** (`Eng_AudioCapture*`, new) | Substrate, like the mixer/transport. Built on miniaudio (§4). |
-| **Voice playback** (a low-latency PCM stream per speaker) | **engine** (`Eng_AudioVoice*`, new, thin) | A reusable wrapper over raylib `AudioStream`; any game wants it. |
+| **Mic capture** (open device, pull PCM frames) | **engine** (`Eng_AudioCapture*`, new) | Pure IO; identical for every game. Built on miniaudio (§4). |
+| **Voice playback** (a low-latency PCM stream per speaker) | **engine** (`Eng_AudioVoice*`, new, thin) | A reusable wrapper over raylib `AudioStream`; deaf to who's talking. |
+| **Codec encode/decode** | **engine** (`Eng_VoiceEncode/Decode`, new, **dependency-gated** — §8) | Generic DSP, no policy. But gated so the engine still builds with no codec dep (PCM16 fallback) — a convenience, never a requirement. |
 | **3D roll-off / pan** | **engine** (`Audio_Positional`, exists) | Already the mixer's job (`audio.h`). |
 | **UDP send/receive** | **engine** (`net.h`, exists) | Transport only — never learns it's carrying voice. |
-| **Push-to-talk / VAD, codec choice, the voice packet schema, positional mapping, the talking overlay** | **plugin / game** | Policy. Lives in a voice **plugin** (`eng_plugin_main`) or game-side. |
+| **Push-to-talk / VAD trigger, bitrate/codec *choice*, the voice packet schema, jitter buffer, peer→player positional mapping, topology, the talking overlay + settings** | **reference plugin** (`eng_plugin_main`) | Everything net/player/UI-aware. A first-party but fully replaceable plugin. |
 
-So a different game reuses capture + voice-stream + transport unchanged and writes only
-its own voice *policy* — exactly the property the plugin host exists to give.
+So a different game reuses capture + voice-stream + codec + transport unchanged and
+rewrites only the plugin — exactly the property the plugin host exists to give. The
+**jitter buffer** is the one borderline call: it looks generic but it's coupled to the
+packet `seq`/timing (policy), so it lives in the plugin; promote it to an engine
+`Eng_VoiceJitter*` helper only if a *second* consumer appears (the same "don't abstract
+until there are two users" rule that kept `ui.h` partial and killed the `DrawItem[]`
+model).
 
 ---
 
@@ -214,6 +238,15 @@ then **swap in Opus** behind the `codec` byte in the packet (so old/new can't be
 confused) once the pipeline works. The `codec` field in §6 exists precisely to make that
 swap non-breaking.
 
+**Dependency gating (this is what keeps codec an engine primitive without an engine
+dependency).** `Eng_VoiceEncode/Decode` live engine-side, but compile **Opus behind a
+build flag** (`ENG_VOICE_OPUS`): when `libopus` is present, the encoder uses it; when it
+isn't, the same API falls back to PCM16 passthrough. So the engine **always builds with
+zero new dependencies**, the codec is a *convenience* a builder opts into (never a
+requirement), and the plugin calls one stable `Eng_VoiceEncode` either way. The plugin
+still owns the *policy* — bitrate, whether to compress at all, which codec id to stamp in
+the packet.
+
 ---
 
 ## 9. Phases (each independently demoable)
@@ -224,25 +257,36 @@ swap non-breaking.
 | **2** | `Eng_AudioVoice*` (§5) + loopback | capture → own speakers (monitor yourself), PTT-gated. |
 | **3** | Voice packet + transport (§6) over `net.h`, PCM16 | **2-player non-positional voice** — the milestone. |
 | **4** | Positional voice (§7 identity seam + `Audio_Positional`) | teammates' voices come from their location. |
-| **5** | Opus codec (§8) + jitter buffer tuning | ship-quality bandwidth/quality. |
+| **5** | `Eng_VoiceEncode/Decode` with the Opus build-flag (§8) + jitter buffer tuning | ship-quality bandwidth/quality, engine still builds dep-free. |
 | **6** | Talking-indicator overlay + settings (device pick, mic gain, PTT bind) | polish. |
 
-Phases 1–3 need **no** engine seam changes beyond the two new audio primitives; Phase 4
-introduces the peer-context hook; many-speaker voice waits on Phase D netcode (§6).
+Phases 1–2 add the deaf-pipe engine primitives (capture + playback); Phase 3 is all
+**plugin** (packet + transport, no engine change); Phase 4 introduces the peer-context
+hook; Phase 5's codec stays dependency-gated. Many-speaker voice waits on Phase D netcode
+(§6). Everything from Phase 3 on lives in the **reference plugin**, so it never touches the
+engine core.
 
 ---
 
 ## 10. Open decisions (defaults in **bold**)
 
-1. **Capture backend:** **miniaudio with `MA_API static`** (zero new deps, §4) vs. SDL/
+1. **How primitive (the headline call):** **engine = deaf-pipe primitives only; the
+   feature is an optional first-party reference plugin** (§2) vs. a fuller "voice service"
+   in the engine. The plugin split keeps the engine reusable and lets a game swap voice
+   wholesale — and a game still gets turnkey voice by just loading the plugin.
+2. **Capture backend:** **miniaudio with `MA_API static`** (zero new deps, §4) vs. SDL/
    PortAudio. Only switch if the static-linkage approach hits a real wall.
-2. **Voice playback wrapper:** **`Eng_AudioVoice*` engine helper** (reusable, jitter
-   buffer has a home) vs. plugin drives raylib `AudioStream` directly (less code for v1).
-3. **Identity/position seam (Phase 4):** **game-pushes-context callback** (smallest, keeps
+3. **Voice playback wrapper:** **`Eng_AudioVoice*` engine helper** (reusable) vs. plugin
+   drives raylib `AudioStream` directly (less code for v1).
+4. **Jitter buffer:** **in the reference plugin** (coupled to the packet `seq`/timing,
+   which is policy) vs. an engine `Eng_VoiceJitter*` helper — promote only if a second
+   consumer appears (§2).
+5. **Identity/position seam (Phase 4):** **game-pushes-context callback** (smallest, keeps
    the seam) vs. a generic engine `Eng_Plugin*` context bag (more general).
-4. **Trigger:** **push-to-talk default** (predictable bandwidth, no hot-mic) with
+6. **Trigger:** **push-to-talk default** (predictable bandwidth, no hot-mic) with
    **VAD optional** (amplitude threshold over `Eng_AudioCaptureLevel`, later Opus VAD).
-5. **Topology:** **mesh broadcast** for ≤4 players (each client sends to all — fine at the
+7. **Topology:** **mesh broadcast** for ≤4 players (each client sends to all — fine at the
    current cap) vs. server-mixed (host decodes+remixes+rebroadcasts one stream) once
    player counts rise with Phase D. Mesh first; revisit at scale.
-6. **Codec:** **PCM16 v1 → Opus for ship** (§8), gated by the packet `codec` byte.
+8. **Codec:** **PCM16 v1 → Opus for ship** (§8), engine-side but **build-flag gated**
+   (`ENG_VOICE_OPUS`, PCM16 fallback) so the engine never gains a hard dependency.

@@ -29,8 +29,8 @@ talking.
               pan/volume from Audio_Positional(peerPlayerPos)   ← positional voice
 ```
 
-The engine adds only a **deaf pipe** — capture + per-speaker playback (+ optional codec),
-primitives that know nothing but samples; the **feature** (when to talk, the wire packet,
+The engine adds only a **deaf pipe** — capture + per-speaker playback, primitives that
+know nothing but samples; the **feature** (when to talk, the wire packet, the codec,
 positional mixing, the indicator) is **policy** in an *optional reference plugin*. How
 primitive to leave it, and why that's the best of both, is §2 — the heart of the design.
 
@@ -58,22 +58,29 @@ This is the same line as the rest of the tree: `net.h` ships transport but not t
 schema; the mixer knows *how* to play, never *when*; `collide.h` ships sweep math but not
 the controller ([engine-layers.md](engine-layers.md)).
 
+**Hard constraint — the engine depends on `raylib` + `enet` only.** No new linked
+third-party library may enter the `engine` target ([[engine-only-raylib-enet]]). That
+*decides the seam for us*, not just guides it: anything that would pull a new dependency
+(a codec like **Opus**) **cannot** be an engine primitive — it lives in the plugin, which
+is free to link whatever it likes. So the engine's voice surface is deliberately tiny:
+just the two raylib-only primitives below.
+
 | Concern | Owner | Why |
 |---|---|---|
-| **Mic capture** (open device, pull PCM frames) | **engine** (`Eng_AudioCapture*`, new) | Pure IO; identical for every game. Built on miniaudio (§4). |
+| **Mic capture** (open device, pull PCM frames) | **engine** (`Eng_AudioCapture*`, new) | Pure IO; identical for every game. Uses raylib's **own bundled** miniaudio header — no new linked library (§4). |
 | **Voice playback** (a low-latency PCM stream per speaker) | **engine** (`Eng_AudioVoice*`, new, thin) | A reusable wrapper over raylib `AudioStream`; deaf to who's talking. |
-| **Codec encode/decode** | **engine** (`Eng_VoiceEncode/Decode`, new, **dependency-gated** — §8) | Generic DSP, no policy. But gated so the engine still builds with no codec dep (PCM16 fallback) — a convenience, never a requirement. |
 | **3D roll-off / pan** | **engine** (`Audio_Positional`, exists) | Already the mixer's job (`audio.h`). |
-| **UDP send/receive** | **engine** (`net.h`, exists) | Transport only — never learns it's carrying voice. |
-| **Push-to-talk / VAD trigger, bitrate/codec *choice*, the voice packet schema, jitter buffer, peer→player positional mapping, topology, the talking overlay + settings** | **reference plugin** (`eng_plugin_main`) | Everything net/player/UI-aware. A first-party but fully replaceable plugin. |
+| **UDP send/receive** | **engine** (`net.h` over `enet`, exists) | Transport only — never learns it's carrying voice. |
+| **Codec encode/decode** | **reference plugin** | Opus would add a linked dep the engine refuses, so codec lives plugin-side; the plugin links `libopus` (or does PCM16/ADPCM in-tree). The `codec` byte in the packet (§6) keeps it swappable. |
+| **Push-to-talk / VAD trigger, the voice packet schema, jitter buffer, peer→player positional mapping, topology, the talking overlay + settings** | **reference plugin** (`eng_plugin_main`) | Everything net/player/UI-aware. A first-party but fully replaceable plugin. |
 
-So a different game reuses capture + voice-stream + codec + transport unchanged and
-rewrites only the plugin — exactly the property the plugin host exists to give. The
-**jitter buffer** is the one borderline call: it looks generic but it's coupled to the
-packet `seq`/timing (policy), so it lives in the plugin; promote it to an engine
-`Eng_VoiceJitter*` helper only if a *second* consumer appears (the same "don't abstract
-until there are two users" rule that kept `ui.h` partial and killed the `DrawItem[]`
-model).
+So the engine ships only raylib-backed capture + playback; a game reuses those + the
+`enet` transport unchanged and rewrites only the plugin — which owns the codec and all
+policy. The **jitter buffer** is the one borderline call: it looks generic but it's
+coupled to the packet `seq`/timing (policy), so it lives in the plugin too; promote it to
+an engine `Eng_VoiceJitter*` helper only if a *second* consumer appears (the same "don't
+abstract until there are two users" rule that kept `ui.h` partial and killed the
+`DrawItem[]` model).
 
 ---
 
@@ -102,6 +109,14 @@ A new engine module (`src/engine/audio_capture.{c,h}`) that opens the default ca
 device and hands the caller mono PCM frames. miniaudio's capture **callback runs on its
 own audio thread**, so the module's job is a **lock-free ring buffer**: the callback
 writes captured samples in; `Eng_AudioCaptureRead` drains them on the game thread.
+
+> **Why this still honours "engine = raylib + enet only"** ([[engine-only-raylib-enet]]):
+> miniaudio is **raylib's own bundled header** (it ships inside the raylib source and is
+> what raylib's audio is built on). Compiling our capture-only copy into the engine adds
+> **no new linked library** — the engine's link line stays `raylib enet`. If you'd rather
+> read the constraint strictly (no raylib-internal headers either), the fallback is to put
+> capture in the plugin too; but since capture is pure, game-agnostic IO and needs no new
+> dependency, keeping it an engine primitive is the better call.
 
 ```c
 // audio_capture.h (proposed)
@@ -225,27 +240,24 @@ sensible v1 milestone before positional.
 
 ---
 
-## 8. Codec — raw first, Opus for real use
+## 8. Codec — lives in the plugin (keeps the engine dep-free)
+
+The codec is **plugin-side**, precisely so the engine stays `raylib + enet` only
+([[engine-only-raylib-enet]]): Opus is a new linked library, and the engine refuses new
+links — so it never sees the codec at all. The plugin encodes captured PCM before
+`Net_Broadcast` and decodes before `Eng_AudioVoiceQueue`.
 
 | Option | Bitrate (16 kHz mono) | Verdict |
 |---|---|---|
-| **Raw PCM16** | ~256 kbit/s per speaker | Fine on LAN for a 2–4 player proof; the zero-dependency v1. |
-| **ADPCM / simple DPCM** | ~64 kbit/s | Tiny code, 4× smaller, no dep — a reasonable middle step. |
-| **Opus** | ~16–32 kbit/s, excellent quality | **The right answer for shipping voice** — purpose-built for VoIP (built-in VAD, PLC, jitter resilience). Adds `libopus` as a dependency. |
+| **Raw PCM16** | ~256 kbit/s per speaker | Fine on LAN for a 2–4 player proof; needs no library at all (in-plugin passthrough). |
+| **ADPCM / simple DPCM** | ~64 kbit/s | Tiny code, 4× smaller, still no external dep — a reasonable middle step the plugin can carry in-tree. |
+| **Opus** | ~16–32 kbit/s, excellent quality | **The right answer for shipping voice** — purpose-built for VoIP (built-in VAD, PLC, jitter resilience). The **plugin** links `libopus`; the engine never does. |
 
 Recommended path: **PCM16 for the first end-to-end loop** (prove capture→net→playback),
-then **swap in Opus** behind the `codec` byte in the packet (so old/new can't be
-confused) once the pipeline works. The `codec` field in §6 exists precisely to make that
-swap non-breaking.
-
-**Dependency gating (this is what keeps codec an engine primitive without an engine
-dependency).** `Eng_VoiceEncode/Decode` live engine-side, but compile **Opus behind a
-build flag** (`ENG_VOICE_OPUS`): when `libopus` is present, the encoder uses it; when it
-isn't, the same API falls back to PCM16 passthrough. So the engine **always builds with
-zero new dependencies**, the codec is a *convenience* a builder opts into (never a
-requirement), and the plugin calls one stable `Eng_VoiceEncode` either way. The plugin
-still owns the *policy* — bitrate, whether to compress at all, which codec id to stamp in
-the packet.
+then **swap in Opus inside the plugin** behind the `codec` byte in the packet (so old/new
+can't be confused) once the pipeline works. The `codec` field in §6 exists precisely to
+make that swap non-breaking. Because all of this is in the plugin, adding Opus is *that
+plugin's* dependency decision — the engine and every other game are unaffected.
 
 ---
 
@@ -257,7 +269,7 @@ the packet.
 | **2** | `Eng_AudioVoice*` (§5) + loopback | capture → own speakers (monitor yourself), PTT-gated. |
 | **3** | Voice packet + transport (§6) over `net.h`, PCM16 | **2-player non-positional voice** — the milestone. |
 | **4** | Positional voice (§7 identity seam + `Audio_Positional`) | teammates' voices come from their location. |
-| **5** | `Eng_VoiceEncode/Decode` with the Opus build-flag (§8) + jitter buffer tuning | ship-quality bandwidth/quality, engine still builds dep-free. |
+| **5** | Opus codec **in the plugin** (plugin links `libopus`, §8) + jitter buffer tuning | ship-quality bandwidth/quality; engine link line untouched (`raylib enet`). |
 | **6** | Talking-indicator overlay + settings (device pick, mic gain, PTT bind) | polish. |
 
 Phases 1–2 add the deaf-pipe engine primitives (capture + playback); Phase 3 is all
@@ -272,8 +284,10 @@ engine core.
 
 1. **How primitive (the headline call):** **engine = deaf-pipe primitives only; the
    feature is an optional first-party reference plugin** (§2) vs. a fuller "voice service"
-   in the engine. The plugin split keeps the engine reusable and lets a game swap voice
-   wholesale — and a game still gets turnkey voice by just loading the plugin.
+   in the engine. Forced partly by the hard rule that the **engine links `raylib + enet`
+   only** ([[engine-only-raylib-enet]]) — anything needing a new dep (the codec) *must* be
+   plugin-side. The split also keeps the engine reusable and lets a game swap voice
+   wholesale, while a game still gets turnkey voice by just loading the plugin.
 2. **Capture backend:** **miniaudio with `MA_API static`** (zero new deps, §4) vs. SDL/
    PortAudio. Only switch if the static-linkage approach hits a real wall.
 3. **Voice playback wrapper:** **`Eng_AudioVoice*` engine helper** (reusable) vs. plugin
@@ -288,5 +302,6 @@ engine core.
 7. **Topology:** **mesh broadcast** for ≤4 players (each client sends to all — fine at the
    current cap) vs. server-mixed (host decodes+remixes+rebroadcasts one stream) once
    player counts rise with Phase D. Mesh first; revisit at scale.
-8. **Codec:** **PCM16 v1 → Opus for ship** (§8), engine-side but **build-flag gated**
-   (`ENG_VOICE_OPUS`, PCM16 fallback) so the engine never gains a hard dependency.
+8. **Codec:** **PCM16 v1 → Opus for ship** (§8), **entirely in the plugin** (the plugin
+   links `libopus`; the engine never does, per #1). The packet `codec` byte keeps the swap
+   non-breaking.

@@ -58,6 +58,8 @@ add_library(engine STATIC
     src/engine/gfx.c
     src/engine/app.c
     src/engine/plugin.c
+    src/engine/audio_capture.c
+    src/engine/audio_voice.c
     src/engine/content.c
     src/engine/pack.c
     src/engine/eng_render.c
@@ -75,6 +77,11 @@ target_include_directories(engine PUBLIC
     ${raygui_SOURCE_DIR}/src
     ${enet_SOURCE_DIR}/include
 )
+# Mic capture (audio_capture.c) compiles raylib's OWN bundled miniaudio header —
+# no new linked library, so engine deps stay raylib + enet ([[engine-only-raylib-enet]]).
+target_include_directories(engine PRIVATE ${raylib_SOURCE_DIR}/src/external)
+# miniaudio is large third-party code; don't subject it to the engine warning set.
+set_source_files_properties(src/engine/audio_capture.c PROPERTIES COMPILE_FLAGS "-w")
 target_link_libraries(engine PUBLIC raylib enet)
 
 # ---- AddressSanitizer / UBSan (opt-in) -------------------------------------
@@ -146,6 +153,26 @@ set_target_properties(editor_example_plugin PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/plugins)
 if(NOT MSVC)
     target_compile_options(editor_example_plugin PRIVATE -Wall -Wextra -Wno-unused-parameter)
+endif()
+
+# ---- voice chat plugin (the reference ENGINE plugin) -----------------------
+# Builds build/plugins/voice.so. Implements eng_plugin_main() and links nothing —
+# its Eng_*/Net_*/raylib calls resolve at dlopen against the host's exported
+# symbol table (the host is built -rdynamic / ENABLE_EXPORTS). Run the game from a
+# directory whose ./plugins holds voice.so (e.g. `cd build && ./shooter`). See
+# docs/voice-chat.md.
+add_library(voice_plugin MODULE
+    src/engine/plugins/voice_plugin.c
+)
+target_include_directories(voice_plugin PRIVATE
+    ${CMAKE_SOURCE_DIR}/src/engine
+    ${raylib_SOURCE_DIR}/src
+)
+set_target_properties(voice_plugin PROPERTIES
+    PREFIX "" OUTPUT_NAME "voice"
+    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/plugins)
+if(NOT MSVC)
+    target_compile_options(voice_plugin PRIVATE -Wall -Wextra -Wno-unused-parameter)
 endif()
 
 # ---- warning flags (engine only here; the game + editor set their own) ------

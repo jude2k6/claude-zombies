@@ -42,7 +42,15 @@ add_executable(shooter
     props.c
 )
 target_include_directories(shooter PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(shooter PRIVATE engine ${CMAKE_DL_LIBS})
+# The game is an ENGINE PLUGIN HOST: a dynamic plugin (e.g. plugins/voice.so) may
+# call ANY Eng_* function, which must therefore be present + exported in this
+# binary. A normal static link drops engine objects the game itself never
+# references (e.g. audio_capture/audio_voice for voice chat), so whole-archive the
+# engine to retain the full engine API for plugins. (ENABLE_EXPORTS below then
+# -rdynamic-exports them for dlopen.) Transitive deps (raylib/enet) still flow
+# normally. See docs/voice-chat.md + docs/engine-usage.md §3 `plugin`.
+target_link_libraries(shooter PRIVATE
+    "$<LINK_LIBRARY:WHOLE_ARCHIVE,engine>" ${CMAKE_DL_LIBS})
 
 # Keep the binary at the build-tree root (build/shooter) regardless of this
 # subdir's location, so `./build/shooter` and the CI/run scripts are unchanged.

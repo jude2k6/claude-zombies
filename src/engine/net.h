@@ -42,6 +42,15 @@ void Net_FreeEvent(NetEvent *ev);
 void Net_SendTo(int peerIdx, const void *data, size_t len, bool reliable);
 void Net_Broadcast(const void *data, size_t len, bool reliable);
 
+// Receive observer: fired for every received packet from inside Net_Poll, IN
+// ADDITION to the NetEvent returned to the poller. This lets a second consumer
+// (e.g. a voice-chat plugin) see incoming packets WITHOUT owning the single
+// Net_Poll drain — it piggybacks on whoever already polls. `data` is valid only
+// for the duration of the call; copy what you need. Game-clean (bytes only); one
+// observer slot, NULL clears.
+typedef void (*NetReceiveObserver)(int peerIdx, const uint8_t *data, size_t len);
+void Net_SetReceiveObserver(NetReceiveObserver fn);
+
 bool Net_IsConnected(void);
 
 // Fills `ips` with up to `maxIps` non-loopback IPv4 strings. Returns count.

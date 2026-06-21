@@ -1,14 +1,32 @@
-# Voice Chat — design (engine capture primitive + a voice plugin)
+# Voice Chat — engine capture primitive + a voice plugin
 
-> **Status: DESIGN — not built.** This captures *how* in-game voice chat fits this
-> engine, written against the actual audio/net APIs in the tree. It builds on the
-> engine **plugin host** ([engine-usage.md](engine-usage.md) §3 `plugin`) — voice
-> chat is the motivating example for that seam — plus the existing audio mixer
-> (`audio.h`) and net transport (`net.h`). Nothing here ships by writing the doc;
-> items become real when they land a header + code and get documented in
-> engine-usage.md §3. Cross-refs: [engine-layers.md](engine-layers.md) (primitives
-> vs. policy), [engine-roadmap.md](engine-roadmap.md) (the `NET_MAX_PLAYERS` cap that
-> gates many-speaker voice).
+> **Status: BUILT (v1, PCM16) — not yet field-verified.** The engine primitives and
+> the reference plugin are implemented and load at runtime:
+> - **`Eng_AudioCapture*`** (`src/engine/audio_capture.{c,h}`) — mic in via raylib's
+>   bundled miniaudio (no new linked lib).
+> - **`Eng_AudioVoice*`** (`src/engine/audio_voice.{c,h}`) — per-speaker playback over
+>   raylib `AudioStream`.
+> - **`Net_SetReceiveObserver`** (`net.{c,h}`) — lets the plugin see incoming packets
+>   without owning `Net_Poll`.
+> - **the voice plugin** (`src/engine/plugins/voice_plugin.c` → `build/plugins/voice.so`)
+>   — PTT, PCM16 packet, host relay, self-monitor, talking overlay.
+>
+> **Verified:** clean `-Wall -Wextra` build; the engine link line stays `raylib enet`;
+> `voice.so` dlopens into the game (`plugin: loaded 'voice'`) with every symbol
+> resolving against the host, and `Eng_AudioVoiceOpen` initialises a 16 kHz stream.
+> **Not yet verified (needs hardware):** actual capture→encode→network→playback with a
+> **real mic** and **two clients** — neither is available in CI/sandbox. To validate
+> locally: run `cd build && ./shooter`, hold **V** to talk with **B** (self-monitor) on
+> to hear yourself; for real chat, run a host + client (`NET_MAX_PLAYERS == 4`) and hold
+> V on each. **Still v1-only:** PCM16 (no Opus yet) and **flat, non-positional** mix
+> (needs the peer→player-position hook, §7).
+>
+> Design rationale below. It builds on the engine **plugin host**
+> ([engine-usage.md](engine-usage.md) §3 `plugin`) — voice chat is the motivating
+> example for that seam — plus the audio mixer (`audio.h`) and net transport (`net.h`).
+> Cross-refs: [engine-layers.md](engine-layers.md) (primitives vs. policy),
+> [engine-roadmap.md](engine-roadmap.md) (the `NET_MAX_PLAYERS` cap that gates
+> many-speaker voice).
 
 ---
 

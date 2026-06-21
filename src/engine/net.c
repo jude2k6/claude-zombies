@@ -22,6 +22,9 @@ static NetMode      g_mode = NET_SOLO;
 static ENetHost    *g_host = NULL;
 static ENetPeer    *g_serverPeer = NULL;
 static ENetPeer    *g_clientPeers[NET_MAX_PLAYERS] = {0};
+static NetReceiveObserver g_recvObserver = NULL;
+
+void Net_SetReceiveObserver(NetReceiveObserver fn) { g_recvObserver = fn; }
 
 static void EnsureInit(void) {
     if (!g_inited) {
@@ -133,6 +136,8 @@ int Net_Poll(NetEvent *out, int maxEvents) {
             }
             case ENET_EVENT_TYPE_RECEIVE: {
                 int peerIdx = (g_mode == NET_HOST) ? (int)(intptr_t)ev.peer->data : 0;
+                if (g_recvObserver)
+                    g_recvObserver(peerIdx, ev.packet->data, ev.packet->dataLength);
                 out[n++] = (NetEvent){
                     .kind = NEV_RECEIVE,
                     .peerIdx = peerIdx,

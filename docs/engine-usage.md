@@ -250,6 +250,23 @@ Audio_PlayMusicTrack("nacht_loop"); Audio_StopMusic();
 (This game's `audio_director.c` is the *game-side* glue that diffs world state
 into these calls — a model worth copying, not part of the engine.)
 
+### audio_capture — `audio_capture.h` (mic in) + audio_voice — `audio_voice.h` (voice out)
+The voice-chat primitives — the "deaf pipe" the voice plugin is built on (knows
+samples, never players). Capture uses raylib's **bundled** miniaudio so it adds no new
+linked library (engine stays `raylib + enet`, [[engine-only-raylib-enet]]); playback
+wraps raylib `AudioStream`.
+
+```c
+Eng_AudioCaptureOpen(16000, 1);                       // mic → PCM16 ring (false if no device)
+int n = Eng_AudioCaptureRead(buf, maxFrames);         // drain captured samples (game thread)
+float lvl = Eng_AudioCaptureLevel();                  // 0..1 RMS (mic meter / VAD)
+EngVoiceStream *v = Eng_AudioVoiceOpen(16000, 1);     // one per remote speaker
+Eng_AudioVoiceQueue(v, pcm, frames); Eng_AudioVoiceSetSpatial(v, vol, pan);
+Eng_AudioVoiceUpdate(v);                              // pump each frame
+```
+These are *primitives*; the policy (codec, packet, PTT, positional mapping) lives in the
+plugin — see [voice-chat.md](voice-chat.md) and the reference `plugins/voice.so`.
+
 ### input — `pad.h` (action map + raw gamepad)
 The engine owns a named action map; bind each game action id to a key + mouse
 button + pad button, then query by action, never by raw key.
@@ -289,7 +306,12 @@ Net_InitHost(7777); / Net_InitClient("127.0.0.1", 7777); / Net_Shutdown();
 NetEvent evs[32]; int n = Net_Poll(evs, 32);          // NEV_CONNECT/DISCONNECT/RECEIVE
 Net_SendTo(peerIdx, data, len, /*reliable*/true); Net_Broadcast(data, len, true);
 Net_GetLocalIPs(ips, max);                            // for the host's join prompt
+Net_SetReceiveObserver(fn);                           // see incoming packets w/o owning Net_Poll
 ```
+`Net_SetReceiveObserver` fires `fn(peerIdx, data, len)` for every received packet from
+inside `Net_Poll`, *in addition* to the `NetEvent` returned to the poller — so a plugin
+(e.g. `plugins/voice.so`) can observe traffic without stealing the single poll. Data is
+valid only for the call; copy what you need.
 
 ### mapdoc — `mapdoc.h` (neutral map document)
 A pure C-stdlib document mirroring the `.map` grammar — no raylib, no game

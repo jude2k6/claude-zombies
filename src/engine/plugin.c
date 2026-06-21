@@ -63,10 +63,21 @@ int Eng_PluginLoadDir(const char *dir) {
     FilePathList files = LoadDirectoryFilesEx(dir, ".so", true);
     int n = 0;
     for (unsigned i = 0; i < files.count; i++) {
+        // Lazy-probe first: the folder may hold OTHER plugin kinds (e.g. editor
+        // plugins needing EdHost_* the game lacks). RTLD_LAZY defers symbol
+        // resolution, so a foreign .so opens here and is skipped quietly when it
+        // has no eng_plugin_main — instead of a scary RTLD_NOW "undefined symbol".
+        void *probe = dlopen(files.paths[i], RTLD_LAZY | RTLD_LOCAL);
+        if (!probe) continue;                                // unloadable — skip
+        bool ours = dlsym(probe, ENG_PLUGIN_ENTRY) != NULL;
+        dlclose(probe);
+        if (!ours) continue;                                 // not an engine plugin
+        // It's ours — load for real with full resolution (fail-fast on a genuine
+        // missing symbol in one of our plugins).
         void *h = dlopen(files.paths[i], RTLD_NOW | RTLD_LOCAL);
-        if (!h) { fprintf(stderr, "plugin: dlopen failed: %s\n", dlerror()); continue; }
+        if (!h) { fprintf(stderr, "plugin: %s: load failed: %s\n", files.paths[i], dlerror()); continue; }
         EngPluginMainFn entry = (EngPluginMainFn)(void (*)(void))dlsym(h, ENG_PLUGIN_ENTRY);
-        if (!entry) { dlclose(h); continue; }   // not an engine plugin — skip quietly
+        if (!entry) { dlclose(h); continue; }
         const EngPluginDesc *d = entry();
         if (!RegisterSlot(d, h)) {
             fprintf(stderr, "plugin: %s: bad/incompatible descriptor\n", files.paths[i]);
